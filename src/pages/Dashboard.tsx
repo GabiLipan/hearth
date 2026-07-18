@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ArrowRight, Sparkles } from 'lucide-react'
 import { db } from '../lib/db'
+import { notDeleted } from '../lib/data'
 import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
 import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
 import { seedDemoData } from '../lib/demo'
@@ -13,10 +14,10 @@ import { CategoryDonut, SpendBars } from '../components/charts'
 export default function Dashboard() {
   const { money } = useApp()
   const month = thisMonthKey()
-  const txns = useLiveQuery(() => db.transactions.toArray(), [])
-  const categories = useLiveQuery(() => db.categories.toArray(), []) ?? []
-  const budgets = useLiveQuery(() => db.budgets.toArray(), []) ?? []
-  const bills = useLiveQuery(() => db.bills.where('active').equals(1).sortBy('nextDue'), []) ?? []
+  const txns = useLiveQuery(() => db.transactions.filter(notDeleted).toArray(), [])
+  const categories = useLiveQuery(() => db.categories.filter(notDeleted).toArray(), []) ?? []
+  const budgets = useLiveQuery(() => db.budgets.filter(notDeleted).toArray(), []) ?? []
+  const bills = useLiveQuery(() => db.bills.where('active').equals(1).filter(notDeleted).sortBy('nextDue'), []) ?? []
   const [seeding, setSeeding] = useState(false)
 
   const totals = useMemo(() => monthTotals(txns ?? [], month), [txns, month])

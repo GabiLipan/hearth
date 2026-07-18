@@ -1,29 +1,33 @@
 import { db, type Bill, type Transaction } from './db'
 import { advanceDue, todayISO } from './dates'
 import { normalizePayee, prettyPayee } from './rules'
+import { createRow, updateRow, notDeleted } from './data'
 import { differenceInCalendarDays, parseISO } from 'date-fns'
 
-/** Post a bill occurrence as a transaction and advance its next-due date. */
+/**
+ * Post a bill occurrence as a transaction and advance its next-due date.
+ * The transaction id is derived from bill + due date so that two devices
+ * auto-posting the same occurrence converge on one row instead of duplicating.
+ */
 export async function postBill(bill: Bill, onDate?: string) {
   const date = onDate ?? bill.nextDue
-  await db.transaction('rw', db.transactions, db.bills, async () => {
-    await db.transactions.add({
-      date,
-      payee: bill.payee || bill.name,
-      note: bill.name,
-      categoryId: bill.categoryId,
-      accountId: bill.accountId,
-      amountMinor: bill.amountMinor,
-      billId: bill.id,
-      createdAt: Date.now(),
-    })
-    await db.bills.update(bill.id!, { nextDue: advanceDue(bill.nextDue, bill.freq) })
+  await createRow<Transaction>('transactions', {
+    id: `autopost-${bill.id}-${bill.nextDue}`,
+    date,
+    payee: bill.payee || bill.name,
+    note: bill.name,
+    categoryId: bill.categoryId,
+    accountId: bill.accountId,
+    amountMinor: bill.amountMinor,
+    billId: bill.id,
+    createdAt: Date.now(),
   })
+  await updateRow('bills', bill.id!, { nextDue: advanceDue(bill.nextDue, bill.freq) })
 }
 
 /** Skip an occurrence without recording a payment. */
 export async function skipBill(bill: Bill) {
-  await db.bills.update(bill.id!, { nextDue: advanceDue(bill.nextDue, bill.freq) })
+  await updateRow('bills', bill.id!, { nextDue: advanceDue(bill.nextDue, bill.freq) })
 }
 
 /**
@@ -32,7 +36,7 @@ export async function skipBill(bill: Bill) {
  */
 export async function autoPostDueBills() {
   const today = todayISO()
-  const due = await db.bills.where('nextDue').belowOrEqual(today).toArray()
+  const due = await db.bills.where('nextDue').belowOrEqual(today).filter(notDeleted).toArray()
   for (const bill of due) {
     if (!bill.active || !bill.autoPost) continue
     let guard = 0
@@ -48,7 +52,7 @@ export interface BillSuggestion {
   payee: string
   amountMinor: number
   freq: 'weekly' | 'monthly'
-  categoryId: number
+  categoryId: string
   lastDate: string
   count: number
 }
@@ -58,7 +62,10 @@ export interface BillSuggestion {
  * cadence with similar amounts — candidates for tracked bills.
  */
 export async function detectBillSuggestions(): Promise<BillSuggestion[]> {
-  const [txns, bills] = await Promise.all([db.transactions.toArray(), db.bills.toArray()])
+  const [txns, bills] = await Promise.all([
+    db.transactions.filter(notDeleted).toArray(),
+    db.bills.filter(notDeleted).toArray(),
+  ])
   const existing = new Set(bills.map((b) => normalizePayee(b.payee || b.name)))
   const groups = new Map<string, Transaction[]>()
   for (const t of txns) {

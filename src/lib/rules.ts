@@ -1,4 +1,5 @@
 import { db, type Rule, type Transaction } from './db'
+import { createRow, updateRow, notDeleted } from './data'
 
 /** Normalise a bank-statement payee for matching: lowercase, strip refs/numbers. */
 export function normalizePayee(raw: string) {
@@ -32,14 +33,14 @@ export function matchRule(payee: string, rules: Rule[]): Rule | undefined {
  * Learn a rule from a manual categorisation. Uses the normalised payee as the
  * match key; replaces any existing rule with the same key.
  */
-export async function learnRule(payee: string, categoryId: number) {
+export async function learnRule(payee: string, categoryId: string) {
   const match = normalizePayee(payee)
   if (match.length < 3) return
-  const existing = await db.rules.filter((r) => r.match === match).first()
+  const existing = await db.rules.filter((r) => r.match === match && !r.deleted).first()
   if (existing) {
-    await db.rules.update(existing.id!, { categoryId })
+    await updateRow('rules', existing.id!, { categoryId })
   } else {
-    await db.rules.add({ match, categoryId, createdAt: Date.now() })
+    await createRow<Rule>('rules', { match, categoryId, createdAt: Date.now() })
   }
 }
 
@@ -48,18 +49,18 @@ export async function learnRule(payee: string, categoryId: number) {
  * either normalised name contains the other ("tesco" ⊂ "tesco stores london"),
  * preferring the longest known name; recent categorisations win ties.
  */
-export function buildHistoryMatcher(txns: Transaction[]): (payee: string) => number | undefined {
-  const entries = new Map<string, number>()
+export function buildHistoryMatcher(txns: Transaction[]): (payee: string) => string | undefined {
+  const entries = new Map<string, string>()
   const sorted = [...txns].sort((a, b) => a.createdAt - b.createdAt)
   for (const t of sorted) {
-    if (t.amountMinor >= 0) continue
+    if (t.amountMinor >= 0 || t.deleted) continue
     const n = normalizePayee(t.payee)
     if (n.length >= 4) entries.set(n, t.categoryId)
   }
   const known = [...entries.keys()].sort((a, b) => b.length - a.length)
   // Leading token is usually the brand ("sainsburys local" → "sainsburys");
   // require ≥5 chars so generic short words don't cause false matches.
-  const byFirstToken = new Map<string, number>()
+  const byFirstToken = new Map<string, string>()
   for (const n of known) {
     const tok = n.split(' ')[0]
     if (tok.length >= 5 && !byFirstToken.has(tok)) byFirstToken.set(tok, entries.get(n)!)
@@ -76,10 +77,10 @@ export function buildHistoryMatcher(txns: Transaction[]): (payee: string) => num
 }
 
 /** Suggest a category for a payee from rules, else fuzzily from past transactions. */
-export async function suggestCategory(payee: string): Promise<number | undefined> {
-  const rules = await db.rules.toArray()
+export async function suggestCategory(payee: string): Promise<string | undefined> {
+  const rules = await db.rules.filter(notDeleted).toArray()
   const rule = matchRule(payee, rules)
   if (rule) return rule.categoryId
-  const txns = await db.transactions.toArray()
+  const txns = await db.transactions.filter(notDeleted).toArray()
   return buildHistoryMatcher(txns)(payee)
 }

@@ -1,21 +1,31 @@
 import Dexie, { type EntityTable } from 'dexie'
 
-/** Amounts are integer minor units (pence/cents). Negative = money out. */
-export interface Transaction {
-  id?: number
+/**
+ * Amounts are integer minor units (pence/cents). Negative = money out.
+ * All synced rows carry: `id` (uuid string), `updatedAt` (client ms, used for
+ * last-write-wins), `dirty` (1 = has local changes not yet pushed) and
+ * `deleted` (soft-delete tombstone so deletions sync too).
+ */
+export interface SyncedRow {
+  id?: string
+  updatedAt?: number
+  dirty?: 0 | 1
+  deleted?: 0 | 1
+}
+
+export interface Transaction extends SyncedRow {
   date: string // yyyy-MM-dd
   payee: string
   note?: string
-  categoryId: number
-  accountId?: number
+  categoryId: string
+  accountId?: string
   amountMinor: number
   importHash?: string
-  billId?: number
+  billId?: string
   createdAt: number
 }
 
-export interface Category {
-  id?: number
+export interface Category extends SyncedRow {
   name: string
   emoji: string
   slot: number // 1..8 -> --series-N color
@@ -23,36 +33,32 @@ export interface Category {
   sortOrder: number
 }
 
-export interface Budget {
-  id?: number
-  categoryId: number
+export interface Budget extends SyncedRow {
+  categoryId: string
   amountMinor: number // monthly budget, positive
 }
 
 export type BillFreq = 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'yearly'
 
-export interface Bill {
-  id?: number
+export interface Bill extends SyncedRow {
   name: string
   payee: string
   amountMinor: number // negative (outgoing)
-  categoryId: number
-  accountId?: number
+  categoryId: string
+  accountId?: string
   freq: BillFreq
   nextDue: string // yyyy-MM-dd
   active: 1 | 0
   autoPost: 1 | 0
 }
 
-export interface Rule {
-  id?: number
+export interface Rule extends SyncedRow {
   match: string // lowercased substring matched against payee
-  categoryId: number
+  categoryId: string
   createdAt: number
 }
 
-export interface Account {
-  id?: number
+export interface Account extends SyncedRow {
   name: string
   kind: 'current' | 'credit' | 'savings' | 'cash'
 }
@@ -61,6 +67,9 @@ export interface KV {
   key: string
   value: string
 }
+
+export const SYNCED_TABLES = ['transactions', 'categories', 'budgets', 'bills', 'rules', 'accounts'] as const
+export type SyncedTable = (typeof SYNCED_TABLES)[number]
 
 export const db = new Dexie('hearth-finance') as Dexie & {
   transactions: EntityTable<Transaction, 'id'>
@@ -82,6 +91,72 @@ db.version(1).stores({
   kv: 'key',
 })
 
+// v2: drop the unique index on budgets.categoryId (sync upserts need plain puts)
+db.version(2).stores({
+  budgets: '++id, categoryId',
+})
+
+export const newId = () => crypto.randomUUID()
+
+export async function getSetting(key: string): Promise<string | undefined> {
+  return (await db.kv.get(key))?.value
+}
+
+export async function setSetting(key: string, value: string) {
+  await db.kv.put({ key, value })
+}
+
+export async function delSetting(key: string) {
+  await db.kv.delete(key)
+}
+
+/**
+ * One-time migration: rows created before sync support have auto-increment
+ * numeric ids. Rewrite them (and every cross-reference) with uuid strings so
+ * ids are globally unique across the household's devices.
+ */
+export async function migrateIdsToUuid() {
+  if (await getSetting('uuidMigrated')) return
+  await db.transaction('rw', [db.transactions, db.categories, db.budgets, db.bills, db.rules, db.accounts, db.kv], async () => {
+    const now = Date.now()
+    const remap = async (table: SyncedTable) => {
+      const map = new Map<number, string>()
+      const rows = await db.table(table).toArray()
+      for (const row of rows) {
+        if (typeof row.id !== 'number') continue
+        const id = newId()
+        map.set(row.id, id)
+        await db.table(table).delete(row.id)
+        await db.table(table).add({ ...row, id, updatedAt: now, dirty: 1 })
+      }
+      return map
+    }
+    const catMap = await remap('categories')
+    const accMap = await remap('accounts')
+    const billMap = await remap('bills')
+    await remap('budgets')
+    await remap('rules')
+    await remap('transactions')
+    const fixRef = (v: unknown, map: Map<number, string>) => (typeof v === 'number' ? map.get(v) : (v as string | undefined))
+    await db.transactions.toCollection().modify((t) => {
+      t.categoryId = fixRef(t.categoryId, catMap)!
+      t.accountId = fixRef(t.accountId, accMap)
+      t.billId = fixRef(t.billId, billMap)
+    })
+    await db.budgets.toCollection().modify((b) => {
+      b.categoryId = fixRef(b.categoryId, catMap)!
+    })
+    await db.bills.toCollection().modify((b) => {
+      b.categoryId = fixRef(b.categoryId, catMap)!
+      b.accountId = fixRef(b.accountId, accMap)
+    })
+    await db.rules.toCollection().modify((r) => {
+      r.categoryId = fixRef(r.categoryId, catMap)!
+    })
+    await db.kv.put({ key: 'uuidMigrated', value: '1' })
+  })
+}
+
 const DEFAULT_CATEGORIES: Omit<Category, 'id'>[] = [
   { name: 'Groceries', emoji: '🛒', slot: 2, kind: 'expense', sortOrder: 0 },
   { name: 'Home & utilities', emoji: '🏠', slot: 5, kind: 'expense', sortOrder: 1 },
@@ -98,20 +173,13 @@ const DEFAULT_CATEGORIES: Omit<Category, 'id'>[] = [
 
 /** Seed default categories and account on first run. */
 export async function ensureDefaults() {
+  const now = Date.now()
   const count = await db.categories.count()
   if (count === 0) {
-    await db.categories.bulkAdd(DEFAULT_CATEGORIES)
+    await db.categories.bulkAdd(DEFAULT_CATEGORIES.map((c) => ({ ...c, id: newId(), updatedAt: now, dirty: 1 as const })))
   }
   const accounts = await db.accounts.count()
   if (accounts === 0) {
-    await db.accounts.add({ name: 'Joint account', kind: 'current' })
+    await db.accounts.add({ id: newId(), name: 'Joint account', kind: 'current', updatedAt: now, dirty: 1 })
   }
-}
-
-export async function getSetting(key: string): Promise<string | undefined> {
-  return (await db.kv.get(key))?.value
-}
-
-export async function setSetting(key: string, value: string) {
-  await db.kv.put({ key, value })
 }

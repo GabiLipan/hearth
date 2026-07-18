@@ -29,7 +29,10 @@ export async function importJSON(text: string) {
     for (const name of TABLES) {
       await db.table(name).clear()
       const rows = parsed.data[name]
-      if (Array.isArray(rows) && rows.length) await db.table(name).bulkPut(rows)
+      if (!Array.isArray(rows) || !rows.length) continue
+      // Restored rows are marked dirty so a synced household pushes them.
+      const stamped = name === 'kv' ? rows : rows.map((r: object) => ({ ...r, dirty: 1 }))
+      await db.table(name).bulkPut(stamped)
     }
   })
 }

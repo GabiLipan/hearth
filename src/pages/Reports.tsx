@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronLeft, ChevronRight, Table2, ChartPie } from 'lucide-react'
 import { db } from '../lib/db'
+import { notDeleted } from '../lib/data'
 import { thisMonthKey, shiftMonth, monthLabel } from '../lib/dates'
 import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
 import { useApp } from '../state/AppContext'
@@ -14,8 +15,8 @@ export default function Reports() {
   const [range, setRange] = useState<'6' | '12'>('6')
   const [view, setView] = useState<'charts' | 'table'>('charts')
 
-  const txns = useLiveQuery(() => db.transactions.toArray(), [])
-  const categories = useLiveQuery(() => db.categories.toArray(), []) ?? []
+  const txns = useLiveQuery(() => db.transactions.filter(notDeleted).toArray(), [])
+  const categories = useLiveQuery(() => db.categories.filter(notDeleted).toArray(), []) ?? []
 
   const slices = useMemo(() => spendByCategory(txns ?? [], categories, month, 8), [txns, categories, month])
   const series = useMemo(() => monthlySeries(txns ?? [], categories, Number(range)), [txns, categories, range])

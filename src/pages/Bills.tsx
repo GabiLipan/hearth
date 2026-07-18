@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Plus, Check, SkipForward, Wand2 } from 'lucide-react'
 import { db, type Bill, type BillFreq } from '../lib/db'
+import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { daysUntil, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from '../lib/dates'
 import { postBill, skipBill, detectBillSuggestions, type BillSuggestion } from '../lib/bills'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -22,8 +23,8 @@ function DueChip({ dateISO }: { dateISO: string }) {
 
 export default function Bills() {
   const { money } = useApp()
-  const bills = useLiveQuery(() => db.bills.toArray(), []) ?? []
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), []) ?? []
+  const bills = useLiveQuery(() => db.bills.filter(notDeleted).toArray(), []) ?? []
+  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id!, c])), [categories])
   const [editing, setEditing] = useState<Bill | 'new' | null>(null)
   const [suggestions, setSuggestions] = useState<BillSuggestion[]>([])
@@ -176,12 +177,12 @@ export default function Bills() {
 
 function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose: () => void }) {
   const { currency } = useApp()
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), []) ?? []
+  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
   const expenseCats = categories.filter((c) => c.kind === 'expense')
   const [name, setName] = useState(bill?.name ?? '')
   const [payee, setPayee] = useState(bill?.payee ?? '')
   const [amount, setAmount] = useState(bill ? String(Math.abs(bill.amountMinor) / 100) : '')
-  const [categoryId, setCategoryId] = useState<number | undefined>(bill?.categoryId)
+  const [categoryId, setCategoryId] = useState<string | undefined>(bill?.categoryId)
   const [freq, setFreq] = useState<BillFreq>(bill?.freq ?? 'monthly')
   const [nextDue, setNextDue] = useState(bill?.nextDue ?? todayISO())
   const [autoPost, setAutoPost] = useState<boolean>(bill ? !!bill.autoPost : true)
@@ -202,14 +203,14 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
       active: (active ? 1 : 0) as 1 | 0,
       autoPost: (autoPost ? 1 : 0) as 1 | 0,
     }
-    if (bill?.id) await db.bills.update(bill.id, data)
-    else await db.bills.add(data)
+    if (bill?.id) await updateRow('bills', bill.id, data)
+    else await createRow<Bill>('bills', data)
     onClose()
   }
 
   async function remove() {
     if (bill?.id && confirm(`Delete "${bill.name}"? Past transactions are kept.`)) {
-      await db.bills.delete(bill.id)
+      await removeRow('bills', bill.id)
       onClose()
     }
   }
@@ -226,7 +227,7 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
           </Field>
         </div>
         <Field label="Category">
-          <Select value={categoryId ?? ''} onChange={(e) => setCategoryId(Number(e.target.value))}>
+          <Select value={categoryId ?? ''} onChange={(e) => setCategoryId(e.target.value || undefined)}>
             <option value="" disabled>
               Choose…
             </option>

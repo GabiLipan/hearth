@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { FileUp, CheckCircle2 } from 'lucide-react'
-import { db } from '../lib/db'
+import { db, type Transaction } from '../lib/db'
 import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping } from '../lib/csv'
 import { matchRule, prettyPayee, learnRule, buildHistoryMatcher } from '../lib/rules'
+import { createMany, notDeleted } from '../lib/data'
 import { fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { Sheet, Button, Field, Select, cx } from './ui'
@@ -14,7 +15,7 @@ interface ReviewRow {
   date: string
   payee: string
   amountMinor: number
-  categoryId: number
+  categoryId: string
   duplicate: boolean
   include: boolean
   userTouched: boolean
@@ -22,7 +23,7 @@ interface ReviewRow {
 
 export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { money } = useApp()
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), []) ?? []
+  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
   const [step, setStep] = useState<Step>('pick')
   const [csv, setCsv] = useState<ParsedCSV | null>(null)
   const [mapping, setMapping] = useState<ColumnMapping | null>(null)
@@ -63,9 +64,9 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     if (!csv || !mapping) return
     const extracted = extractRows(csv, mapping).filter((r) => r.valid)
     const [rules, existing, cats] = await Promise.all([
-      db.rules.toArray(),
-      db.transactions.toArray(),
-      db.categories.toArray(),
+      db.rules.filter(notDeleted).toArray(),
+      db.transactions.filter(notDeleted).toArray(),
+      db.categories.filter(notDeleted).toArray(),
     ])
     const existingHashes = new Set(existing.map((t) => t.importHash ?? importHash(t)))
     const fallbackExpense = cats.find((c) => c.kind === 'expense' && c.name === 'Other') ?? cats.find((c) => c.kind === 'expense')
@@ -76,7 +77,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       const hash = importHash(r)
       const duplicate = existingHashes.has(hash) || seen.has(hash)
       seen.add(hash)
-      let categoryId: number | undefined
+      let categoryId: string | undefined
       if (r.amountMinor < 0) {
         categoryId = matchRule(r.payee, rules)?.categoryId ?? fromHistory(r.payee) ?? fallbackExpense?.id
       } else {
@@ -99,7 +100,8 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
 
   async function doImport() {
     const toImport = rows.filter((r) => r.include)
-    await db.transactions.bulkAdd(
+    await createMany<Transaction>(
+      'transactions',
       toImport.map((r) => ({
         date: r.date,
         payee: r.payee,
@@ -248,7 +250,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                   <select
                     value={r.categoryId}
                     onChange={(e) =>
-                      setRows(rows.map((x, j) => (j === i ? { ...x, categoryId: Number(e.target.value), userTouched: true } : x)))
+                      setRows(rows.map((x, j) => (j === i ? { ...x, categoryId: e.target.value, userTouched: true } : x)))
                     }
                     className="h-8 max-w-32 shrink-0 truncate rounded-lg bg-surface-2 px-2 text-xs outline-none"
                     aria-label="Category"

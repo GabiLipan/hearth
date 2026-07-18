@@ -4,6 +4,7 @@ import { db, type Transaction } from '../lib/db'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { todayISO } from '../lib/dates'
 import { learnRule, suggestCategory, prettyPayee } from '../lib/rules'
+import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { useApp } from '../state/AppContext'
 import { Sheet, Field, TextInput, Select, Segmented, Button, cx } from './ui'
 
@@ -17,19 +18,19 @@ export function TransactionForm({
   editing?: Transaction
 }) {
   const { currency } = useApp()
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), []) ?? []
-  const accounts = useLiveQuery(() => db.accounts.toArray(), []) ?? []
+  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
+  const accounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
   const payees = useLiveQuery(async () => {
-    const txns = await db.transactions.orderBy('date').reverse().limit(400).toArray()
+    const txns = await db.transactions.orderBy('date').reverse().limit(400).filter(notDeleted).toArray()
     return [...new Set(txns.map((t) => prettyPayee(t.payee)))].slice(0, 60)
   }, []) ?? []
 
   const [kind, setKind] = useState<'expense' | 'income'>('expense')
   const [amount, setAmount] = useState('')
   const [payee, setPayee] = useState('')
-  const [categoryId, setCategoryId] = useState<number | undefined>()
+  const [categoryId, setCategoryId] = useState<string | undefined>()
   const [date, setDate] = useState(todayISO())
-  const [accountId, setAccountId] = useState<number | undefined>()
+  const [accountId, setAccountId] = useState<string | undefined>()
   const [note, setNote] = useState('')
   const [suggested, setSuggested] = useState(false)
   const amountRef = useRef<HTMLInputElement>(null)
@@ -84,7 +85,7 @@ export function TransactionForm({
     if (!canSave) return
     const signed = kind === 'expense' ? -Math.abs(amountMinor!) : Math.abs(amountMinor!)
     if (editing) {
-      await db.transactions.update(editing.id!, {
+      await updateRow('transactions', editing.id!, {
         amountMinor: signed,
         payee: payee.trim(),
         categoryId: categoryId!,
@@ -93,7 +94,7 @@ export function TransactionForm({
         note: note.trim() || undefined,
       })
     } else {
-      await db.transactions.add({
+      await createRow<Transaction>('transactions', {
         amountMinor: signed,
         payee: payee.trim(),
         categoryId: categoryId!,
@@ -183,7 +184,7 @@ export function TransactionForm({
             <TextInput type="date" value={date} max={todayISO()} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <Field label="Account">
-            <Select value={accountId ?? ''} onChange={(e) => setAccountId(Number(e.target.value) || undefined)}>
+            <Select value={accountId ?? ''} onChange={(e) => setAccountId(e.target.value || undefined)}>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
@@ -204,7 +205,7 @@ export function TransactionForm({
               size="lg"
               onClick={async () => {
                 if (confirm('Delete this transaction?')) {
-                  await db.transactions.delete(editing.id!)
+                  await removeRow('transactions', editing.id!)
                   onClose()
                 }
               }}

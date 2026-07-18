@@ -1,23 +1,172 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus } from 'lucide-react'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, RefreshCw, LogOut, Users, Copy } from 'lucide-react'
 import { db, type Category } from '../lib/db'
+import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { CURRENCIES } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
 import { seedDemoData } from '../lib/demo'
+import { signIn, signUp, signOut, createHousehold, joinHousehold, syncNow } from '../lib/sync'
+import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { Card, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot } from '../components/ui'
 
+function HouseholdSync() {
+  const sync = useSyncState()
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+  const [copied, setCopied] = useState(false)
+
+  async function run(fn: () => Promise<void>) {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await fn()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+    }
+    setBusy(false)
+  }
+
+  if (!sync.email) {
+    return (
+      <Card className="space-y-3 p-4">
+        <p className="text-sm text-ink-2">
+          Sign in to sync your household's data between your devices — changes appear on your partner's phone in
+          seconds, and everything still works offline.
+        </p>
+        <Segmented
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'signin', label: 'Sign in' },
+            { value: 'signup', label: 'Create account' },
+          ]}
+        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Email">
+            <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="you@example.com" />
+          </Field>
+          <Field label="Password" hint={mode === 'signup' ? 'At least 6 characters.' : undefined}>
+            <TextInput
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+              placeholder="••••••••"
+            />
+          </Field>
+        </div>
+        {error && <p className="text-sm text-critical-text">{error}</p>}
+        <Button
+          disabled={busy || !email.trim() || password.length < 6}
+          onClick={() => run(() => (mode === 'signup' ? signUp(email.trim(), password) : signIn(email.trim(), password)))}
+        >
+          <Cloud size={15} /> {busy ? 'Working…' : mode === 'signup' ? 'Create account' : 'Sign in'}
+        </Button>
+      </Card>
+    )
+  }
+
+  if (!sync.householdId) {
+    return (
+      <Card className="space-y-3 p-4">
+        <p className="text-sm text-ink-2">
+          Signed in as <span className="font-medium text-ink">{sync.email}</span>. One of you creates the household;
+          the other joins with the invite code it generates.
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <Button disabled={busy} onClick={() => run(createHousehold)}>
+            <Users size={15} /> Create our household
+          </Button>
+          <span className="text-sm text-ink-3">or</span>
+          <TextInput
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+            placeholder="Invite code"
+            className="w-36 uppercase"
+          />
+          <Button
+            variant="subtle"
+            disabled={busy || joinCode.trim().length < 6}
+            onClick={() => {
+              if (confirm('Joining replaces any data on this device with the household’s shared data. Continue?')) {
+                void run(() => joinHousehold(joinCode))
+              }
+            }}
+          >
+            Join
+          </Button>
+        </div>
+        {error && <p className="text-sm text-critical-text">{error}</p>}
+        <button onClick={() => void signOut()} className="text-sm text-ink-3 underline-offset-2 hover:underline">
+          Sign out
+        </button>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex items-center gap-1.5 rounded-full bg-good/10 px-3 py-1 text-sm font-medium text-good-text">
+          <Cloud size={14} /> Syncing
+        </span>
+        <span className="text-sm text-ink-2">{sync.email}</span>
+        {sync.syncing && <RefreshCw size={14} className="animate-spin text-ink-3" />}
+        {sync.lastSyncAt && !sync.syncing && (
+          <span className="text-xs text-ink-3">updated {new Date(sync.lastSyncAt).toLocaleTimeString()}</span>
+        )}
+      </div>
+      {sync.joinCode && (
+        <div className="flex items-center gap-2 rounded-xl bg-surface-2 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-ink-3">Partner invite code — they enter this after creating their account</p>
+            <p className="text-lg font-bold tracking-widest tabular">{sync.joinCode}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="subtle"
+            onClick={() => {
+              void navigator.clipboard.writeText(sync.joinCode!)
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            }}
+          >
+            <Copy size={14} /> {copied ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+      )}
+      {sync.error && <p className="text-sm text-critical-text">Last sync problem: {sync.error}</p>}
+      <div className="flex gap-2">
+        <Button size="sm" variant="subtle" disabled={sync.syncing} onClick={() => void syncNow()}>
+          <RefreshCw size={14} /> Sync now
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void signOut()}>
+          <LogOut size={14} /> Sign out
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
 export default function SettingsPage() {
   const { themePref, setThemePref, currency, setCurrency } = useApp()
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), []) ?? []
-  const rules = useLiveQuery(async () => (await db.rules.toArray()).sort((a, b) => b.createdAt - a.createdAt), []) ?? []
+  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
+  const rules = useLiveQuery(async () => (await db.rules.filter(notDeleted).toArray()).sort((a, b) => b.createdAt - a.createdAt), []) ?? []
   const [editingCat, setEditingCat] = useState<Category | 'new' | null>(null)
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   return (
     <div className="max-w-2xl">
+      <SectionTitle>Household sync</SectionTitle>
+      <HouseholdSync />
+
       <SectionTitle>Appearance</SectionTitle>
       <Card className="p-4">
         <Segmented
@@ -78,7 +227,7 @@ export default function SettingsPage() {
                 <span className="min-w-0 flex-1 truncate">
                   “{r.match}” → {categories.find((c) => c.id === r.categoryId)?.name ?? '?'}
                 </span>
-                <button onClick={() => db.rules.delete(r.id!)} aria-label={`Forget rule ${r.match}`} className="text-ink-3 hover:text-critical-text">
+                <button onClick={() => void removeRow('rules', r.id!)} aria-label={`Forget rule ${r.match}`} className="text-ink-3 hover:text-critical-text">
                   <Trash2 size={14} />
                 </button>
               </li>
@@ -90,8 +239,8 @@ export default function SettingsPage() {
       <SectionTitle>Your data</SectionTitle>
       <Card className="space-y-3 p-4">
         <p className="text-sm text-ink-2">
-          Everything lives privately on this device. To share with your partner or move to a new device, export a backup
-          and import it there. Do it after big updates — it takes two taps.
+          Data lives on this device (and syncs via your household when signed in). Backups are handy before big
+          changes, or for moving data without sync.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button variant="subtle" onClick={async () => downloadJSON(await exportJSON())}>
@@ -143,8 +292,8 @@ export default function SettingsPage() {
       </Card>
 
       <p className="mt-6 px-1 text-xs text-ink-3">
-        Hearth · a private, offline-first family finance app. Install it from your browser's share / install menu for the
-        full app experience.
+        Hearth · a private family finance app. Install it from your browser's share / install menu for the full app
+        experience.
       </p>
 
       <CategoryForm
@@ -166,10 +315,10 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
   async function save() {
     if (!canSave) return
     if (category?.id) {
-      await db.categories.update(category.id, { name: name.trim(), emoji: emoji.trim() || '🏷️' })
+      await updateRow('categories', category.id, { name: name.trim(), emoji: emoji.trim() || '🏷️' })
     } else {
       const count = await db.categories.count()
-      await db.categories.add({
+      await createRow<Category>('categories', {
         name: name.trim(),
         emoji: emoji.trim() || '🏷️',
         kind,
@@ -182,14 +331,15 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
 
   async function remove() {
     if (!category?.id) return
-    const used = await db.transactions.where('categoryId').equals(category.id).count()
+    const used = await db.transactions.where('categoryId').equals(category.id).filter(notDeleted).count()
     if (used > 0) {
       alert(`"${category.name}" is used by ${used} transactions, so it can't be deleted. Recategorise them first.`)
       return
     }
     if (confirm(`Delete category "${category.name}"?`)) {
-      await db.budgets.where('categoryId').equals(category.id).delete()
-      await db.categories.delete(category.id)
+      const budgets = await db.budgets.where('categoryId').equals(category.id).toArray()
+      for (const b of budgets) await removeRow('budgets', b.id!)
+      await removeRow('categories', category.id)
       onClose()
     }
   }

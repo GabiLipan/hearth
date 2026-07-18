@@ -15,7 +15,7 @@ import {
 } from 'recharts'
 import { useChartColors } from '../hooks/useChartColors'
 import { useApp } from '../state/AppContext'
-import type { CategorySlice, MonthPoint } from '../lib/stats'
+import { OTHER_SLICE_ID, type CategorySlice, type MonthPoint } from '../lib/stats'
 
 /* ---------- Shared tooltip ---------- */
 interface TipRow {
@@ -182,7 +182,7 @@ export function CategoryDonut({
   const c = useChartColors()
   const { money } = useApp()
   const otherColor = c.ink3
-  const colorOf = (s: CategorySlice) => (s.categoryId === -1 ? otherColor : c.slot(s.slot))
+  const colorOf = (s: CategorySlice) => (s.categoryId === OTHER_SLICE_ID ? otherColor : c.slot(s.slot))
   return (
     <div className="grid items-center gap-2 sm:grid-cols-[minmax(0,220px)_1fr]">
       <div className="relative mx-auto w-full max-w-[220px]" style={{ height }}>

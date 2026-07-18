@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Search, Upload, ChevronLeft, ChevronRight } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
+import { notDeleted } from '../lib/data'
 import { thisMonthKey, shiftMonth, monthLabel, monthKey, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Empty, TextInput, cx } from '../components/ui'
@@ -12,11 +13,11 @@ export default function Activity() {
   const { money } = useApp()
   const [month, setMonth] = useState(thisMonthKey())
   const [query, setQuery] = useState('')
-  const [catFilter, setCatFilter] = useState<number | null>(null)
+  const [catFilter, setCatFilter] = useState<string | null>(null)
   const [editing, setEditing] = useState<Transaction | undefined>()
   const [importOpen, setImportOpen] = useState(false)
 
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), []) ?? []
+  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id!, c])), [categories])
   const searching = query.trim().length > 0
 
@@ -24,10 +25,10 @@ export default function Activity() {
     if (searching) {
       const q = query.trim().toLowerCase()
       return db.transactions
-        .filter((t) => t.payee.toLowerCase().includes(q) || (t.note ?? '').toLowerCase().includes(q))
+        .filter((t) => !t.deleted && (t.payee.toLowerCase().includes(q) || (t.note ?? '').toLowerCase().includes(q)))
         .toArray()
     }
-    return db.transactions.filter((t) => monthKey(t.date) === month).toArray()
+    return db.transactions.filter((t) => !t.deleted && monthKey(t.date) === month).toArray()
   }, [month, query, searching])
 
   const filtered = useMemo(() => {

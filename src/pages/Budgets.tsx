@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { db, type Category } from '../lib/db'
+import { db, type Category, type Budget } from '../lib/db'
+import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { thisMonthKey, shiftMonth, monthLabel, monthKey } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -13,13 +14,13 @@ export default function Budgets() {
   const [editingCat, setEditingCat] = useState<Category | null>(null)
   const [amount, setAmount] = useState('')
 
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), []) ?? []
-  const budgets = useLiveQuery(() => db.budgets.toArray(), []) ?? []
-  const txns = useLiveQuery(() => db.transactions.filter((t) => monthKey(t.date) === month).toArray(), [month]) ?? []
+  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
+  const budgets = useLiveQuery(() => db.budgets.filter(notDeleted).toArray(), []) ?? []
+  const txns = useLiveQuery(() => db.transactions.filter((t) => !t.deleted && monthKey(t.date) === month).toArray(), [month]) ?? []
 
   const budgetMap = useMemo(() => new Map(budgets.map((b) => [b.categoryId, b])), [budgets])
   const spentMap = useMemo(() => {
-    const m = new Map<number, number>()
+    const m = new Map<string, number>()
     for (const t of txns) {
       if (t.amountMinor >= 0) continue
       m.set(t.categoryId, (m.get(t.categoryId) ?? 0) - t.amountMinor)
@@ -45,11 +46,11 @@ export default function Budgets() {
     const minor = parseAmount(amount)
     const existing = budgetMap.get(editingCat.id!)
     if (minor === null || minor <= 0) {
-      if (existing) await db.budgets.delete(existing.id!)
+      if (existing) await removeRow('budgets', existing.id!)
     } else if (existing) {
-      await db.budgets.update(existing.id!, { amountMinor: minor })
+      await updateRow('budgets', existing.id!, { amountMinor: minor })
     } else {
-      await db.budgets.add({ categoryId: editingCat.id!, amountMinor: minor })
+      await createRow<Budget>('budgets', { categoryId: editingCat.id!, amountMinor: minor })
     }
     setEditingCat(null)
   }
