@@ -1,35 +1,102 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState, type ComponentType } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowRight, Sparkles } from 'lucide-react'
-import { db } from '../lib/db'
+import { Sparkles, SlidersHorizontal, Check, ChevronUp, ChevronDown, EyeOff, Plus } from 'lucide-react'
+import { db, getSetting, setSetting } from '../lib/db'
 import { notDeleted } from '../lib/data'
-import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
-import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
 import { seedDemoData } from '../lib/demo'
-import { useApp } from '../state/AppContext'
-import { Card, SectionTitle, Button, CategoryDot, Empty, Progress } from '../components/ui'
-import { CategoryDonut, SpendBars } from '../components/charts'
+import { useSyncState } from '../hooks/useSync'
+import { Button, Empty, cx } from '../components/ui'
+import {
+  HeroWidget,
+  BudgetGlanceWidget,
+  AccountsWidget,
+  DonutWidget,
+  TrendWidget,
+  BillsWidget,
+  RecentWidget,
+  type HomeData,
+} from '../components/widgets'
+
+interface WidgetDef {
+  id: string
+  label: string
+  component: ComponentType<{ data: HomeData }>
+  /** wide widgets span both columns on desktop */
+  wide?: boolean
+}
+
+const WIDGETS: WidgetDef[] = [
+  { id: 'hero', label: 'Month summary', component: HeroWidget, wide: true },
+  { id: 'budgets', label: 'Budgets at a glance', component: BudgetGlanceWidget, wide: true },
+  { id: 'bills', label: 'Coming up', component: BillsWidget },
+  { id: 'donut', label: 'Where it went', component: DonutWidget },
+  { id: 'trend', label: 'Spending trend', component: TrendWidget },
+  { id: 'accounts', label: 'Accounts', component: AccountsWidget },
+  { id: 'recent', label: 'Recent activity', component: RecentWidget },
+]
+
+interface LayoutItem {
+  id: string
+  on: boolean
+}
+
+const DEFAULT_LAYOUT: LayoutItem[] = WIDGETS.map((w) => ({ id: w.id, on: true }))
+
+/** Merge a stored layout with the widget catalogue (new widgets append, on). */
+function normaliseLayout(stored: LayoutItem[] | null): LayoutItem[] {
+  const known = new Set(WIDGETS.map((w) => w.id))
+  const seen = new Set<string>()
+  const out: LayoutItem[] = []
+  for (const item of stored ?? []) {
+    if (known.has(item.id) && !seen.has(item.id)) {
+      out.push(item)
+      seen.add(item.id)
+    }
+  }
+  for (const w of WIDGETS) if (!seen.has(w.id)) out.push({ id: w.id, on: true })
+  return out.length ? out : DEFAULT_LAYOUT
+}
 
 export default function Dashboard() {
-  const { money } = useApp()
-  const month = thisMonthKey()
+  const { userId } = useSyncState()
   const txns = useLiveQuery(() => db.transactions.filter(notDeleted).toArray(), [])
   const categories = useLiveQuery(() => db.categories.filter(notDeleted).toArray(), []) ?? []
   const budgets = useLiveQuery(() => db.budgets.filter(notDeleted).toArray(), []) ?? []
-  const bills = useLiveQuery(() => db.bills.where('active').equals(1).filter(notDeleted).sortBy('nextDue'), []) ?? []
+  const bills = useLiveQuery(() => db.bills.filter(notDeleted).toArray(), []) ?? []
+  const accounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
+  const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT)
+  const [editing, setEditing] = useState(false)
   const [seeding, setSeeding] = useState(false)
 
-  const totals = useMemo(() => monthTotals(txns ?? [], month), [txns, month])
-  const slices = useMemo(() => spendByCategory(txns ?? [], categories, month, 6), [txns, categories, month])
-  const trend = useMemo(() => monthlySeries(txns ?? [], categories, 6), [txns, categories])
-  const budgetTotal = budgets.reduce((s, b) => s + b.amountMinor, 0)
-  const upcoming = bills.filter((b) => daysUntil(b.nextDue) <= 14).slice(0, 5)
-  const recent = useMemo(
-    () => [...(txns ?? [])].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt).slice(0, 5),
-    [txns],
-  )
-  const catMap = useMemo(() => new Map(categories.map((c) => [c.id!, c])), [categories])
+  useEffect(() => {
+    void getSetting('homeLayout').then((raw) => {
+      if (raw) {
+        try {
+          setLayout(normaliseLayout(JSON.parse(raw)))
+        } catch {
+          /* keep default */
+        }
+      }
+    })
+  }, [])
+
+  function saveLayout(next: LayoutItem[]) {
+    setLayout(next)
+    void setSetting('homeLayout', JSON.stringify(next))
+  }
+
+  function move(id: string, dir: -1 | 1) {
+    const i = layout.findIndex((l) => l.id === id)
+    const j = i + dir
+    if (j < 0 || j >= layout.length) return
+    const next = [...layout]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    saveLayout(next)
+  }
+
+  function toggle(id: string) {
+    saveLayout(layout.map((l) => (l.id === id ? { ...l, on: !l.on } : l)))
+  }
 
   if (txns && txns.length === 0) {
     return (
@@ -52,115 +119,76 @@ export default function Dashboard() {
     )
   }
 
-  const spentFraction = budgetTotal > 0 ? totals.spend / budgetTotal : 0
+  const data: HomeData = { txns: txns ?? [], categories, budgets, bills, accounts, userId }
+  const visible = layout.filter((l) => l.on)
+  const hidden = layout.filter((l) => !l.on)
+  const defOf = (id: string) => WIDGETS.find((w) => w.id === id)!
 
   return (
     <div>
-      {/* Hero summary */}
-      <Card className="p-5 md:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-sm text-ink-3">{monthLabel(month)} · spent so far</p>
-            <p className="mt-1 text-4xl font-bold tracking-tight tabular md:text-5xl">{money(totals.spend)}</p>
-            {budgetTotal > 0 && (
-              <p className="mt-1 text-sm text-ink-2">
-                of {money(budgetTotal, { hideDecimals: true })} budgeted
-                {spentFraction <= 1 ? (
-                  <span className="text-good-text font-medium"> · {money(budgetTotal - totals.spend)} left</span>
-                ) : (
-                  <span className="text-critical-text font-medium"> · {money(totals.spend - budgetTotal)} over</span>
-                )}
-              </p>
-            )}
-          </div>
-          <div className="min-w-40 flex-1 md:max-w-60">
-            <div className="mb-1.5 flex justify-between text-xs text-ink-3">
-              <span>Income {money(totals.income, { compact: true })}</span>
-              <span>Net {money(totals.net, { sign: true, compact: true })}</span>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {visible.map((item) => {
+          const def = defOf(item.id)
+          const Widget = def.component
+          return (
+            <div key={item.id} className={cx('relative min-w-0', def.wide && 'lg:col-span-2')}>
+              {editing && (
+                <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">
+                  <button onClick={() => move(item.id, -1)} aria-label={`Move ${def.label} up`} className="grid size-7 place-items-center rounded-full hover:bg-surface-2">
+                    <ChevronUp size={14} />
+                  </button>
+                  <button onClick={() => move(item.id, 1)} aria-label={`Move ${def.label} down`} className="grid size-7 place-items-center rounded-full hover:bg-surface-2">
+                    <ChevronDown size={14} />
+                  </button>
+                  <button onClick={() => toggle(item.id)} aria-label={`Hide ${def.label}`} className="grid size-7 place-items-center rounded-full text-ink-3 hover:bg-surface-2">
+                    <EyeOff size={14} />
+                  </button>
+                </div>
+              )}
+              <div className={cx(editing && 'rounded-2xl ring-2 ring-dashed ring-accent/40')}>
+                <Widget data={data} />
+              </div>
             </div>
-            {budgetTotal > 0 && (
-              <Progress fraction={spentFraction} tone={spentFraction > 1 ? 'over' : spentFraction > 0.85 ? 'warn' : 'ok'} />
-            )}
-          </div>
-        </div>
-      </Card>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        {/* Where it went */}
-        {slices.length > 0 && (
-          <Card className="p-5">
-            <h3 className="mb-3 font-semibold">Where it went</h3>
-            <CategoryDonut slices={slices} height={200} centerLabel={{ title: 'spent', value: money(totals.spend, { compact: true }) }} />
-          </Card>
-        )}
-
-        {/* 6-month trend */}
-        <Card className="p-5">
-          <h3 className="mb-3 font-semibold">Spending, last 6 months</h3>
-          <SpendBars data={trend} height={200} />
-        </Card>
+          )
+        })}
       </div>
 
-      {/* Upcoming bills */}
-      {upcoming.length > 0 && (
-        <>
-          <SectionTitle
-            action={
-              <Link to="/bills" className="flex items-center gap-1 text-sm font-medium text-accent">
-                All bills <ArrowRight size={14} />
-              </Link>
-            }
-          >
-            Coming up
-          </SectionTitle>
-          <Card>
-            <ul className="divide-y divide-hairline">
-              {upcoming.map((b) => {
-                const days = daysUntil(b.nextDue)
-                return (
-                  <li key={b.id} className="flex items-center gap-3 px-4 py-3">
-                    <CategoryDot category={catMap.get(b.categoryId)} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{b.name}</p>
-                      <p className="text-sm text-ink-3">
-                        {days < 0 ? `Overdue — was due ${fmtFullDate(b.nextDue)}` : days === 0 ? 'Due today' : days === 1 ? 'Due tomorrow' : `Due ${fmtDay(b.nextDue)}`}
-                      </p>
-                    </div>
-                    <span className="font-semibold tabular">{money(b.amountMinor)}</span>
-                  </li>
-                )
-              })}
-            </ul>
-          </Card>
-        </>
+      {editing && hidden.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 px-1 text-sm font-semibold uppercase tracking-wide text-ink-3">Hidden widgets</p>
+          <div className="flex flex-wrap gap-2">
+            {hidden.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => toggle(item.id)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3.5 py-2 text-sm font-medium text-ink-2 hover:text-ink"
+              >
+                <Plus size={14} /> {defOf(item.id).label}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
-      {/* Recent activity */}
-      <SectionTitle
-        action={
-          <Link to="/activity" className="flex items-center gap-1 text-sm font-medium text-accent">
-            All activity <ArrowRight size={14} />
-          </Link>
-        }
-      >
-        Recent
-      </SectionTitle>
-      <Card>
-        <ul className="divide-y divide-hairline">
-          {recent.map((t) => (
-            <li key={t.id} className="flex items-center gap-3 px-4 py-3">
-              <CategoryDot category={catMap.get(t.categoryId)} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{t.payee}</p>
-                <p className="text-sm text-ink-3">{fmtDay(t.date)}</p>
-              </div>
-              <span className={`font-semibold tabular ${t.amountMinor > 0 ? 'text-good-text' : ''}`}>
-                {money(t.amountMinor, { sign: t.amountMinor > 0 })}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </Card>
+      <div className="mt-5 flex justify-center">
+        <button
+          onClick={() => setEditing(!editing)}
+          className={cx(
+            'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition',
+            editing ? 'bg-accent text-accent-ink' : 'bg-surface-2 text-ink-3 hover:text-ink',
+          )}
+        >
+          {editing ? (
+            <>
+              <Check size={15} /> Done
+            </>
+          ) : (
+            <>
+              <SlidersHorizontal size={15} /> Customise
+            </>
+          )}
+        </button>
+      </div>
     </div>
   )
 }

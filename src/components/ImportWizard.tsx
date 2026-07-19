@@ -2,7 +2,8 @@ import { useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { FileUp, CheckCircle2 } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
-import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping } from '../lib/csv'
+import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping, type ImportRow } from '../lib/csv'
+import { extractRowsFromPDF } from '../lib/pdfImport'
 import { matchRule, prettyPayee, learnRule, buildHistoryMatcher } from '../lib/rules'
 import { createMany, notDeleted } from '../lib/data'
 import { fmtFullDate } from '../lib/dates'
@@ -29,6 +30,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   const [mapping, setMapping] = useState<ColumnMapping | null>(null)
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [importedCount, setImportedCount] = useState(0)
+  const [reading, setReading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   function reset() {
@@ -36,6 +38,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     setCsv(null)
     setMapping(null)
     setRows([])
+    setReading(false)
   }
 
   function close() {
@@ -44,6 +47,22 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   }
 
   async function onFile(file: File) {
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+      setReading(true)
+      try {
+        const extracted = await extractRowsFromPDF(file)
+        if (extracted.filter((r) => r.valid).length === 0) {
+          alert('No transactions found in that PDF. If it is a scanned/photographed statement it has no text to read — try a CSV export instead.')
+          return
+        }
+        await buildReview(extracted)
+      } catch {
+        alert('That PDF could not be read. Try a CSV export from your bank instead.')
+      } finally {
+        setReading(false)
+      }
+      return
+    }
     const text = await file.text()
     const parsed = parseCSV(text)
     if (parsed.rows.length === 0) {
@@ -60,9 +79,9 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     return extractRows(csv, mapping).slice(0, 3)
   }, [csv, mapping])
 
-  async function buildReview() {
-    if (!csv || !mapping) return
-    const extracted = extractRows(csv, mapping).filter((r) => r.valid)
+  async function buildReview(source?: ImportRow[]) {
+    const extracted = (source ?? (csv && mapping ? extractRows(csv, mapping) : [])).filter((r) => r.valid)
+    if (extracted.length === 0) return
     const [rules, existing, cats] = await Promise.all([
       db.rules.filter(notDeleted).toArray(),
       db.transactions.filter(notDeleted).toArray(),
@@ -127,12 +146,13 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       {step === 'pick' && (
         <div className="space-y-4">
           <p className="text-sm text-ink-2">
-            Export a CSV statement from your bank's website or app, then drop it here. Hearth works out the columns,
-            skips anything already imported, and auto-categorises from what it has learned.
+            Export a statement from your bank as CSV or PDF, then drop it here. Hearth works out the columns, skips
+            anything already imported, and auto-categorises from what it has learned.
           </p>
           <button
             onClick={() => fileRef.current?.click()}
-            className="flex w-full flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-hairline bg-surface-2/50 py-12 text-ink-2 transition hover:border-accent/50 hover:text-ink"
+            disabled={reading}
+            className="flex w-full flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-hairline bg-surface-2/50 py-12 text-ink-2 transition hover:border-accent/50 hover:text-ink disabled:opacity-60"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault()
@@ -141,13 +161,13 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
             }}
           >
             <FileUp size={32} className="text-accent" />
-            <span className="font-medium">Choose a CSV file</span>
-            <span className="text-sm text-ink-3">or drag &amp; drop</span>
+            <span className="font-medium">{reading ? 'Reading statement…' : 'Choose a CSV or PDF'}</span>
+            <span className="text-sm text-ink-3">{reading ? 'this takes a few seconds' : 'or drag & drop'}</span>
           </button>
           <input
             ref={fileRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.pdf,text/csv,application/pdf"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0]
@@ -213,7 +233,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
             <Button variant="subtle" onClick={reset}>
               Back
             </Button>
-            <Button className="flex-1" onClick={buildReview} disabled={!preview.some((r) => r.valid)}>
+            <Button className="flex-1" onClick={() => void buildReview()} disabled={!preview.some((r) => r.valid)}>
               Continue
             </Button>
           </div>
@@ -273,7 +293,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
             ))}
           </div>
           <div className="flex gap-2 pt-1">
-            <Button variant="subtle" onClick={() => setStep('map')}>
+            <Button variant="subtle" onClick={() => (csv ? setStep('map') : reset())}>
               Back
             </Button>
             <Button className="flex-1" disabled={includeCount === 0} onClick={doImport}>

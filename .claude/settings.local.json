@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'Accounts with privacy levels, PDF import, receipt scanning, widget home screen *)",
+      "Bash(git push *)"
+    ]
+  }
+}

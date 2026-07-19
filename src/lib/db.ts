@@ -58,9 +58,31 @@ export interface Rule extends SyncedRow {
   createdAt: number
 }
 
+/**
+ * Account visibility (enforced server-side by RLS on the `private` column):
+ * - 'shared': account and its transactions sync to the whole household
+ * - 'balance': partner sees the account and its balance, not its transactions
+ * - 'private': partner never sees the account at all
+ */
+export type AccountVisibility = 'shared' | 'balance' | 'private'
+
 export interface Account extends SyncedRow {
   name: string
   kind: 'current' | 'credit' | 'savings' | 'cash'
+  visibility?: AccountVisibility // undefined = 'shared' (pre-privacy rows)
+  ownerId?: string // auth user id of the creator; undefined = household-owned
+  openingBalanceMinor?: number
+  balanceMinor?: number // maintained by the owner's device, synced for display
+}
+
+/**
+ * When an account becomes more private, a purge record tells every non-owner
+ * device to drop its local copies of that account's transactions.
+ */
+export interface Purge extends SyncedRow {
+  accountId: string
+  ownerId: string
+  createdAt: number
 }
 
 export interface KV {
@@ -68,7 +90,7 @@ export interface KV {
   value: string
 }
 
-export const SYNCED_TABLES = ['transactions', 'categories', 'budgets', 'bills', 'rules', 'accounts'] as const
+export const SYNCED_TABLES = ['transactions', 'categories', 'budgets', 'bills', 'rules', 'accounts', 'purges'] as const
 export type SyncedTable = (typeof SYNCED_TABLES)[number]
 
 export const db = new Dexie('hearth-finance') as Dexie & {
@@ -78,6 +100,7 @@ export const db = new Dexie('hearth-finance') as Dexie & {
   bills: EntityTable<Bill, 'id'>
   rules: EntityTable<Rule, 'id'>
   accounts: EntityTable<Account, 'id'>
+  purges: EntityTable<Purge, 'id'>
   kv: EntityTable<KV, 'key'>
 }
 
@@ -94,6 +117,11 @@ db.version(1).stores({
 // v2: drop the unique index on budgets.categoryId (sync upserts need plain puts)
 db.version(2).stores({
   budgets: '++id, categoryId',
+})
+
+// v3: purge records for account-privacy changes
+db.version(3).stores({
+  purges: '++id, accountId',
 })
 
 export const newId = () => crypto.randomUUID()

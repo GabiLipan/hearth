@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, RefreshCw, LogOut, Users, Copy } from 'lucide-react'
-import { db, type Category } from '../lib/db'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, RefreshCw, LogOut, Users, Copy, Lock, Eye } from 'lucide-react'
+import { db, type Category, type Account, type AccountVisibility } from '../lib/db'
 import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
-import { CURRENCIES } from '../lib/money'
+import { computeBalance, setAccountVisibility, VISIBILITY_LABEL } from '../lib/accounts'
+import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
 import { seedDemoData } from '../lib/demo'
 import { signIn, signUp, signOut, createHousehold, joinHousehold, syncNow } from '../lib/sync'
@@ -191,6 +192,8 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      <AccountsSection />
+
       <SectionTitle
         action={
           <button onClick={() => setEditingCat('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
@@ -303,6 +306,178 @@ export default function SettingsPage() {
         onClose={() => setEditingCat(null)}
       />
     </div>
+  )
+}
+
+function AccountsSection() {
+  const { money } = useApp()
+  const { userId } = useSyncState()
+  const accounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
+  const txns = useLiveQuery(() => db.transactions.filter(notDeleted).toArray(), []) ?? []
+  const [editing, setEditing] = useState<Account | 'new' | null>(null)
+
+  const balanceOf = (a: Account) =>
+    a.ownerId && a.ownerId !== userId ? (a.balanceMinor ?? 0) : computeBalance(a, txns)
+
+  return (
+    <>
+      <SectionTitle
+        action={
+          <button onClick={() => setEditing('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
+            <Plus size={14} /> Add
+          </button>
+        }
+      >
+        Accounts
+      </SectionTitle>
+      <Card>
+        <ul className="divide-y divide-hairline">
+          {accounts.map((a) => {
+            const vis = a.visibility ?? 'shared'
+            const mine = !a.ownerId || a.ownerId === userId
+            return (
+              <li key={a.id}>
+                <button
+                  onClick={() => (mine ? setEditing(a) : undefined)}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left ${mine ? 'hover:bg-surface-2/50' : 'cursor-default'}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-1.5 font-medium">
+                      {a.name}
+                      {vis === 'private' && <Lock size={13} className="text-ink-3" />}
+                      {vis === 'balance' && <Eye size={13} className="text-ink-3" />}
+                    </p>
+                    <p className="text-sm text-ink-3">
+                      {a.kind}
+                      {!mine ? " · partner's" : vis !== 'shared' ? ` · ${VISIBILITY_LABEL[vis].toLowerCase()}` : ''}
+                    </p>
+                  </div>
+                  <span className={`font-semibold tabular ${balanceOf(a) < 0 ? 'text-critical-text' : ''}`}>
+                    {money(balanceOf(a))}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </Card>
+      <AccountForm
+        key={editing === 'new' ? 'new' : (editing?.id ?? 'closed')}
+        account={editing === 'new' ? undefined : (editing ?? undefined)}
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+      />
+    </>
+  )
+}
+
+function AccountForm({ account, open, onClose }: { account?: Account; open: boolean; onClose: () => void }) {
+  const { currency } = useApp()
+  const { userId, householdId } = useSyncState()
+  const [name, setName] = useState(account?.name ?? '')
+  const [kind, setKind] = useState<Account['kind']>(account?.kind ?? 'current')
+  const [visibility, setVisibility] = useState<AccountVisibility>(account?.visibility ?? 'shared')
+  const [opening, setOpening] = useState(
+    account?.openingBalanceMinor != null ? String(account.openingBalanceMinor / 100) : '',
+  )
+  const canSave = name.trim().length > 0
+
+  const visOptions: { value: AccountVisibility; hint: string }[] = [
+    { value: 'shared', hint: 'You both see the account and all its transactions.' },
+    { value: 'balance', hint: 'Your partner sees the account and its balance, but none of the transactions.' },
+    { value: 'private', hint: 'Only you ever see this account.' },
+  ]
+
+  async function save() {
+    if (!canSave) return
+    const openingMinor = parseAmount(opening) ?? undefined
+    if (account?.id) {
+      await updateRow('accounts', account.id, { name: name.trim(), kind, openingBalanceMinor: openingMinor })
+      await setAccountVisibility({ ...account, openingBalanceMinor: openingMinor }, visibility, userId)
+    } else {
+      await createRow<Account>('accounts', {
+        name: name.trim(),
+        kind,
+        visibility,
+        ownerId: visibility === 'shared' ? undefined : userId,
+        openingBalanceMinor: openingMinor,
+      })
+    }
+    onClose()
+  }
+
+  async function remove() {
+    if (!account?.id) return
+    const used = await db.transactions.where('accountId').equals(account.id).filter(notDeleted).count()
+    if (used > 0) {
+      alert(`"${account.name}" has ${used} transactions, so it can't be deleted.`)
+      return
+    }
+    if (confirm(`Delete account "${account.name}"?`)) {
+      await removeRow('accounts', account.id)
+      onClose()
+    }
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title={account ? 'Edit account' : 'New account'}>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Name">
+            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. My current account" autoFocus={!account} />
+          </Field>
+          <Field label="Type">
+            <Select value={kind} onChange={(e) => setKind(e.target.value as Account['kind'])}>
+              <option value="current">Current</option>
+              <option value="credit">Credit card</option>
+              <option value="savings">Savings</option>
+              <option value="cash">Cash</option>
+            </Select>
+          </Field>
+        </div>
+        <Field label={`Opening balance (${currencySymbol(currency)}, optional)`} hint="The balance before the first transaction recorded in Hearth.">
+          <TextInput value={opening} onChange={(e) => setOpening(e.target.value)} inputMode="decimal" placeholder="0.00" />
+        </Field>
+        <div>
+          <span className="mb-1.5 block text-sm font-medium text-ink-2">Who can see it?</span>
+          <div className="space-y-2">
+            {visOptions.map((o) => (
+              <label
+                key={o.value}
+                className={`flex cursor-pointer items-start gap-3 rounded-xl px-4 py-3 ring-1 transition ${
+                  visibility === o.value ? 'bg-accent/8 ring-accent' : 'bg-surface-2 ring-transparent'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="visibility"
+                  checked={visibility === o.value}
+                  onChange={() => setVisibility(o.value)}
+                  className="mt-0.5 accent-[var(--accent)]"
+                />
+                <span>
+                  <span className="block text-sm font-medium">{VISIBILITY_LABEL[o.value]}</span>
+                  <span className="block text-xs text-ink-3">{o.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {visibility !== 'shared' && !householdId && (
+            <p className="mt-2 text-xs text-ink-3">Privacy applies once you're signed in to household sync.</p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          {account?.id && (
+            <Button variant="danger" onClick={remove}>
+              Delete
+            </Button>
+          )}
+          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Sheet>
   )
 }
 

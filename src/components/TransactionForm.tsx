@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { ScanLine } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
+import { scanReceipt } from '../lib/receipt'
+import { canUseAccount } from '../lib/accounts'
+import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { todayISO } from '../lib/dates'
 import { learnRule, suggestCategory, prettyPayee } from '../lib/rules'
@@ -18,8 +22,10 @@ export function TransactionForm({
   editing?: Transaction
 }) {
   const { currency } = useApp()
+  const { userId } = useSyncState()
   const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
-  const accounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
+  const allAccounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
+  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
   const payees = useLiveQuery(async () => {
     const txns = await db.transactions.orderBy('date').reverse().limit(400).filter(notDeleted).toArray()
     return [...new Set(txns.map((t) => prettyPayee(t.payee)))].slice(0, 60)
@@ -33,7 +39,22 @@ export function TransactionForm({
   const [accountId, setAccountId] = useState<string | undefined>()
   const [note, setNote] = useState('')
   const [suggested, setSuggested] = useState(false)
+  const [scanState, setScanState] = useState<string | null>(null)
   const amountRef = useRef<HTMLInputElement>(null)
+  const receiptRef = useRef<HTMLInputElement>(null)
+
+  async function onReceiptPhoto(file: File) {
+    setScanState('Reading receipt…')
+    try {
+      const guess = await scanReceipt(file, (pct) => setScanState(`Reading receipt… ${pct}%`))
+      if (guess.amountMinor) setAmount((guess.amountMinor / 100).toFixed(2))
+      if (guess.payee) setPayee(guess.payee)
+      if (guess.date) setDate(guess.date)
+      setScanState(guess.amountMinor || guess.payee ? null : 'Could not read that photo — try a clearer shot.')
+    } catch {
+      setScanState('Scanning needs an internet connection the first time — try again online.')
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -136,6 +157,32 @@ export function TransactionForm({
             className="w-44 bg-transparent text-center text-5xl font-bold tracking-tight outline-none placeholder:text-ink-3/40 tabular"
           />
         </div>
+
+        {kind === 'expense' && !editing && (
+          <div className="flex flex-col items-center gap-1">
+            <button
+              type="button"
+              onClick={() => receiptRef.current?.click()}
+              disabled={scanState?.startsWith('Reading')}
+              className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3.5 py-1.5 text-sm font-medium text-ink-2 transition hover:text-ink disabled:opacity-60"
+            >
+              <ScanLine size={15} /> {scanState?.startsWith('Reading') ? scanState : 'Scan a receipt'}
+            </button>
+            {scanState && !scanState.startsWith('Reading') && <p className="text-xs text-ink-3">{scanState}</p>}
+            <input
+              ref={receiptRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f) void onReceiptPhoto(f)
+              }}
+            />
+          </div>
+        )}
 
         <Field label={kind === 'expense' ? 'Where did you spend?' : 'Where from?'}>
           <TextInput

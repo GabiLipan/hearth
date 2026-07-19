@@ -2,6 +2,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import { db, getSetting, setSetting, delSetting, SYNCED_TABLES, type SyncedTable, type SyncedRow } from './db'
 import { setOnLocalChange } from './data'
+import { recomputeOwnedBalances } from './accounts'
 
 /**
  * Household sync engine.
@@ -17,6 +18,7 @@ import { setOnLocalChange } from './data'
 
 export interface SyncState {
   email?: string
+  userId?: string
   householdId?: string
   joinCode?: string
   syncing: boolean
@@ -112,14 +114,29 @@ async function findMembership(): Promise<boolean> {
 
 /* ---------- sync core ---------- */
 
+/** Account ids whose transactions must not be visible to the partner. */
+async function privateAccountIds(): Promise<Set<string>> {
+  const accounts = await db.accounts.toArray()
+  return new Set(accounts.filter((a) => a.visibility === 'private' || a.visibility === 'balance').map((a) => a.id!))
+}
+
 async function pushDirty(householdId: string) {
+  const privateAccounts = await privateAccountIds()
+  const isPrivate = (tbl: SyncedTable, r: SyncedRow & Record<string, unknown>) => {
+    if (tbl === 'accounts') return (r as { visibility?: string }).visibility === 'private'
+    if (tbl === 'transactions') {
+      const accountId = (r as { accountId?: string }).accountId
+      return !!accountId && privateAccounts.has(accountId)
+    }
+    return false
+  }
   for (const tbl of SYNCED_TABLES) {
     const dirty = (await db.table(tbl).filter((r) => r.dirty === 1).toArray()) as (SyncedRow & Record<string, unknown>)[]
     for (let i = 0; i < dirty.length; i += 400) {
       const chunk = dirty.slice(i, i + 400)
       const payload = chunk.map((r) => {
         const { dirty: _d, deleted, ...data } = r
-        return { id: r.id!, household_id: householdId, tbl, data, deleted: !!deleted }
+        return { id: r.id!, household_id: householdId, tbl, data, deleted: !!deleted, private: isPrivate(tbl, r) }
       })
       const { error } = await supabase.from('records').upsert(payload)
       if (error) throw new Error(`push ${tbl}: ${error.message}`)
@@ -140,6 +157,8 @@ interface RemoteRecord {
   data: SyncedRow & Record<string, unknown>
   deleted: boolean
   updated_at: string
+  owner_id?: string
+  private?: boolean
 }
 
 async function applyRemote(rec: RemoteRecord) {
@@ -148,7 +167,20 @@ async function applyRemote(rec: RemoteRecord) {
   const local = (await db.table(tbl).get(rec.id)) as SyncedRow | undefined
   const remoteUpdatedAt = (rec.data.updatedAt as number) ?? 0
   if (local?.dirty && (local.updatedAt ?? 0) > remoteUpdatedAt) return // ours is newer; will push
-  await db.table(tbl).put({ ...rec.data, id: rec.id, deleted: rec.deleted ? 1 : 0, dirty: 0 })
+  const row: Record<string, unknown> = { ...rec.data, id: rec.id, deleted: rec.deleted ? 1 : 0, dirty: 0 }
+  if (tbl === 'accounts' && rec.owner_id) row.ownerId = rec.owner_id
+  await db.table(tbl).put(row)
+  // A purge means an account went private: non-owner devices drop its
+  // transactions locally (the server already refuses to send them anew).
+  if (tbl === 'purges' && !rec.deleted) {
+    const accountId = rec.data.accountId as string
+    const ownerId = rec.data.ownerId as string
+    if (ownerId && ownerId !== state.userId) {
+      await db.transactions.where('accountId').equals(accountId).delete()
+      const account = await db.accounts.get(accountId)
+      if (account && account.visibility === 'private') await db.accounts.delete(accountId)
+    }
+  }
 }
 
 async function pullSince(cursor: string | undefined): Promise<string | undefined> {
@@ -174,6 +206,7 @@ export async function syncNow() {
   }
   set({ syncing: true, error: undefined })
   try {
+    await recomputeOwnedBalances(state.userId)
     await pushDirty(householdId)
     await pullSince(await getSetting('syncCursor'))
     set({ syncing: false, lastSyncAt: Date.now() })
@@ -224,7 +257,7 @@ export async function initSync() {
   supabase.auth.onAuthStateChange((_event, session) => {
     void (async () => {
       if (session?.user) {
-        set({ email: session.user.email ?? undefined })
+        set({ email: session.user.email ?? undefined, userId: session.user.id })
         const storedHousehold = await getSetting('householdId')
         const storedCode = await getSetting('joinCode')
         if (storedHousehold) {
