@@ -5,8 +5,10 @@ import { db, type Transaction } from '../lib/db'
 import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping, type ImportRow } from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
 import { matchRule, prettyPayee, learnRule, buildHistoryMatcher } from '../lib/rules'
+import { findLikelyDuplicate } from '../lib/dedupe'
 import { createMany, notDeleted } from '../lib/data'
-import { fmtFullDate } from '../lib/dates'
+import { useSyncState } from '../hooks/useSync'
+import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { Sheet, Button, Field, Select, cx } from './ui'
 
@@ -17,13 +19,16 @@ interface ReviewRow {
   payee: string
   amountMinor: number
   categoryId: string
-  duplicate: boolean
+  duplicate: boolean // exact re-import of a previously imported row
+  /** fuzzy match against an existing (usually manual) entry — needs the user's call */
+  possibleDup?: { payee: string; date: string }
   include: boolean
   userTouched: boolean
 }
 
 export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { money } = useApp()
+  const { userId } = useSyncState()
   const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
   const [step, setStep] = useState<Step>('pick')
   const [csv, setCsv] = useState<ParsedCSV | null>(null)
@@ -92,10 +97,19 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     const fallbackIncome = cats.find((c) => c.kind === 'income') ?? fallbackExpense
     const fromHistory = buildHistoryMatcher(existing)
     const seen = new Set<string>()
+    const matchedIds = new Set<string>()
     const review: ReviewRow[] = extracted.map((r) => {
       const hash = importHash(r)
       const duplicate = existingHashes.has(hash) || seen.has(hash)
       seen.add(hash)
+      let possibleDup: ReviewRow['possibleDup']
+      if (!duplicate) {
+        const match = findLikelyDuplicate(r, existing, matchedIds)
+        if (match) {
+          matchedIds.add(match.id!)
+          possibleDup = { payee: match.payee, date: match.date }
+        }
+      }
       let categoryId: string | undefined
       if (r.amountMinor < 0) {
         categoryId = matchRule(r.payee, rules)?.categoryId ?? fromHistory(r.payee) ?? fallbackExpense?.id
@@ -108,7 +122,8 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
         amountMinor: r.amountMinor,
         categoryId: categoryId!,
         duplicate,
-        include: !duplicate,
+        possibleDup,
+        include: !duplicate && !possibleDup,
         userTouched: false,
       }
     })
@@ -127,6 +142,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
         categoryId: r.categoryId,
         amountMinor: r.amountMinor,
         importHash: importHash(r),
+        createdBy: userId,
         createdAt: Date.now(),
       })),
     )
@@ -139,6 +155,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   }
 
   const dupCount = rows.filter((r) => r.duplicate).length
+  const possibleCount = rows.filter((r) => r.possibleDup).length
   const includeCount = rows.filter((r) => r.include).length
 
   return (
@@ -243,14 +260,26 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       {step === 'review' && (
         <div className="space-y-3">
           <p className="text-sm text-ink-2">
-            {rows.length} transactions found{dupCount > 0 && <> · {dupCount} look already imported and are unticked</>}.
-            Fix any categories — Hearth learns from your corrections.
+            {rows.length} transactions found
+            {dupCount > 0 && <> · {dupCount} already imported</>}
+            {possibleCount > 0 && (
+              <>
+                {' '}· <span className="font-medium text-ink">{possibleCount} possible duplicate{possibleCount === 1 ? '' : 's'}</span> of
+                entries you added by hand — they're unticked, so tick any that are genuinely separate purchases
+              </>
+            )}
+            . Fix any categories — Hearth learns from your corrections.
           </p>
           <div className="max-h-[46dvh] space-y-1 overflow-y-auto pr-1">
             {rows.map((r, i) => (
               <div
                 key={i}
-                className={cx('flex items-center gap-2.5 rounded-xl px-2 py-1.5', r.duplicate && 'opacity-55', r.include && 'bg-surface-2/50')}
+                className={cx(
+                  'flex items-center gap-2.5 rounded-xl px-2 py-1.5',
+                  r.duplicate && 'opacity-55',
+                  r.include && 'bg-surface-2/50',
+                  r.possibleDup && !r.include && 'ring-1 ring-warning/50',
+                )}
               >
                 <input
                   type="checkbox"
@@ -262,9 +291,16 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
                     {r.payee}
-                    {r.duplicate && <span className="ml-1.5 text-xs text-ink-3">duplicate?</span>}
+                    {r.duplicate && <span className="ml-1.5 text-xs text-ink-3">already imported</span>}
                   </p>
-                  <p className="text-xs text-ink-3 tabular">{fmtFullDate(r.date)}</p>
+                  <p className="truncate text-xs text-ink-3 tabular">
+                    {fmtFullDate(r.date)}
+                    {r.possibleDup && (
+                      <span className="text-ink-2">
+                        {' '}· looks like “{r.possibleDup.payee}” added {fmtDay(r.possibleDup.date)}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 {r.amountMinor < 0 ? (
                   <select

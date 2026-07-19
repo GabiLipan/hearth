@@ -25,7 +25,7 @@ const month = () => thisMonthKey()
 export function HeroWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
   const totals = useMemo(() => monthTotals(data.txns, month()), [data.txns])
-  const budgetTotal = data.budgets.reduce((s, b) => s + b.amountMinor, 0)
+  const budgetTotal = data.budgets.reduce((s, b) => (b.ownerId ? s : s + b.amountMinor), 0)
   const frac = budgetTotal > 0 ? totals.spend / budgetTotal : 0
   return (
     <Card className="p-4 md:p-5">
@@ -71,7 +71,7 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
   }, [data.txns])
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id!, c])), [data.categories])
   const rows = data.budgets
-    .filter((b) => catMap.has(b.categoryId))
+    .filter((b) => !b.ownerId && catMap.has(b.categoryId)) // the household's budgets
     .map((b) => ({
       cat: catMap.get(b.categoryId)!,
       budget: b.amountMinor,

@@ -5,28 +5,37 @@ import { db, type Category, type Budget } from '../lib/db'
 import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { thisMonthKey, shiftMonth, monthLabel, monthKey } from '../lib/dates'
 import { useApp } from '../state/AppContext'
+import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
-import { Card, CategoryDot, Progress, Sheet, Button, TextInput, Field, Empty } from '../components/ui'
+import { Card, CategoryDot, Progress, Sheet, Button, TextInput, Field, Empty, Segmented } from '../components/ui'
 
 export default function Budgets() {
   const { money, currency } = useApp()
+  const { userId } = useSyncState()
   const [month, setMonth] = useState(thisMonthKey())
+  const [scope, setScope] = useState<'household' | 'mine'>('household')
   const [editingCat, setEditingCat] = useState<Category | null>(null)
   const [amount, setAmount] = useState('')
 
   const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
-  const budgets = useLiveQuery(() => db.budgets.filter(notDeleted).toArray(), []) ?? []
+  const allBudgets = useLiveQuery(() => db.budgets.filter(notDeleted).toArray(), []) ?? []
   const txns = useLiveQuery(() => db.transactions.filter((t) => !t.deleted && monthKey(t.date) === month).toArray(), [month]) ?? []
 
+  const mine = scope === 'mine' && !!userId
+  const budgets = useMemo(
+    () => allBudgets.filter((b) => (mine ? b.ownerId === userId : !b.ownerId)),
+    [allBudgets, mine, userId],
+  )
   const budgetMap = useMemo(() => new Map(budgets.map((b) => [b.categoryId, b])), [budgets])
   const spentMap = useMemo(() => {
     const m = new Map<string, number>()
     for (const t of txns) {
       if (t.amountMinor >= 0) continue
+      if (mine && t.createdBy !== userId) continue // personal budgets track what *you* recorded
       m.set(t.categoryId, (m.get(t.categoryId) ?? 0) - t.amountMinor)
     }
     return m
-  }, [txns])
+  }, [txns, mine, userId])
 
   const expenseCats = categories.filter((c) => c.kind === 'expense')
   const budgeted = expenseCats.filter((c) => budgetMap.has(c.id!))
@@ -50,13 +59,35 @@ export default function Budgets() {
     } else if (existing) {
       await updateRow('budgets', existing.id!, { amountMinor: minor })
     } else {
-      await createRow<Budget>('budgets', { categoryId: editingCat.id!, amountMinor: minor })
+      await createRow<Budget>('budgets', {
+        categoryId: editingCat.id!,
+        amountMinor: minor,
+        ownerId: mine ? userId : undefined,
+      })
     }
     setEditingCat(null)
   }
 
   return (
     <div>
+      {/* Household / personal switcher (personal budgets need sign-in) */}
+      {userId && (
+        <Segmented
+          value={scope}
+          onChange={setScope}
+          className="mx-auto mb-3 max-w-xs"
+          options={[
+            { value: 'household', label: 'Household' },
+            { value: 'mine', label: 'Just mine' },
+          ]}
+        />
+      )}
+      {mine && (
+        <p className="mb-3 text-center text-xs text-ink-3">
+          Personal budgets count only the spending you record yourself.
+        </p>
+      )}
+
       {/* Month picker */}
       <div className="mb-4 flex items-center justify-center gap-1">
         <button className="grid size-9 place-items-center rounded-full text-ink-2 hover:bg-surface-2" aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}>
@@ -76,8 +107,12 @@ export default function Budgets() {
       {budgeted.length === 0 ? (
         <Empty
           emoji="🎯"
-          title="No budgets yet"
-          hint="Set a monthly amount for each category below and Hearth will track how you're doing."
+          title={mine ? 'No personal budgets yet' : 'No budgets yet'}
+          hint={
+            mine
+              ? 'Set a monthly amount below for spending you want to keep an eye on yourself — only you count towards it.'
+              : "Set a monthly amount for each category below and Hearth will track how you're doing."
+          }
         />
       ) : (
         <>
@@ -146,7 +181,11 @@ export default function Budgets() {
         </>
       )}
 
-      <Sheet open={editingCat !== null} onClose={() => setEditingCat(null)} title={`Budget for ${editingCat?.name ?? ''}`}>
+      <Sheet
+        open={editingCat !== null}
+        onClose={() => setEditingCat(null)}
+        title={`${mine ? 'My budget' : 'Budget'} for ${editingCat?.name ?? ''}`}
+      >
         <div className="space-y-4">
           <Field label={`Monthly amount (${currencySymbol(currency)})`} hint="Leave empty to remove this budget.">
             <TextInput

@@ -22,6 +22,7 @@ export interface Transaction extends SyncedRow {
   amountMinor: number
   importHash?: string
   billId?: string
+  createdBy?: string // auth user id of whoever recorded it (feeds personal budgets)
   createdAt: number
 }
 
@@ -36,6 +37,7 @@ export interface Category extends SyncedRow {
 export interface Budget extends SyncedRow {
   categoryId: string
   amountMinor: number // monthly budget, positive
+  ownerId?: string // undefined = household budget; a user id = that person's own budget
 }
 
 export type BillFreq = 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'yearly'

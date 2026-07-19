@@ -8,6 +8,8 @@ import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { todayISO } from '../lib/dates'
 import { learnRule, suggestCategory, prettyPayee } from '../lib/rules'
+import { findLikelyDuplicate } from '../lib/dedupe'
+import { fmtFullDate } from '../lib/dates'
 import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { useApp } from '../state/AppContext'
 import { Sheet, Field, TextInput, Select, Segmented, Button, cx } from './ui'
@@ -21,7 +23,7 @@ export function TransactionForm({
   onClose: () => void
   editing?: Transaction
 }) {
-  const { currency } = useApp()
+  const { currency, money } = useApp()
   const { userId } = useSyncState()
   const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
   const allAccounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
@@ -105,6 +107,19 @@ export function TransactionForm({
   async function save() {
     if (!canSave) return
     const signed = kind === 'expense' ? -Math.abs(amountMinor!) : Math.abs(amountMinor!)
+    if (!editing) {
+      // Same amount, similar payee, within a few days — probably the same purchase.
+      const existing = await db.transactions.filter(notDeleted).toArray()
+      const dup = findLikelyDuplicate({ date, payee: payee.trim(), amountMinor: signed }, existing)
+      if (
+        dup &&
+        !confirm(
+          `This looks like a duplicate of “${dup.payee}” (${money(dup.amountMinor)}) on ${fmtFullDate(dup.date)}. Add it anyway?`,
+        )
+      ) {
+        return
+      }
+    }
     if (editing) {
       await updateRow('transactions', editing.id!, {
         amountMinor: signed,
@@ -122,6 +137,7 @@ export function TransactionForm({
         date,
         accountId,
         note: note.trim() || undefined,
+        createdBy: userId,
         createdAt: Date.now(),
       })
     }
