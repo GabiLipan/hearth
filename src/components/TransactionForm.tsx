@@ -48,7 +48,7 @@ export function TransactionForm({
   async function onReceiptPhoto(file: File) {
     setScanState('Reading receipt…')
     try {
-      const guess = await scanReceipt(file, (pct) => setScanState(`Reading receipt… ${pct}%`))
+      const guess = await scanReceipt(file, (pct) => setScanState(`Reading receipt… ${pct}%`), payees)
       if (guess.amountMinor) setAmount((guess.amountMinor / 100).toFixed(2))
       if (guess.payee) setPayee(guess.payee)
       if (guess.date) setDate(guess.date)

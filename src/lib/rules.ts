@@ -5,7 +5,8 @@ import { createRow, updateRow, notDeleted } from './data'
 export function normalizePayee(raw: string) {
   return raw
     .toLowerCase()
-    .replace(/\b(card|ref|reference|payment|direct debit|dd|so|standing order|visa|contactless)\b/g, ' ')
+    .replace(/\b(card|ref|reference|payment|direct debit|standing order|visa|contactless)\b/g, ' ')
+    .replace(/\b(dd|deb|so|bp|fpi|fpo|tfr|cpt|csh|bgc|chg|pos|chq|atm)\b/g, ' ') // bank type codes
     .replace(/[*#]/g, ' ')
     .replace(/\d{4,}/g, ' ') // long numbers are refs, not identity
     .replace(/\s+/g, ' ')

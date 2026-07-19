@@ -36,7 +36,9 @@ export async function extractRowsFromPDF(file: File): Promise<ImportRow[]> {
 }
 
 const AMOUNT_RE = /(?:[£$€]\s?)?[-+]?\(?\d{1,3}(?:,\d{3})*\.\d{2}\)?(?:\s?(?:CR|DR))?/gi
-const DATE_FORMATS = ['dd/MM/yyyy', 'dd/MM/yy', 'dd-MM-yyyy', 'dd.MM.yyyy', 'yyyy-MM-dd', 'dd MMM yyyy', 'd MMM yyyy', 'dd MMM yy']
+const DATE_FORMATS = ['dd/MM/yyyy', 'dd/MM/yy', 'dd-MM-yyyy', 'dd.MM.yyyy', 'yyyy-MM-dd', 'dd MMM yyyy', 'd MMM yyyy', 'dd MMM yy', 'd MMM yy', 'dd MMMM yyyy', 'd MMMM yyyy']
+/** Bank transaction-type column codes that leak into descriptions. */
+const TYPE_CODES = /\b(DD|DEB|SO|BP|FPI|FPO|TFR|CPT|CSH|BGC|CHG|POS|CHQ|ATM)\b/g
 
 interface Parsed {
   date: string
@@ -46,22 +48,25 @@ interface Parsed {
 }
 
 function parseLeadingDate(line: string): { date: string; rest: string } | null {
-  // "12 Mar" without a year (common on UK statements)
-  const noYear = line.match(/^(\d{1,2} [A-Za-z]{3})\b(?! \d{4})/)
+  // Full dates first — crucially including 2-digit years ("01 Jul 26"), which
+  // must win over the no-year form so the year isn't swallowed into the payee.
+  const token = line.match(/^(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2} [A-Za-z]{3,9} \d{2,4})\b/)
+  if (token) {
+    for (const f of DATE_FORMATS) {
+      const d = parseDate(token[1], f, new Date())
+      if (isValid(d) && d.getFullYear() > 1990 && d.getFullYear() < 2100) {
+        return { date: format(d, 'yyyy-MM-dd'), rest: line.slice(token[0].length).trim() }
+      }
+    }
+  }
+  // "12 Mar" without any year (also common on UK statements)
+  const noYear = line.match(/^(\d{1,2} [A-Za-z]{3})\b/)
   if (noYear) {
     const now = new Date()
     let d = parseDate(`${noYear[1]} ${now.getFullYear()}`, 'd MMM yyyy', now)
     if (isValid(d)) {
       if (d > now) d = subYears(d, 1) // statement dates are in the past
       return { date: format(d, 'yyyy-MM-dd'), rest: line.slice(noYear[0].length).trim() }
-    }
-  }
-  const token = line.match(/^(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2} [A-Za-z]{3,9} \d{2,4})\b/)
-  if (!token) return null
-  for (const f of DATE_FORMATS) {
-    const d = parseDate(token[1], f, new Date())
-    if (isValid(d) && d.getFullYear() > 1990 && d.getFullYear() < 2100) {
-      return { date: format(d, 'yyyy-MM-dd'), rest: line.slice(token[0].length).trim() }
     }
   }
   return null
@@ -83,7 +88,16 @@ export function parseStatementLines(lines: string[]): ImportRow[] {
     // Amounts must sit at the end of the line to be column values.
     const tail = matches.slice(-2)
     const firstTail = tail[0]
-    const payee = lead.rest.slice(0, firstTail.index).replace(/[|·•]+/g, ' ').replace(/\s+/g, ' ').trim()
+    // Strip type-column codes and keep only tokens with real content, which
+    // drops the stray dots and rules that table layouts leave behind.
+    const payee = lead.rest
+      .slice(0, firstTail.index)
+      .replace(TYPE_CODES, ' ')
+      .replace(/[|·•]+/g, ' ')
+      .split(/\s+/)
+      .filter((tok) => /[A-Za-z0-9]/.test(tok))
+      .join(' ')
+      .trim()
     if (payee.length < 2) continue
     parsed.push({
       date: lead.date,

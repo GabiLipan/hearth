@@ -1,4 +1,4 @@
-import { db } from './db'
+import { db, ensureDefaults } from './db'
 
 const TABLES = ['transactions', 'categories', 'budgets', 'bills', 'rules', 'accounts', 'kv'] as const
 
@@ -41,4 +41,7 @@ export async function clearAllData() {
   await db.transaction('rw', db.tables, async () => {
     for (const name of TABLES) await db.table(name).clear()
   })
+  // Without this, the app sits category-less until the next reload and
+  // anything imported meanwhile ends up uncategorised.
+  await ensureDefaults()
 }

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { FileUp, CheckCircle2 } from 'lucide-react'
-import { db, type Transaction } from '../lib/db'
+import { db, ensureDefaults, type Transaction } from '../lib/db'
 import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping, type ImportRow } from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
 import { matchRule, prettyPayee, learnRule, buildHistoryMatcher } from '../lib/rules'
@@ -87,11 +87,15 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   async function buildReview(source?: ImportRow[]) {
     const extracted = (source ?? (csv && mapping ? extractRows(csv, mapping) : [])).filter((r) => r.valid)
     if (extracted.length === 0) return
-    const [rules, existing, cats] = await Promise.all([
+    const [rules, existing] = await Promise.all([
       db.rules.filter(notDeleted).toArray(),
       db.transactions.filter(notDeleted).toArray(),
-      db.categories.filter(notDeleted).toArray(),
     ])
+    let cats = await db.categories.filter(notDeleted).toArray()
+    if (!cats.some((c) => c.kind === 'expense')) {
+      await ensureDefaults()
+      cats = await db.categories.filter(notDeleted).toArray()
+    }
     const existingHashes = new Set(existing.map((t) => t.importHash ?? importHash(t)))
     const fallbackExpense = cats.find((c) => c.kind === 'expense' && c.name === 'Other') ?? cats.find((c) => c.kind === 'expense')
     const fallbackIncome = cats.find((c) => c.kind === 'income') ?? fallbackExpense
