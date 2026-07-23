@@ -187,18 +187,21 @@ export async function migrateIdsToUuid() {
   })
 }
 
-const DEFAULT_CATEGORIES: Omit<Category, 'id'>[] = [
-  { name: 'Groceries', emoji: '🛒', slot: 2, kind: 'expense', sortOrder: 0 },
-  { name: 'Home & utilities', emoji: '🏠', slot: 5, kind: 'expense', sortOrder: 1 },
-  { name: 'Transport', emoji: '🚗', slot: 1, kind: 'expense', sortOrder: 2 },
-  { name: 'Dining out', emoji: '🍽️', slot: 8, kind: 'expense', sortOrder: 3 },
-  { name: 'Shopping', emoji: '🛍️', slot: 7, kind: 'expense', sortOrder: 4 },
-  { name: 'Subscriptions', emoji: '📺', slot: 6, kind: 'expense', sortOrder: 5 },
-  { name: 'Health', emoji: '💊', slot: 4, kind: 'expense', sortOrder: 6 },
-  { name: 'Fun & leisure', emoji: '🎉', slot: 3, kind: 'expense', sortOrder: 7 },
-  { name: 'Other', emoji: '📦', slot: 1, kind: 'expense', sortOrder: 8 },
-  { name: 'Salary', emoji: '💼', slot: 2, kind: 'income', sortOrder: 9 },
-  { name: 'Other income', emoji: '💰', slot: 4, kind: 'income', sortOrder: 10 },
+// Built-in categories carry stable `def-*` ids. Because every device seeds the
+// same ids, two people seeding defaults and then syncing collapse onto one row
+// instead of creating a duplicate per device (see dedupeCategories).
+const DEFAULT_CATEGORIES: (Omit<Category, 'id'> & { id: string })[] = [
+  { id: 'def-groceries', name: 'Groceries', emoji: '🛒', slot: 2, kind: 'expense', sortOrder: 0 },
+  { id: 'def-home-utilities', name: 'Home & utilities', emoji: '🏠', slot: 5, kind: 'expense', sortOrder: 1 },
+  { id: 'def-transport', name: 'Transport', emoji: '🚗', slot: 1, kind: 'expense', sortOrder: 2 },
+  { id: 'def-dining-out', name: 'Dining out', emoji: '🍽️', slot: 8, kind: 'expense', sortOrder: 3 },
+  { id: 'def-shopping', name: 'Shopping', emoji: '🛍️', slot: 7, kind: 'expense', sortOrder: 4 },
+  { id: 'def-subscriptions', name: 'Subscriptions', emoji: '📺', slot: 6, kind: 'expense', sortOrder: 5 },
+  { id: 'def-health', name: 'Health', emoji: '💊', slot: 4, kind: 'expense', sortOrder: 6 },
+  { id: 'def-fun-leisure', name: 'Fun & leisure', emoji: '🎉', slot: 3, kind: 'expense', sortOrder: 7 },
+  { id: 'def-other', name: 'Other', emoji: '📦', slot: 1, kind: 'expense', sortOrder: 8 },
+  { id: 'def-salary', name: 'Salary', emoji: '💼', slot: 2, kind: 'income', sortOrder: 9 },
+  { id: 'def-other-income', name: 'Other income', emoji: '💰', slot: 4, kind: 'income', sortOrder: 10 },
 ]
 
 /** Seed default categories and account on first run. */
@@ -206,10 +209,90 @@ export async function ensureDefaults() {
   const now = Date.now()
   const count = await db.categories.count()
   if (count === 0) {
-    await db.categories.bulkAdd(DEFAULT_CATEGORIES.map((c) => ({ ...c, id: newId(), updatedAt: now, dirty: 1 as const })))
+    await db.categories.bulkAdd(DEFAULT_CATEGORIES.map((c) => ({ ...c, updatedAt: now, dirty: 1 as const })))
   }
   const accounts = await db.accounts.count()
   if (accounts === 0) {
     await db.accounts.add({ id: newId(), name: 'Joint account', kind: 'current', updatedAt: now, dirty: 1 })
+  }
+}
+
+const norm = (s: string) => s.trim().toLowerCase()
+const catKey = (kind: string, name: string) => `${kind}::${norm(name)}`
+
+// name+kind -> the canonical id built-in categories should collapse onto.
+const DEFAULT_CANONICAL = new Map(DEFAULT_CATEGORIES.map((c) => [catKey(c.kind, c.name), c.id]))
+
+function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const k = key(item)
+    const bucket = groups.get(k)
+    if (bucket) bucket.push(item)
+    else groups.set(k, [item])
+  }
+  return groups
+}
+
+/**
+ * Collapse categories that share a name+kind into a single canonical row,
+ * repointing every transaction/bill/budget/rule onto it and tombstoning the
+ * losers so the cleanup propagates through sync. Built-in categories collapse
+ * onto their stable `def-*` id; custom duplicates collapse onto their
+ * lowest id (a deterministic choice, so every device picks the same survivor).
+ *
+ * Runs on boot and at the start of each sync. When the data is already clean it
+ * only reads the (tiny) categories table and returns, so it's cheap to repeat.
+ */
+export async function dedupeCategories() {
+  const cats = await db.categories.filter((c) => !c.deleted).toArray()
+  const now = Date.now()
+  let changed = false
+
+  for (const [key, members] of groupBy(cats, (c) => catKey(c.kind, c.name))) {
+    const canonicalId = DEFAULT_CANONICAL.get(key) ?? members.map((m) => m.id!).sort()[0]
+    const canonical = members.find((m) => m.id === canonicalId)
+    const losers = members.filter((m) => m.id !== canonicalId)
+    if (canonical && losers.length === 0) continue // already clean
+
+    // Preserve the fields of whichever copy is most-used, tie-break by id.
+    if (!canonical) {
+      const counts = await Promise.all(members.map((m) => db.transactions.where('categoryId').equals(m.id!).count()))
+      const source = members
+        .map((m, i) => ({ m, n: counts[i] }))
+        .sort((a, b) => b.n - a.n || (a.m.id! < b.m.id! ? -1 : 1))[0].m
+      await db.categories.put({ ...source, id: canonicalId, deleted: 0, dirty: 1, updatedAt: now })
+    }
+
+    for (const loser of losers) {
+      const from = loser.id!
+      await db.transactions.where('categoryId').equals(from).modify({ categoryId: canonicalId, dirty: 1, updatedAt: now })
+      await db.budgets.where('categoryId').equals(from).modify({ categoryId: canonicalId, dirty: 1, updatedAt: now })
+      await db.rules.where('categoryId').equals(from).modify({ categoryId: canonicalId, dirty: 1, updatedAt: now })
+      await db.bills.filter((b) => b.categoryId === from).modify({ categoryId: canonicalId, dirty: 1, updatedAt: now })
+      await db.categories.update(from, { deleted: 1, dirty: 1, updatedAt: now })
+    }
+    changed = true
+  }
+
+  if (changed) {
+    await dedupeDuplicateRows()
+  }
+}
+
+/** After repointing, two budgets (or rules) can point at the same key — keep one. */
+async function dedupeDuplicateRows() {
+  const now = Date.now()
+  const budgets = await db.budgets.filter((b) => !b.deleted).toArray()
+  for (const [, members] of groupBy(budgets, (b) => `${b.categoryId}::${b.ownerId ?? ''}`)) {
+    if (members.length < 2) continue
+    const survivor = members.map((m) => m.id!).sort()[0]
+    for (const m of members) if (m.id !== survivor) await db.budgets.update(m.id!, { deleted: 1, dirty: 1, updatedAt: now })
+  }
+  const rules = await db.rules.filter((r) => !r.deleted).toArray()
+  for (const [, members] of groupBy(rules, (r) => norm(r.match))) {
+    if (members.length < 2) continue
+    const survivor = members.map((m) => m.id!).sort()[0]
+    for (const m of members) if (m.id !== survivor) await db.rules.update(m.id!, { deleted: 1, dirty: 1, updatedAt: now })
   }
 }

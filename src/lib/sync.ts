@@ -1,6 +1,6 @@
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from './supabase'
-import { db, getSetting, setSetting, delSetting, SYNCED_TABLES, type SyncedTable, type SyncedRow } from './db'
+import { db, getSetting, setSetting, delSetting, dedupeCategories, SYNCED_TABLES, type SyncedTable, type SyncedRow } from './db'
 import { setOnLocalChange } from './data'
 import { recomputeOwnedBalances } from './accounts'
 
@@ -105,6 +105,31 @@ export async function joinHousehold(code: string) {
   await delSetting('syncCursor')
   await adoptHousehold(row.id, row.join_code)
   await syncNow()
+}
+
+let provisioning = false
+
+/**
+ * A signed-in account with no household yet gets one created automatically, so
+ * sync "just works" across that person's own devices without a manual step. A
+ * partner still joins with an invite code. The guard stops overlapping auth
+ * events (e.g. INITIAL_SESSION then SIGNED_IN) from creating two households.
+ */
+async function autoProvisionHousehold() {
+  if (provisioning || state.householdId) return
+  provisioning = true
+  try {
+    // Re-check in case a membership landed between findMembership and here.
+    if (await findMembership()) {
+      void syncNow()
+      return
+    }
+    await createHousehold()
+  } catch (e) {
+    set({ error: e instanceof Error ? e.message : 'Could not set up sync' })
+  } finally {
+    provisioning = false
+  }
 }
 
 /** Look up an existing membership after signing in on a new device. */
@@ -212,8 +237,13 @@ export async function syncNow() {
   set({ syncing: true, error: undefined })
   try {
     await recomputeOwnedBalances(state.userId)
+    // Fold away any duplicate categories (e.g. a partner's device seeded its
+    // own defaults) before pushing, so the merge propagates to everyone.
+    await dedupeCategories()
     await pushDirty(householdId)
     await pullSince(await getSetting('syncCursor'))
+    await dedupeCategories()
+    await pushDirty(householdId)
     set({ syncing: false, lastSyncAt: Date.now() })
   } catch (e) {
     set({ syncing: false, error: e instanceof Error ? e.message : 'Sync failed' })
@@ -272,6 +302,7 @@ export async function initSync() {
         } else {
           const joined = await findMembership()
           if (joined) void syncNow()
+          else await autoProvisionHousehold()
         }
       } else {
         set({ email: undefined })

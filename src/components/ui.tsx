@@ -200,7 +200,9 @@ export function Sheet({
           aria-label={title}
           onClick={(e) => e.stopPropagation()}
           className={cx(
-            'animate-sheet relative flex max-h-full w-full flex-col overflow-hidden bg-surface sm:max-h-[92%]',
+            // Always leave a strip of backdrop above the sheet so tap-to-dismiss
+            // has a target, even when the keyboard has shrunk the viewport.
+            'animate-sheet relative flex max-h-[92%] w-full flex-col overflow-hidden bg-surface',
             'rounded-t-3xl sm:rounded-3xl sm:shadow-2xl',
             wide ? 'sm:max-w-2xl' : 'sm:max-w-md',
           )}

@@ -85,7 +85,7 @@ export default function Activity() {
       </div>
 
       {/* Category filter chips */}
-      <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
+      <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 py-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
         <button
           onClick={() => setCatFilter(null)}
           className={cx(

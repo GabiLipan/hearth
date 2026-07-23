@@ -37,8 +37,9 @@ function HouseholdSync() {
     return (
       <Card className="space-y-3 p-4">
         <p className="text-sm text-ink-2">
-          Sign in to sync your household's data between your devices — changes appear on your partner's phone in
-          seconds, and everything still works offline.
+          Sign in to keep your data backed up and in sync across all your devices — your phone and laptop stay
+          identical, changes appear in seconds, and everything still works offline. You can invite a partner to
+          share a household too.
         </p>
         <Segmented
           value={mode}
@@ -77,12 +78,12 @@ function HouseholdSync() {
     return (
       <Card className="space-y-3 p-4">
         <p className="text-sm text-ink-2">
-          Signed in as <span className="font-medium text-ink">{sync.email}</span>. One of you creates the household;
-          the other joins with the invite code it generates.
+          Signed in as <span className="font-medium text-ink">{sync.email}</span>. Setting up your sync… If you'd
+          rather join a partner's existing household, enter their invite code below.
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <Button disabled={busy} onClick={() => run(createHousehold)}>
-            <Users size={15} /> Create our household
+            <Users size={15} /> Set up sync
           </Button>
           <span className="text-sm text-ink-3">or</span>
           <TextInput
@@ -126,7 +127,7 @@ function HouseholdSync() {
       {sync.joinCode && (
         <div className="flex items-center gap-2 rounded-xl bg-surface-2 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-ink-3">Partner invite code — they enter this after creating their account</p>
+            <p className="text-xs text-ink-3">Invite code — share with your partner so they can join this household</p>
             <p className="text-lg font-bold tracking-widest tabular">{sync.joinCode}</p>
           </div>
           <Button
@@ -143,6 +144,32 @@ function HouseholdSync() {
         </div>
       )}
       {sync.error && <p className="text-sm text-critical-text">Last sync problem: {sync.error}</p>}
+      <details className="text-sm">
+        <summary className="cursor-pointer text-ink-3 hover:text-ink-2">Joining your partner instead?</summary>
+        <p className="mt-2 text-xs text-ink-3">
+          Enter their invite code to share one household. This replaces the data on this device with theirs.
+        </p>
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <TextInput
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+            placeholder="Invite code"
+            className="w-36 uppercase"
+          />
+          <Button
+            variant="subtle"
+            disabled={busy || joinCode.trim().length < 6}
+            onClick={() => {
+              if (confirm('Joining replaces the data on this device with your partner’s shared household. Continue?')) {
+                void run(() => joinHousehold(joinCode))
+              }
+            }}
+          >
+            Join
+          </Button>
+        </div>
+        {error && <p className="mt-2 text-sm text-critical-text">{error}</p>}
+      </details>
       <div className="flex gap-2">
         <Button size="sm" variant="subtle" disabled={sync.syncing} onClick={() => void syncNow()}>
           <RefreshCw size={14} /> Sync now

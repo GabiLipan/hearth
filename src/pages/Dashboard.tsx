@@ -126,12 +126,18 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="grid gap-3 lg:grid-cols-2">
+      {/* Masonry columns on desktop: cards pack vertically instead of aligning
+          to the tallest card in a grid row, so there's no dead space between
+          cards of unequal height. Wide widgets span the full width. */}
+      <div className="lg:columns-2 lg:gap-3">
         {visible.map((item) => {
           const def = defOf(item.id)
           const Widget = def.component
           return (
-            <div key={item.id} className={cx('relative min-w-0', def.wide && 'lg:col-span-2')}>
+            <div
+              key={item.id}
+              className={cx('relative min-w-0 mb-3 break-inside-avoid', def.wide && 'lg:[column-span:all]')}
+            >
               {editing && (
                 <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">
                   <button onClick={() => move(item.id, -1)} aria-label={`Move ${def.label} up`} className="grid size-7 place-items-center rounded-full hover:bg-surface-2">
