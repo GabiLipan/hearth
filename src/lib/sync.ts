@@ -49,7 +49,12 @@ export const syncStore = {
 /* ---------- auth ---------- */
 
 export async function signUp(email: string, password: string) {
-  const { error } = await supabase.auth.signUp({ email, password })
+  // Send the confirmation link back to wherever the app is actually served
+  // (the hosted gh-pages URL in production, localhost during dev) rather than
+  // inheriting the project's Site URL. Stripping the hash keeps HashRouter's
+  // route out of the redirect target.
+  const emailRedirectTo = window.location.href.split('#')[0]
+  const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo } })
   if (error) throw new Error(error.message)
 }
 
