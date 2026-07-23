@@ -216,7 +216,23 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={bill?.id ? 'Edit bill' : 'New bill'}>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={bill?.id ? 'Edit bill' : 'New bill'}
+      footer={
+        <div className="flex gap-2">
+          {bill?.id && (
+            <Button variant="danger" size="lg" onClick={remove}>
+              Delete
+            </Button>
+          )}
+          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+            {bill?.id ? 'Save changes' : 'Add bill'}
+          </Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Name">
@@ -268,16 +284,6 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="size-5 accent-[var(--accent)]" />
           </label>
         )}
-        <div className="flex gap-2">
-          {bill?.id && (
-            <Button variant="danger" onClick={remove}>
-              Delete
-            </Button>
-          )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
-            {bill?.id ? 'Save changes' : 'Add bill'}
-          </Button>
-        </div>
       </div>
     </Sheet>
   )

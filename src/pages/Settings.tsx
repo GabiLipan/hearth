@@ -420,7 +420,23 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={account ? 'Edit account' : 'New account'}>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={account ? 'Edit account' : 'New account'}
+      footer={
+        <div className="flex gap-2">
+          {account?.id && (
+            <Button variant="danger" size="lg" onClick={remove}>
+              Delete
+            </Button>
+          )}
+          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+            Save
+          </Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Name">
@@ -466,16 +482,6 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
             <p className="mt-2 text-xs text-ink-3">Privacy applies once you're signed in to household sync.</p>
           )}
         </div>
-        <div className="flex gap-2">
-          {account?.id && (
-            <Button variant="danger" onClick={remove}>
-              Delete
-            </Button>
-          )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
-            Save
-          </Button>
-        </div>
       </div>
     </Sheet>
   )
@@ -520,7 +526,23 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={category ? 'Edit category' : 'New category'}>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={category ? 'Edit category' : 'New category'}
+      footer={
+        <div className="flex gap-2">
+          {category?.id && (
+            <Button variant="danger" size="lg" onClick={remove}>
+              Delete
+            </Button>
+          )}
+          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+            Save
+          </Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         <div className="grid grid-cols-[5rem_1fr] gap-3">
           <Field label="Emoji">
@@ -540,16 +562,6 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
             ]}
           />
         )}
-        <div className="flex gap-2">
-          {category?.id && (
-            <Button variant="danger" onClick={remove}>
-              Delete
-            </Button>
-          )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
-            Save
-          </Button>
-        </div>
       </div>
     </Sheet>
   )

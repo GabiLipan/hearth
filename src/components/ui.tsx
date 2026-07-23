@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes } from 'react'
+import { useEffect, useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes } from 'react'
 import { X } from 'lucide-react'
 import type { Category } from '../lib/db'
 
@@ -129,19 +129,52 @@ export function Segmented<T extends string>({
 }
 
 /* ---------- Modal / bottom sheet ---------- */
+
+/**
+ * Tracks the visual viewport so a sheet stays inside the space the on-screen
+ * keyboard leaves behind. On iOS the layout viewport doesn't shrink when the
+ * keyboard opens, so a bottom-anchored sheet would otherwise slide behind it —
+ * hiding its inputs and action button. Sizing the sheet's frame to
+ * `visualViewport` keeps everything above the keyboard.
+ */
+function useViewportInset() {
+  const [inset, setInset] = useState(() => ({
+    height: typeof window === 'undefined' ? 0 : window.innerHeight,
+    top: 0,
+  }))
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setInset({ height: vv.height, top: vv.offsetTop })
+    update()
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+    }
+  }, [])
+  return inset
+}
+
 export function Sheet({
   open,
   onClose,
   title,
   children,
+  footer,
   wide,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
+  /** Sticky action bar pinned to the bottom of the sheet, always above the keyboard. */
+  footer?: ReactNode
   wide?: boolean
 }) {
+  const inset = useViewportInset()
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -155,28 +188,36 @@ export function Sheet({
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+    <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40 animate-fade" onClick={onClose} />
       <div
-        role="dialog"
-        aria-label={title}
-        className={cx(
-          'animate-sheet relative flex max-h-[92dvh] w-full flex-col overflow-hidden bg-surface',
-          'rounded-t-3xl sm:rounded-3xl sm:shadow-2xl',
-          wide ? 'sm:max-w-2xl' : 'sm:max-w-md',
-        )}
+        onClick={onClose}
+        className="absolute inset-x-0 top-0 flex items-end justify-center sm:items-center"
+        style={{ height: inset.height || undefined, transform: inset.top ? `translateY(${inset.top}px)` : undefined }}
       >
-        <div className="flex items-center justify-between px-5 pb-2 pt-4">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-2 hover:text-ink"
-          >
-            <X size={16} />
-          </button>
+        <div
+          role="dialog"
+          aria-label={title}
+          onClick={(e) => e.stopPropagation()}
+          className={cx(
+            'animate-sheet relative flex max-h-full w-full flex-col overflow-hidden bg-surface sm:max-h-[92%]',
+            'rounded-t-3xl sm:rounded-3xl sm:shadow-2xl',
+            wide ? 'sm:max-w-2xl' : 'sm:max-w-md',
+          )}
+        >
+          <div className="flex items-center justify-between px-5 pb-2 pt-4">
+            <h2 className="text-lg font-semibold">{title}</h2>
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-2 hover:text-ink"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className={cx('overflow-y-auto px-5', footer ? 'pb-4' : 'pb-6 pb-safe')}>{children}</div>
+          {footer && <div className="border-t border-hairline bg-surface px-5 pb-safe pt-3">{footer}</div>}
         </div>
-        <div className="overflow-y-auto px-5 pb-6 pb-safe">{children}</div>
       </div>
     </div>
   )

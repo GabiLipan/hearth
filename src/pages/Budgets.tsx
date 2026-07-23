@@ -185,6 +185,11 @@ export default function Budgets() {
         open={editingCat !== null}
         onClose={() => setEditingCat(null)}
         title={`${mine ? 'My budget' : 'Budget'} for ${editingCat?.name ?? ''}`}
+        footer={
+          <Button size="lg" className="w-full" onClick={saveBudget}>
+            Save
+          </Button>
+        }
       >
         <div className="space-y-4">
           <Field label={`Monthly amount (${currencySymbol(currency)})`} hint="Leave empty to remove this budget.">
@@ -196,9 +201,6 @@ export default function Budgets() {
               autoFocus
             />
           </Field>
-          <Button size="lg" className="w-full" onClick={saveBudget}>
-            Save
-          </Button>
         </div>
       </Sheet>
     </div>

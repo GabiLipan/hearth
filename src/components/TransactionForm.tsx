@@ -147,7 +147,32 @@ export function TransactionForm({
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={editing ? 'Edit transaction' : 'Add transaction'}>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={editing ? 'Edit transaction' : 'Add transaction'}
+      footer={
+        <div className="flex gap-2">
+          {editing && (
+            <Button
+              variant="danger"
+              size="lg"
+              onClick={async () => {
+                if (confirm('Delete this transaction?')) {
+                  await removeRow('transactions', editing.id!)
+                  onClose()
+                }
+              }}
+            >
+              Delete
+            </Button>
+          )}
+          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+            {editing ? 'Save changes' : 'Add transaction'}
+          </Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         <Segmented
           value={kind}
@@ -260,26 +285,6 @@ export function TransactionForm({
         <Field label="Note (optional)">
           <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" />
         </Field>
-
-        <div className="flex gap-2">
-          {editing && (
-            <Button
-              variant="danger"
-              size="lg"
-              onClick={async () => {
-                if (confirm('Delete this transaction?')) {
-                  await removeRow('transactions', editing.id!)
-                  onClose()
-                }
-              }}
-            >
-              Delete
-            </Button>
-          )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
-            {editing ? 'Save changes' : 'Add transaction'}
-          </Button>
-        </div>
       </div>
     </Sheet>
   )
