@@ -217,8 +217,21 @@ export function Sheet({
               <X size={16} />
             </button>
           </div>
-          <div className={cx('overflow-y-auto px-5', footer ? 'pb-4' : 'pb-6 pb-safe')}>{children}</div>
-          {footer && <div className="border-t border-hairline bg-surface px-5 pb-safe pt-3">{footer}</div>}
+          <div
+            className={cx(
+              'overflow-y-auto px-5',
+              footer ? 'pb-3' : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]',
+            )}
+          >
+            {children}
+          </div>
+          {footer && (
+            // Real bottom padding (not just the safe-area inset, which is 0 on
+            // desktop) so the action never jams against the sheet's edge.
+            <div className="border-t border-hairline bg-surface px-5 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
+              {footer}
+            </div>
+          )}
         </div>
       </div>
     </div>
