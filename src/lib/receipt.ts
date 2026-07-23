@@ -1,15 +1,15 @@
 /**
- * Receipt scanning: OCR a photo with tesseract.js (loaded on demand — the
- * engine + language data come over the network on first use, then stay
- * cached), then pull out merchant, total and date to prefill the expense form.
+ * Receipt scanning: OCR a photo with PaddleOCR's PP-OCRv5 models running
+ * on-device via ONNX Runtime Web (loaded on demand — the models come over the
+ * network on first use, then stay cached, and the photo never leaves the
+ * device), then pull out merchant, total and date to prefill the expense form.
  *
- * Two things keep results stable across shaky photos:
- * 1. the image is preprocessed (orientation fixed, greyscale, contrast
- *    stretched, sensible resolution) before OCR;
- * 2. the merchant line is snapped to a known name — the user's own payee
- *    history first, then common UK chains — so OCR wobble ("SCREWEIX")
- *    lands on the same canonical name every time.
+ * The merchant line is still snapped to a known name — the user's own payee
+ * history first, then common UK chains — so any OCR wobble ("SCREWEIX") lands
+ * on the same canonical name every time.
  */
+
+import type { PaddleOcrService as PaddleOcrServiceType } from 'ppu-paddle-ocr/web'
 
 export interface ReceiptGuess {
   payee?: string
@@ -162,55 +162,87 @@ export function parseReceiptText(text: string, knownPayees: string[] = []): Rece
   return { payee, amountMinor, date, rawText: text }
 }
 
-/** Orientation-fix, greyscale and contrast-stretch the photo for stable OCR. */
-async function preprocess(file: File): Promise<Blob> {
+/* ---------- OCR engine (PaddleOCR PP-OCRv5, on-device via ONNX Runtime) ---------- */
+
+// The English PP-OCRv5 models, served from our own origin (see public/models).
+// They download once (~12 MB), then the service worker keeps them cached so
+// scanning works offline afterwards.
+const MODEL_URLS = {
+  detection: `${import.meta.env.BASE_URL}models/PP-OCRv5_mobile_det_infer.ort`,
+  recognition: `${import.meta.env.BASE_URL}models/en_PP-OCRv5_mobile_rec_infer.ort`,
+  charactersDictionary: `${import.meta.env.BASE_URL}models/ppocrv5_en_dict.txt`,
+}
+// Rough combined size of the two model files, for the first-run progress bar.
+const MODEL_BYTES = 12.3 * 1024 * 1024
+
+let servicePromise: Promise<PaddleOcrServiceType> | null = null
+
+/** Fetch a URL to an ArrayBuffer, reporting each chunk of bytes as it streams in. */
+async function fetchBuffer(url: string, onChunk: (delta: number) => void): Promise<ArrayBuffer> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Failed to load ${url} (${res.status})`)
+  if (!res.body) return res.arrayBuffer()
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    received += value.length
+    onChunk(value.length)
+  }
+  const out = new Uint8Array(received)
+  let pos = 0
+  for (const c of chunks) {
+    out.set(c, pos)
+    pos += c.length
+  }
+  return out.buffer
+}
+
+/** Build the OCR service once, streaming the models in with progress on first use. */
+function getService(onProgress?: (pct: number) => void): Promise<PaddleOcrServiceType> {
+  if (!servicePromise) {
+    servicePromise = (async () => {
+      const { PaddleOcrService } = await import('ppu-paddle-ocr/web')
+      let received = 0
+      const onChunk = (delta: number) => {
+        received += delta
+        onProgress?.(Math.min(85, Math.round((received / MODEL_BYTES) * 85)))
+      }
+      const [detection, recognition] = await Promise.all([
+        fetchBuffer(MODEL_URLS.detection, onChunk),
+        fetchBuffer(MODEL_URLS.recognition, onChunk),
+      ])
+      const service = new PaddleOcrService({
+        model: { detection, recognition, charactersDictionary: MODEL_URLS.charactersDictionary },
+      })
+      await service.initialize()
+      return service
+    })()
+    // A failed download (e.g. first use while offline) shouldn't poison the
+    // singleton — clear it so the next attempt can retry.
+    servicePromise.catch(() => {
+      servicePromise = null
+    })
+  }
+  return servicePromise
+}
+
+/** Orientation-fix and size a photo into a colour canvas for the detector. */
+async function fileToCanvas(file: File, maxSide = 1600): Promise<HTMLCanvasElement> {
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' })
-  const target = 1600
-  const scale = bmp.width > target ? target / bmp.width : bmp.width < 700 ? Math.min(2, 1400 / bmp.width) : 1
-  const w = Math.round(bmp.width * scale)
-  const h = Math.round(bmp.height * scale)
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height))
+  const w = Math.max(1, Math.round(bmp.width * scale))
+  const h = Math.max(1, Math.round(bmp.height * scale))
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   ctx.drawImage(bmp, 0, 0, w, h)
   bmp.close()
-  const img = ctx.getImageData(0, 0, w, h)
-  const px = img.data
-  const grey = new Uint8Array(w * h)
-  const hist = new Uint32Array(256)
-  for (let i = 0, j = 0; i < px.length; i += 4, j++) {
-    const g = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2])
-    grey[j] = g
-    hist[g]++
-  }
-  // Percentile contrast stretch: p5 -> black, p95 -> white
-  const total = w * h
-  let lo = 0
-  let hi = 255
-  for (let acc = 0, v = 0; v < 256; v++) {
-    acc += hist[v]
-    if (acc >= total * 0.05) {
-      lo = v
-      break
-    }
-  }
-  for (let acc = 0, v = 255; v >= 0; v--) {
-    acc += hist[v]
-    if (acc >= total * 0.05) {
-      hi = v
-      break
-    }
-  }
-  const range = Math.max(1, hi - lo)
-  for (let i = 0, j = 0; i < px.length; i += 4, j++) {
-    const v = Math.max(0, Math.min(255, Math.round(((grey[j] - lo) / range) * 255)))
-    px[i] = px[i + 1] = px[i + 2] = v
-  }
-  ctx.putImageData(img, 0, 0)
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'))
-  if (!blob) throw new Error('preprocess failed')
-  return blob
+  return canvas
 }
 
 export async function scanReceipt(
@@ -218,22 +250,9 @@ export async function scanReceipt(
   onProgress?: (pct: number) => void,
   knownPayees: string[] = [],
 ): Promise<ReceiptGuess> {
-  let input: Blob = file
-  try {
-    input = await preprocess(file)
-  } catch {
-    // fall back to the raw photo
-  }
-  const { createWorker } = await import('tesseract.js')
-  const worker = await createWorker('eng', 1, {
-    logger: (m) => {
-      if (m.status === 'recognizing text' && onProgress) onProgress(Math.round(m.progress * 100))
-    },
-  })
-  try {
-    const { data } = await worker.recognize(input)
-    return parseReceiptText(data.text, knownPayees)
-  } finally {
-    await worker.terminate()
-  }
+  const [service, canvas] = await Promise.all([getService(onProgress), fileToCanvas(file)])
+  onProgress?.(90)
+  const result = await service.recognize(canvas)
+  onProgress?.(100)
+  return parseReceiptText(result.text, knownPayees)
 }

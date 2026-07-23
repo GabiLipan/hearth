@@ -13,6 +13,33 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icons/apple-touch-icon.png'],
+      workbox: {
+        // The OCR models (~12 MB) and ONNX Runtime WASM are fetched on first
+        // receipt scan, not precached, then kept so scanning works offline.
+        // ONNX Runtime's WASM is loaded from a CDN at runtime, so keep the copy
+        // Vite emits into the bundle out of the precache manifest.
+        globIgnores: ['**/*.wasm'],
+        runtimeCaching: [
+          {
+            urlPattern: /\/models\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'ocr-models',
+              expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 90 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/npm\/onnxruntime-web/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'onnxruntime-wasm',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 90 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
+      },
       manifest: {
         name: 'Hearth — Family Finance',
         short_name: 'Hearth',
