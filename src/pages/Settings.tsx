@@ -311,7 +311,12 @@ export default function SettingsPage() {
           <Button
             variant="danger"
             onClick={async () => {
-              if (confirm('Delete ALL data on this device? Export a backup first if you want to keep it.') && confirm('Really delete everything? This cannot be undone.')) {
+              if (
+                confirm(
+                  'Delete all transactions, budgets, bills and accounts? If you sync with a partner, this deletes them for both of you. Export a backup first if you want to keep a copy.',
+                ) &&
+                confirm('Really delete everything? This cannot be undone.')
+              ) {
                 await clearAllData()
               }
             }}

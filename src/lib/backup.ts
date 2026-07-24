@@ -1,4 +1,4 @@
-import { db, ensureDefaults } from './db'
+import { db, ensureDefaults, SYNCED_TABLES } from './db'
 
 const TABLES = ['transactions', 'categories', 'budgets', 'bills', 'rules', 'accounts', 'kv'] as const
 
@@ -38,10 +38,21 @@ export async function importJSON(text: string) {
 }
 
 export async function clearAllData() {
+  const now = Date.now()
   await db.transaction('rw', db.tables, async () => {
-    for (const name of TABLES) await db.table(name).clear()
+    // Soft-delete every synced row (rather than a local `clear()`, which leaves
+    // no tombstone — so the next pull would just resurrect everything and the
+    // wipe would never reach the other device). `kv` is left alone so the
+    // household connection and settings survive and can push these deletions.
+    for (const name of SYNCED_TABLES) {
+      await db.table(name).toCollection().modify((r) => {
+        r.deleted = 1
+        r.dirty = 1
+        r.updatedAt = now
+      })
+    }
   })
-  // Without this, the app sits category-less until the next reload and
-  // anything imported meanwhile ends up uncategorised.
+  // Revive the starter categories + account (their stable ids overwrite their
+  // own tombstones), so the app isn't left empty and uncategorised.
   await ensureDefaults()
 }

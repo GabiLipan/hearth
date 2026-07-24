@@ -204,16 +204,25 @@ const DEFAULT_CATEGORIES: (Omit<Category, 'id'> & { id: string })[] = [
   { id: 'def-other-income', name: 'Other income', emoji: '💰', slot: 4, kind: 'income', sortOrder: 10 },
 ]
 
-/** Seed default categories and account on first run. */
+// The starter account carries a stable id for the same reason the categories
+// do: every device seeds the same "Joint account" row, so they collapse onto
+// one instead of piling up a duplicate per device.
+const DEFAULT_ACCOUNT = { id: 'acct-joint', name: 'Joint account', kind: 'current' as const }
+
+/**
+ * Seed (or revive) the default categories and account. Counts only live rows so
+ * that after a wipe — which tombstones everything — the defaults come back:
+ * `put` overwrites their own tombstones with fresh, live copies that sync.
+ */
 export async function ensureDefaults() {
   const now = Date.now()
-  const count = await db.categories.count()
-  if (count === 0) {
-    await db.categories.bulkAdd(DEFAULT_CATEGORIES.map((c) => ({ ...c, updatedAt: now, dirty: 1 as const })))
+  const liveCategories = await db.categories.filter((c) => !c.deleted).count()
+  if (liveCategories === 0) {
+    await db.categories.bulkPut(DEFAULT_CATEGORIES.map((c) => ({ ...c, deleted: 0, dirty: 1 as const, updatedAt: now })))
   }
-  const accounts = await db.accounts.count()
-  if (accounts === 0) {
-    await db.accounts.add({ id: newId(), name: 'Joint account', kind: 'current', updatedAt: now, dirty: 1 })
+  const liveAccounts = await db.accounts.filter((a) => !a.deleted).count()
+  if (liveAccounts === 0) {
+    await db.accounts.put({ ...DEFAULT_ACCOUNT, deleted: 0, dirty: 1, updatedAt: now })
   }
 }
 
@@ -242,9 +251,15 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
  * lowest id (a deterministic choice, so every device picks the same survivor).
  *
  * Runs on boot and at the start of each sync. When the data is already clean it
- * only reads the (tiny) categories table and returns, so it's cheap to repeat.
+ * only reads the (tiny) categories/accounts tables and returns, so it's cheap
+ * to repeat.
  */
-export async function dedupeCategories() {
+export async function dedupeSyncedData() {
+  await dedupeCategories()
+  await dedupeAccounts()
+}
+
+async function dedupeCategories() {
   const cats = await db.categories.filter((c) => !c.deleted).toArray()
   const now = Date.now()
   let changed = false
@@ -294,5 +309,41 @@ async function dedupeDuplicateRows() {
     if (members.length < 2) continue
     const survivor = members.map((m) => m.id!).sort()[0]
     for (const m of members) if (m.id !== survivor) await db.rules.update(m.id!, { deleted: 1, dirty: 1, updatedAt: now })
+  }
+}
+
+/**
+ * Collapse duplicate starter "Joint account" rows onto the stable default id,
+ * repointing their transactions and bills. Deliberately narrow: it only touches
+ * plain, unowned, shared accounts (the seeded default and simple duplicates),
+ * never a private or personally-owned account a partner shouldn't see merged.
+ */
+async function dedupeAccounts() {
+  const now = Date.now()
+  const accounts = await db.accounts.filter((a) => !a.deleted).toArray()
+  const defaults = accounts.filter(
+    (a) =>
+      a.kind === DEFAULT_ACCOUNT.kind &&
+      norm(a.name) === norm(DEFAULT_ACCOUNT.name) &&
+      !a.ownerId &&
+      (a.visibility === undefined || a.visibility === 'shared'),
+  )
+  const extras = defaults.filter((a) => a.id !== DEFAULT_ACCOUNT.id)
+  if (extras.length === 0) return
+
+  if (!defaults.some((a) => a.id === DEFAULT_ACCOUNT.id)) {
+    // Re-key the most-used duplicate to the stable id, preserving its fields.
+    const counts = await Promise.all(defaults.map((a) => db.transactions.where('accountId').equals(a.id!).count()))
+    const source = defaults
+      .map((a, i) => ({ a, n: counts[i] }))
+      .sort((x, y) => y.n - x.n || (x.a.id! < y.a.id! ? -1 : 1))[0].a
+    await db.accounts.put({ ...source, id: DEFAULT_ACCOUNT.id, deleted: 0, dirty: 1, updatedAt: now })
+  }
+
+  for (const loser of extras) {
+    const from = loser.id!
+    await db.transactions.where('accountId').equals(from).modify({ accountId: DEFAULT_ACCOUNT.id, dirty: 1, updatedAt: now })
+    await db.bills.filter((b) => b.accountId === from).modify({ accountId: DEFAULT_ACCOUNT.id, dirty: 1, updatedAt: now })
+    await db.accounts.update(from, { deleted: 1, dirty: 1, updatedAt: now })
   }
 }

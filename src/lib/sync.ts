@@ -1,6 +1,6 @@
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from './supabase'
-import { db, getSetting, setSetting, delSetting, dedupeCategories, SYNCED_TABLES, type SyncedTable, type SyncedRow } from './db'
+import { db, getSetting, setSetting, delSetting, dedupeSyncedData, SYNCED_TABLES, type SyncedTable, type SyncedRow } from './db'
 import { setOnLocalChange } from './data'
 import { recomputeOwnedBalances } from './accounts'
 
@@ -237,12 +237,12 @@ export async function syncNow() {
   set({ syncing: true, error: undefined })
   try {
     await recomputeOwnedBalances(state.userId)
-    // Fold away any duplicate categories (e.g. a partner's device seeded its
-    // own defaults) before pushing, so the merge propagates to everyone.
-    await dedupeCategories()
+    // Fold away any duplicate categories/accounts (e.g. a partner's device
+    // seeded its own defaults) before pushing, so the merge propagates.
+    await dedupeSyncedData()
     await pushDirty(householdId)
     await pullSince(await getSetting('syncCursor'))
-    await dedupeCategories()
+    await dedupeSyncedData()
     await pushDirty(householdId)
     set({ syncing: false, lastSyncAt: Date.now() })
   } catch (e) {
