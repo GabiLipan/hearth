@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus } from 'lucide-react'
 import { cx } from './ui'
+import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 
 const NAV = [
@@ -24,7 +25,7 @@ const TITLES: Record<string, string> = {
 function Logo() {
   return (
     <div className="flex items-center gap-2.5 px-2">
-      <img src="./icons/icon-192.png" alt="" className="size-8 rounded-lg" />
+      <BrandMark size={30} className="drop-shadow-sm" />
       <span className="text-lg font-bold tracking-tight">Hearth</span>
     </div>
   )
@@ -38,15 +39,15 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh md:flex">
       {/* Desktop / iPad sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col gap-1 border-r border-hairline bg-surface p-4 md:flex">
-        <div className="mb-6 mt-1">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col gap-0.5 border-r border-hairline bg-surface p-3 md:flex">
+        <div className="mb-5 mt-1">
           <Logo />
         </div>
         <button
           onClick={() => setAddOpen(true)}
-          className="mb-4 inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-accent font-medium text-accent-ink transition hover:brightness-110"
+          className="mb-3 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110"
         >
-          <Plus size={18} /> Add transaction
+          <Plus size={17} /> Add transaction
         </button>
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
@@ -55,7 +56,7 @@ export function Layout({ children }: { children: ReactNode }) {
             end={to === '/'}
             className={({ isActive }) =>
               cx(
-                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+                'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors',
                 isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
               )
             }
@@ -96,7 +97,7 @@ export function Layout({ children }: { children: ReactNode }) {
       </header>
 
       {/* Content */}
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-32 pt-4 md:ml-60 md:px-8 md:pb-12 md:pt-8">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-32 pt-4 md:ml-56 md:px-7 md:pb-10 md:pt-6">
         {children}
       </main>
 

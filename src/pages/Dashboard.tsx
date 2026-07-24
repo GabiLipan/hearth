@@ -101,7 +101,7 @@ export default function Dashboard() {
   if (txns && txns.length === 0) {
     return (
       <Empty
-        emoji="👋"
+        icon={Sparkles}
         title="Welcome to Hearth"
         hint="Your shared home for budgets, bills and spending. Add your first transaction with the + button, import a bank statement from the Activity tab — or explore with demo data first."
         action={

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes } from 'react'
-import { X } from 'lucide-react'
+import { X, type LucideIcon } from 'lucide-react'
 import type { Category } from '../lib/db'
+import { CategoryIcon } from './CategoryIcon'
 
 export function cx(...parts: (string | false | undefined | null)[]) {
   return parts.filter(Boolean).join(' ')
@@ -246,12 +247,12 @@ export function CategoryDot({ category, size = 36 }: { category?: Category; size
       style={{
         width: size,
         height: size,
-        fontSize: size * 0.5,
         background: category ? `color-mix(in oklab, var(--series-${category.slot}) 16%, var(--surface-2))` : 'var(--surface-2)',
+        color: category ? `var(--series-${category.slot})` : 'var(--ink-3)',
       }}
       aria-hidden
     >
-      {category?.emoji ?? '❓'}
+      <CategoryIcon icon={category?.icon} emoji={category?.emoji} size={Math.round(size * 0.52)} />
     </span>
   )
 }
@@ -270,11 +271,11 @@ export function Progress({ fraction, tone }: { fraction: number; tone: 'ok' | 'w
 }
 
 /* ---------- Empty state ---------- */
-export function Empty({ emoji, title, hint, action }: { emoji: string; title: string; hint?: string; action?: ReactNode }) {
+export function Empty({ icon: Icon, title, hint, action }: { icon: LucideIcon; title: string; hint?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-2 py-12 text-center">
-      <div className="text-4xl" aria-hidden>
-        {emoji}
+    <div className="flex flex-col items-center gap-2.5 py-12 text-center">
+      <div className="grid size-14 place-items-center rounded-2xl bg-surface-2 text-ink-3" aria-hidden>
+        <Icon size={26} strokeWidth={1.75} />
       </div>
       <p className="font-medium text-ink-2">{title}</p>
       {hint && <p className="max-w-xs text-sm text-ink-3">{hint}</p>}

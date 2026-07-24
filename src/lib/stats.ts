@@ -7,6 +7,7 @@ export interface CategorySlice {
   categoryId: string
   name: string
   emoji: string
+  icon?: string
   slot: number
   totalMinor: number // positive spend
   fraction: number
@@ -27,7 +28,7 @@ export function spendByCategory(txns: Transaction[], categories: Category[], mon
   const slices: CategorySlice[] = [...totals.entries()]
     .map(([categoryId, totalMinor]) => {
       const c = catMap.get(categoryId)!
-      return { categoryId, name: c.name, emoji: c.emoji, slot: c.slot, totalMinor, fraction: totalMinor / grand }
+      return { categoryId, name: c.name, emoji: c.emoji, icon: c.icon, slot: c.slot, totalMinor, fraction: totalMinor / grand }
     })
     .sort((a, b) => b.totalMinor - a.totalMinor)
   if (slices.length <= maxSlices) return slices

@@ -28,7 +28,8 @@ export interface Transaction extends SyncedRow {
 
 export interface Category extends SyncedRow {
   name: string
-  emoji: string
+  emoji: string // legacy / fallback for categories created before icons
+  icon?: string // key into CATEGORY_ICONS (lucide); preferred over emoji
   slot: number // 1..8 -> --series-N color
   kind: 'expense' | 'income'
   sortOrder: number
@@ -191,17 +192,17 @@ export async function migrateIdsToUuid() {
 // same ids, two people seeding defaults and then syncing collapse onto one row
 // instead of creating a duplicate per device (see dedupeCategories).
 const DEFAULT_CATEGORIES: (Omit<Category, 'id'> & { id: string })[] = [
-  { id: 'def-groceries', name: 'Groceries', emoji: '🛒', slot: 2, kind: 'expense', sortOrder: 0 },
-  { id: 'def-home-utilities', name: 'Home & utilities', emoji: '🏠', slot: 5, kind: 'expense', sortOrder: 1 },
-  { id: 'def-transport', name: 'Transport', emoji: '🚗', slot: 1, kind: 'expense', sortOrder: 2 },
-  { id: 'def-dining-out', name: 'Dining out', emoji: '🍽️', slot: 8, kind: 'expense', sortOrder: 3 },
-  { id: 'def-shopping', name: 'Shopping', emoji: '🛍️', slot: 7, kind: 'expense', sortOrder: 4 },
-  { id: 'def-subscriptions', name: 'Subscriptions', emoji: '📺', slot: 6, kind: 'expense', sortOrder: 5 },
-  { id: 'def-health', name: 'Health', emoji: '💊', slot: 4, kind: 'expense', sortOrder: 6 },
-  { id: 'def-fun-leisure', name: 'Fun & leisure', emoji: '🎉', slot: 3, kind: 'expense', sortOrder: 7 },
-  { id: 'def-other', name: 'Other', emoji: '📦', slot: 1, kind: 'expense', sortOrder: 8 },
-  { id: 'def-salary', name: 'Salary', emoji: '💼', slot: 2, kind: 'income', sortOrder: 9 },
-  { id: 'def-other-income', name: 'Other income', emoji: '💰', slot: 4, kind: 'income', sortOrder: 10 },
+  { id: 'def-groceries', name: 'Groceries', emoji: '🛒', icon: 'cart', slot: 2, kind: 'expense', sortOrder: 0 },
+  { id: 'def-home-utilities', name: 'Home & utilities', emoji: '🏠', icon: 'home', slot: 5, kind: 'expense', sortOrder: 1 },
+  { id: 'def-transport', name: 'Transport', emoji: '🚗', icon: 'car', slot: 1, kind: 'expense', sortOrder: 2 },
+  { id: 'def-dining-out', name: 'Dining out', emoji: '🍽️', icon: 'dining', slot: 8, kind: 'expense', sortOrder: 3 },
+  { id: 'def-shopping', name: 'Shopping', emoji: '🛍️', icon: 'bag', slot: 7, kind: 'expense', sortOrder: 4 },
+  { id: 'def-subscriptions', name: 'Subscriptions', emoji: '📺', icon: 'tv', slot: 6, kind: 'expense', sortOrder: 5 },
+  { id: 'def-health', name: 'Health', emoji: '💊', icon: 'health', slot: 4, kind: 'expense', sortOrder: 6 },
+  { id: 'def-fun-leisure', name: 'Fun & leisure', emoji: '🎉', icon: 'fun', slot: 3, kind: 'expense', sortOrder: 7 },
+  { id: 'def-other', name: 'Other', emoji: '📦', icon: 'package', slot: 1, kind: 'expense', sortOrder: 8 },
+  { id: 'def-salary', name: 'Salary', emoji: '💼', icon: 'wallet', slot: 2, kind: 'income', sortOrder: 9 },
+  { id: 'def-other-income', name: 'Other income', emoji: '💰', icon: 'coins', slot: 4, kind: 'income', sortOrder: 10 },
 ]
 
 // The starter account carries a stable id for the same reason the categories
@@ -223,6 +224,13 @@ export async function ensureDefaults() {
   const liveAccounts = await db.accounts.filter((a) => !a.deleted).count()
   if (liveAccounts === 0) {
     await db.accounts.put({ ...DEFAULT_ACCOUNT, deleted: 0, dirty: 1, updatedAt: now })
+  }
+  // Backfill icons onto default categories seeded before icons existed.
+  for (const c of DEFAULT_CATEGORIES) {
+    const existing = await db.categories.get(c.id)
+    if (existing && !existing.deleted && !existing.icon) {
+      await db.categories.update(c.id, { icon: c.icon, dirty: 1, updatedAt: now })
+    }
   }
 }
 

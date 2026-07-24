@@ -10,7 +10,8 @@ import { seedDemoData } from '../lib/demo'
 import { signIn, signUp, signOut, createHousehold, joinHousehold, syncNow } from '../lib/sync'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
-import { Card, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot } from '../components/ui'
+import { Card, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, cx } from '../components/ui'
+import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
 
 function HouseholdSync() {
   const sync = useSyncState()
@@ -521,19 +522,20 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
 
 function CategoryForm({ category, open, onClose }: { category?: Category; open: boolean; onClose: () => void }) {
   const [name, setName] = useState(category?.name ?? '')
-  const [emoji, setEmoji] = useState(category?.emoji ?? '🏷️')
+  const [icon, setIcon] = useState(category?.icon ?? 'tag')
   const [kind, setKind] = useState<'expense' | 'income'>(category?.kind ?? 'expense')
   const canSave = name.trim().length > 0
 
   async function save() {
     if (!canSave) return
     if (category?.id) {
-      await updateRow('categories', category.id, { name: name.trim(), emoji: emoji.trim() || '🏷️' })
+      await updateRow('categories', category.id, { name: name.trim(), icon })
     } else {
       const count = await db.categories.count()
       await createRow<Category>('categories', {
         name: name.trim(),
-        emoji: emoji.trim() || '🏷️',
+        emoji: '🏷️',
+        icon,
         kind,
         slot: (count % 8) + 1,
         sortOrder: count,
@@ -576,13 +578,28 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
       }
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-[5rem_1fr] gap-3">
-          <Field label="Emoji">
-            <TextInput value={emoji} onChange={(e) => setEmoji(e.target.value)} className="text-center text-xl" />
-          </Field>
-          <Field label="Name">
-            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pets" autoFocus />
-          </Field>
+        <Field label="Name">
+          <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pets" autoFocus />
+        </Field>
+        <div>
+          <span className="mb-1.5 block text-sm font-medium text-ink-2">Icon</span>
+          <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8">
+            {CATEGORY_ICON_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setIcon(key)}
+                aria-label={key}
+                aria-pressed={icon === key}
+                className={cx(
+                  'grid aspect-square place-items-center rounded-xl ring-1 transition',
+                  icon === key ? 'bg-accent text-accent-ink ring-accent' : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
+                )}
+              >
+                <CategoryIcon icon={key} size={18} />
+              </button>
+            ))}
+          </div>
         </div>
         {!category && (
           <Segmented

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Check, SkipForward, Wand2 } from 'lucide-react'
+import { Plus, Check, SkipForward, Wand2, CalendarClock } from 'lucide-react'
 import { db, type Bill, type BillFreq } from '../lib/db'
 import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { daysUntil, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from '../lib/dates'
@@ -51,7 +51,7 @@ export default function Bills() {
 
       {active.length === 0 && paused.length === 0 ? (
         <Empty
-          emoji="📅"
+          icon={CalendarClock}
           title="No recurring bills yet"
           hint="Add rent, utilities and subscriptions — Hearth tracks due dates and can record them automatically."
           action={
@@ -249,7 +249,7 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
             </option>
             {expenseCats.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.emoji} {c.name}
+                {c.name}
               </option>
             ))}
           </Select>

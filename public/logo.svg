@@ -1,0 +1,28 @@
+<svg width="180" height="180" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hearth">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#eef1f6"/>
+      <stop offset="1" stop-color="#ccd4e2"/>
+    </linearGradient>
+    <radialGradient id="d" cx="42%" cy="33%" r="80%">
+      <stop offset="0" stop-color="#ffe7ad"/>
+      <stop offset="0.4" stop-color="#ff9d4d"/>
+      <stop offset="1" stop-color="#ef4e3a"/>
+    </radialGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.9"/>
+      <stop offset="0.22" stop-color="#fff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="b" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5"/></filter>
+    <clipPath id="c"><rect width="180" height="180" rx="44"/></clipPath>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect width="180" height="180" fill="url(#g)"/>
+    <path d="M90 50 C110 78 118 94 118 112 a28 28 0 0 1 -56 0 c0 -16 8 -34 28 -62 z" fill="#ff7a45" opacity="0.35" filter="url(#b)"/>
+    <path d="M90 50 C110 78 118 94 118 112 a28 28 0 0 1 -56 0 c0 -16 8 -34 28 -62 z" fill="url(#d)"/>
+    <ellipse cx="79" cy="99" rx="8" ry="13" fill="#fff" opacity="0.5"/>
+    <path d="M0 0 h180 v54 q-90 24 -180 0 z" fill="url(#s)"/>
+  </g>
+  <rect x="1" y="1" width="178" height="178" rx="43" fill="none" stroke="#fff" stroke-opacity="0.55"/>
+</svg>

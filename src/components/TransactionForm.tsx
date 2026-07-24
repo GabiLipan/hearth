@@ -13,6 +13,7 @@ import { fmtFullDate } from '../lib/dates'
 import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { useApp } from '../state/AppContext'
 import { Sheet, Field, TextInput, Select, Segmented, Button, cx } from './ui'
+import { CategoryIcon } from './CategoryIcon'
 
 export function TransactionForm({
   open,
@@ -261,7 +262,7 @@ export function TransactionForm({
                     : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
                 )}
               >
-                <span aria-hidden>{c.emoji}</span> {c.name}
+                <CategoryIcon icon={c.icon} emoji={c.emoji} size={16} /> {c.name}
               </button>
             ))}
           </div>

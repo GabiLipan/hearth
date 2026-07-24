@@ -7,6 +7,7 @@ import { thisMonthKey, shiftMonth, monthLabel } from '../lib/dates'
 import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
 import { useApp } from '../state/AppContext'
 import { Card, Segmented, Empty } from '../components/ui'
+import { CategoryIcon } from '../components/CategoryIcon'
 import { CategoryDonut, SpendBars, IncomeSpendBars, NetLine } from '../components/charts'
 
 export default function Reports() {
@@ -23,7 +24,7 @@ export default function Reports() {
   const totals = useMemo(() => monthTotals(txns ?? [], month), [txns, month])
 
   if (txns && txns.length === 0) {
-    return <Empty emoji="📊" title="Nothing to report yet" hint="Add or import some transactions and your charts will appear here." />
+    return <Empty icon={ChartPie} title="Nothing to report yet" hint="Add or import some transactions and your charts will appear here." />
   }
 
   return (
@@ -84,7 +85,14 @@ export default function Reports() {
             <tbody>
               {slices.map((s) => (
                 <tr key={s.categoryId} className="border-b border-hairline last:border-0">
-                  <td className="py-2">{s.emoji} {s.name}</td>
+                  <td className="py-2">
+                    <span className="inline-flex items-center gap-2">
+                      <span style={{ color: `var(--series-${s.slot})` }}>
+                        <CategoryIcon icon={s.icon} emoji={s.emoji} size={16} />
+                      </span>
+                      {s.name}
+                    </span>
+                  </td>
                   <td className="py-2 text-right tabular">{money(s.totalMinor)}</td>
                   <td className="py-2 text-right text-ink-3 tabular">{Math.round(s.fraction * 100)}%</td>
                 </tr>

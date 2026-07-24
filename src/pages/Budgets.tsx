@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Target } from 'lucide-react'
 import { db, type Category, type Budget } from '../lib/db'
 import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { thisMonthKey, shiftMonth, monthLabel, monthKey } from '../lib/dates'
@@ -106,7 +106,7 @@ export default function Budgets() {
 
       {budgeted.length === 0 ? (
         <Empty
-          emoji="🎯"
+          icon={Target}
           title={mine ? 'No personal budgets yet' : 'No budgets yet'}
           hint={
             mine

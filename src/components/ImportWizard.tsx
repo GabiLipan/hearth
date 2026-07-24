@@ -319,7 +319,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                       .filter((c) => c.kind === 'expense')
                       .map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.emoji} {c.name}
+                          {c.name}
                         </option>
                       ))}
                   </select>

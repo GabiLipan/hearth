@@ -8,6 +8,7 @@ import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
 import { computeBalance } from '../lib/accounts'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Progress, cx } from './ui'
+import { CategoryIcon } from './CategoryIcon'
 import { CategoryDonut, SpendBars } from './charts'
 
 export interface HomeData {
@@ -28,11 +29,11 @@ export function HeroWidget({ data }: { data: HomeData }) {
   const budgetTotal = data.budgets.reduce((s, b) => (b.ownerId ? s : s + b.amountMinor), 0)
   const frac = budgetTotal > 0 ? totals.spend / budgetTotal : 0
   return (
-    <Card className="p-4 md:p-5">
+    <Card className="p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-ink-3">{monthLabel(month())} · spent so far</p>
-          <p className="mt-0.5 text-3xl font-bold tracking-tight tabular md:text-4xl">{money(totals.spend)}</p>
+          <p className="mt-0.5 text-3xl font-bold tracking-tight tabular">{money(totals.spend)}</p>
           {budgetTotal > 0 && (
             <p className="mt-0.5 text-sm text-ink-2">
               of {money(budgetTotal, { hideDecimals: true })}
@@ -106,8 +107,8 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
           const barColor = over ? 'var(--critical)' : frac > 0.85 ? 'var(--warning)' : 'var(--accent)'
           return (
             <li key={cat.id} className="flex items-center gap-2.5">
-              <span className="w-5 text-center text-sm" aria-hidden>
-                {cat.emoji}
+              <span className="grid w-5 shrink-0 place-items-center" style={{ color: `var(--series-${cat.slot})` }} aria-hidden>
+                <CategoryIcon icon={cat.icon} emoji={cat.emoji} size={16} />
               </span>
               <span className="w-24 truncate text-sm text-ink-2 sm:w-32">{cat.name}</span>
               <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-surface-2">

@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Search, Upload, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, Upload, ChevronLeft, ChevronRight, Receipt } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
 import { notDeleted } from '../lib/data'
 import { thisMonthKey, shiftMonth, monthLabel, monthKey, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Empty, TextInput, cx } from '../components/ui'
+import { CategoryIcon } from '../components/CategoryIcon'
 import { TransactionForm } from '../components/TransactionForm'
 import { ImportWizard } from '../components/ImportWizard'
 
@@ -100,11 +101,11 @@ export default function Activity() {
             key={c.id}
             onClick={() => setCatFilter(catFilter === c.id ? null : c.id!)}
             className={cx(
-              'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition',
+              'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition',
               catFilter === c.id ? 'bg-ink text-page ring-ink' : 'bg-surface text-ink-2 ring-hairline',
             )}
           >
-            {c.emoji} {c.name}
+            <CategoryIcon icon={c.icon} emoji={c.emoji} size={15} /> {c.name}
           </button>
         ))}
       </div>
@@ -120,7 +121,7 @@ export default function Activity() {
       {/* Grouped list */}
       {filtered.length === 0 ? (
         <Empty
-          emoji="🧾"
+          icon={Receipt}
           title={searching ? 'Nothing matches your search' : 'No transactions this month'}
           hint={searching ? undefined : 'Add one with the + button, or import a bank statement CSV.'}
         />
@@ -135,9 +136,9 @@ export default function Activity() {
                     <li key={t.id}>
                       <button
                         onClick={() => setEditing(t)}
-                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50"
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 md:gap-2.5 md:px-3.5 md:py-2"
                       >
-                        <CategoryDot category={catMap.get(t.categoryId)} />
+                        <CategoryDot category={catMap.get(t.categoryId)} size={34} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{t.payee}</p>
                           <p className="truncate text-sm text-ink-3">
