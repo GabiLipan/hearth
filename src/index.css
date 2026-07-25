@@ -2,6 +2,16 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/**
+ * `desktop:` — a wide screen driven by a precise pointer.
+ *
+ * Layout (column counts, sidebar, table vs. card list) keys off plain `md:`/`lg:`
+ * width breakpoints. Anything that sets a *hit target* — control heights, row
+ * padding, chip sizes — keys off this instead, so a tablet gets the roomy
+ * multi-column layout without inheriting hit areas meant for a cursor.
+ */
+@custom-variant desktop (@media (min-width: 768px) and (pointer: fine));
+
 /* ---------- Design tokens ---------- */
 :root {
   color-scheme: light;
@@ -26,6 +36,10 @@
   --series-6: #e34948;
   --series-7: #e87ba4;
   --series-8: #eb6834;
+  --series-9: #0b8ba3;
+  --series-10: #a344c4;
+  --series-11: #6b8a15;
+  --series-12: #8a6244;
   /* status (fixed, both modes) */
   --good: #0ca30c;
   --good-text: #006300;
@@ -55,6 +69,10 @@
   --series-6: #e66767;
   --series-7: #d55181;
   --series-8: #d95926;
+  --series-9: #29a8c4;
+  --series-10: #b866d8;
+  --series-11: #8fae2e;
+  --series-12: #a8794f;
   --good-text: #0ca30c;
   --critical-text: #e66767;
 }
@@ -79,6 +97,10 @@
   --color-series-6: var(--series-6);
   --color-series-7: var(--series-7);
   --color-series-8: var(--series-8);
+  --color-series-9: var(--series-9);
+  --color-series-10: var(--series-10);
+  --color-series-11: var(--series-11);
+  --color-series-12: var(--series-12);
   --color-good: var(--good);
   --color-good-text: var(--good-text);
   --color-warning: var(--warning);

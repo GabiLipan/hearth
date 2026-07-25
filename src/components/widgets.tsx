@@ -23,35 +23,78 @@ export interface HomeData {
 const month = () => thisMonthKey()
 
 /* ---------- Month summary hero ---------- */
+
+/** One figure in the desktop stat strip. */
+function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
+  return (
+    <div className="min-w-0 px-4 first:pl-0 last:pr-0">
+      <p className="text-xs text-ink-3">{label}</p>
+      <p
+        className={cx(
+          'mt-0.5 truncate text-lg font-bold tracking-tight tabular',
+          tone === 'good' && 'text-good-text',
+          tone === 'bad' && 'text-critical-text',
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  )
+}
+
 export function HeroWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
   const totals = useMemo(() => monthTotals(data.txns, month()), [data.txns])
   const budgetTotal = data.budgets.reduce((s, b) => (b.ownerId ? s : s + b.amountMinor), 0)
   const frac = budgetTotal > 0 ? totals.spend / budgetTotal : 0
+  const over = frac > 1
+  const bar = budgetTotal > 0 && <Progress fraction={frac} tone={over ? 'over' : frac > 0.85 ? 'warn' : 'ok'} />
+
   return (
-    <Card className="p-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <Card className="p-4 md:p-3">
+      {/* Phone: one headline figure with the detail stacked underneath. */}
+      <div className="flex flex-wrap items-end justify-between gap-3 md:hidden">
         <div>
           <p className="text-sm text-ink-3">{monthLabel(month())} · spent so far</p>
           <p className="mt-0.5 text-3xl font-bold tracking-tight tabular">{money(totals.spend)}</p>
           {budgetTotal > 0 && (
             <p className="mt-0.5 text-sm text-ink-2">
               of {money(budgetTotal, { hideDecimals: true })}
-              {frac <= 1 ? (
-                <span className="font-medium text-good-text"> · {money(budgetTotal - totals.spend)} left</span>
-              ) : (
+              {over ? (
                 <span className="font-medium text-critical-text"> · {money(totals.spend - budgetTotal)} over</span>
+              ) : (
+                <span className="font-medium text-good-text"> · {money(budgetTotal - totals.spend)} left</span>
               )}
             </p>
           )}
         </div>
-        <div className="min-w-36 flex-1 md:max-w-56">
+        <div className="min-w-36 flex-1">
           <div className="mb-1.5 flex justify-between text-xs text-ink-3">
             <span>In {money(totals.income, { compact: true })}</span>
             <span>Net {money(totals.net, { sign: true, compact: true })}</span>
           </div>
-          {budgetTotal > 0 && <Progress fraction={frac} tone={frac > 1 ? 'over' : frac > 0.85 ? 'warn' : 'ok'} />}
+          {bar}
         </div>
+      </div>
+
+      {/* Desktop: a strip of figures across the full width — the numbers that
+          were buried in a sub-line each get their own column. */}
+      <div className="hidden md:block">
+        <p className="text-xs text-ink-3">{monthLabel(month())}</p>
+        <div className="mt-1 flex flex-wrap items-start divide-x divide-hairline">
+          <Stat label="Spent so far" value={money(totals.spend)} />
+          {budgetTotal > 0 && <Stat label="Budgeted" value={money(budgetTotal, { hideDecimals: true })} />}
+          {budgetTotal > 0 && (
+            <Stat
+              label={over ? 'Over budget' : 'Left to spend'}
+              value={money(over ? totals.spend - budgetTotal : budgetTotal - totals.spend)}
+              tone={over ? 'bad' : 'good'}
+            />
+          )}
+          <Stat label="Income" value={money(totals.income)} />
+          <Stat label="Net" value={money(totals.net, { sign: true })} tone={totals.net < 0 ? 'bad' : 'good'} />
+        </div>
+        {budgetTotal > 0 && <div className="mt-2.5">{bar}</div>}
       </div>
     </Card>
   )
@@ -81,7 +124,7 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
     .sort((a, b) => b.spent / b.budget - a.spent / a.budget)
   if (rows.length === 0) {
     return (
-      <Card className="p-4">
+      <Card className="p-4 md:p-3">
         <p className="text-sm text-ink-3">
           No budgets yet — set some in the <Link to="/budgets" className="text-accent">Budgets</Link> tab and they'll
           appear here.
@@ -92,26 +135,28 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
   const totalBudget = rows.reduce((s, r) => s + r.budget, 0)
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0)
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-baseline justify-between gap-2">
-        <h3 className="font-semibold">Budgets</h3>
+    <Card className="p-4 md:p-3">
+      <div className="mb-3 flex items-baseline justify-between gap-2 md:mb-2">
+        <h3 className="font-semibold md:text-sm">Budgets</h3>
         <p className="text-sm text-ink-2 tabular">
           <span className="font-semibold text-ink">{money(totalSpent, { compact: true })}</span> of{' '}
           {money(totalBudget, { compact: true, hideDecimals: true })}
         </p>
       </div>
-      <ul className="space-y-2.5">
+      {/* This widget spans the full page width, so on a wide screen the rows
+          split into columns — a bar 1,000px long is harder to read, not easier. */}
+      <ul className="grid gap-2.5 md:gap-x-6 md:gap-y-1.5 lg:grid-cols-2 min-[1800px]:grid-cols-3">
         {rows.map(({ cat, budget, spent: catSpent }) => {
           const frac = catSpent / budget
           const over = frac > 1
           const barColor = over ? 'var(--critical)' : frac > 0.85 ? 'var(--warning)' : 'var(--accent)'
           return (
-            <li key={cat.id} className="flex items-center gap-2.5">
+            <li key={cat.id} className="flex items-center gap-2.5 md:gap-2">
               <span className="grid w-5 shrink-0 place-items-center" style={{ color: `var(--series-${cat.slot})` }} aria-hidden>
-                <CategoryIcon icon={cat.icon} emoji={cat.emoji} size={16} />
+                <CategoryIcon icon={cat.icon} emoji={cat.emoji} size={15} />
               </span>
               <span className="w-24 truncate text-sm text-ink-2 sm:w-32">{cat.name}</span>
-              <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
+              <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-surface-2 md:h-1.5">
                 <span
                   className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500"
                   style={{ width: `${Math.min(100, frac * 100)}%`, background: barColor }}
@@ -130,7 +175,7 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
           )
         })}
       </ul>
-      <p className="mt-3 text-xs text-ink-3">
+      <p className="mt-3 text-xs text-ink-3 md:mt-2">
         Bar = spent · line = where today sits in the month · right column = left (or over)
       </p>
     </Card>
@@ -145,9 +190,9 @@ export function AccountsWidget({ data }: { data: HomeData }) {
     a.ownerId && a.ownerId !== data.userId ? (a.balanceMinor ?? 0) : computeBalance(a, data.txns)
   const total = data.accounts.reduce((s, a) => s + balanceOf(a), 0)
   return (
-    <Card className="p-4">
+    <Card className="p-4 md:p-3">
       <div className="mb-2 flex items-baseline justify-between">
-        <h3 className="font-semibold">Accounts</h3>
+        <h3 className="font-semibold md:text-sm">Accounts</h3>
         <span className="text-sm font-semibold tabular">{money(total)}</span>
       </div>
       <ul className="divide-y divide-hairline">
@@ -155,7 +200,7 @@ export function AccountsWidget({ data }: { data: HomeData }) {
           const vis = a.visibility ?? 'shared'
           const bal = balanceOf(a)
           return (
-            <li key={a.id} className="flex items-center gap-2 py-2">
+            <li key={a.id} className="flex items-center gap-2 py-2 md:py-1">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
                 {a.name}
                 {vis === 'private' && <Lock size={12} className="ml-1.5 inline text-ink-3" />}
@@ -177,8 +222,8 @@ export function DonutWidget({ data }: { data: HomeData }) {
   const slices = useMemo(() => spendByCategory(data.txns, data.categories, month(), 6), [data.txns, data.categories])
   if (slices.length === 0) return null
   return (
-    <Card className="p-4">
-      <h3 className="mb-2 font-semibold">Where it went</h3>
+    <Card className="p-4 md:p-3">
+      <h3 className="mb-2 font-semibold md:mb-1.5 md:text-sm">Where it went</h3>
       <CategoryDonut slices={slices} height={180} centerLabel={{ title: 'spent', value: money(totals.spend, { compact: true }) }} />
     </Card>
   )
@@ -188,8 +233,8 @@ export function DonutWidget({ data }: { data: HomeData }) {
 export function TrendWidget({ data }: { data: HomeData }) {
   const series = useMemo(() => monthlySeries(data.txns, data.categories, 6), [data.txns, data.categories])
   return (
-    <Card className="p-4">
-      <h3 className="mb-2 font-semibold">Spending, last 6 months</h3>
+    <Card className="p-4 md:p-3">
+      <h3 className="mb-2 font-semibold md:mb-1.5 md:text-sm">Spending, last 6 months</h3>
       <SpendBars data={series} height={170} />
     </Card>
   )
@@ -205,9 +250,9 @@ export function BillsWidget({ data }: { data: HomeData }) {
     .slice(0, 5)
   if (upcoming.length === 0) return null
   return (
-    <Card className="p-4">
+    <Card className="p-4 md:p-3">
       <div className="mb-1 flex items-baseline justify-between">
-        <h3 className="font-semibold">Coming up</h3>
+        <h3 className="font-semibold md:text-sm">Coming up</h3>
         <Link to="/bills" className="flex items-center gap-1 text-sm font-medium text-accent">
           All bills <ArrowRight size={13} />
         </Link>
@@ -216,8 +261,8 @@ export function BillsWidget({ data }: { data: HomeData }) {
         {upcoming.map((b) => {
           const days = daysUntil(b.nextDue)
           return (
-            <li key={b.id} className="flex items-center gap-2.5 py-2">
-              <CategoryDot category={catMap.get(b.categoryId)} size={30} />
+            <li key={b.id} className="flex items-center gap-2.5 py-2 md:gap-2 md:py-1">
+              <CategoryDot category={catMap.get(b.categoryId)} size={30} className="md:[--dot:24px]" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{b.name}</p>
                 <p className="text-xs text-ink-3">
@@ -243,17 +288,17 @@ export function RecentWidget({ data }: { data: HomeData }) {
   )
   if (recent.length === 0) return null
   return (
-    <Card className="p-4">
+    <Card className="p-4 md:p-3">
       <div className="mb-1 flex items-baseline justify-between">
-        <h3 className="font-semibold">Recent</h3>
+        <h3 className="font-semibold md:text-sm">Recent</h3>
         <Link to="/activity" className="flex items-center gap-1 text-sm font-medium text-accent">
           All activity <ArrowRight size={13} />
         </Link>
       </div>
       <ul className="divide-y divide-hairline">
         {recent.map((t) => (
-          <li key={t.id} className="flex items-center gap-2.5 py-2">
-            <CategoryDot category={catMap.get(t.categoryId)} size={30} />
+          <li key={t.id} className="flex items-center gap-2.5 py-2 md:gap-2 md:py-1">
+            <CategoryDot category={catMap.get(t.categoryId)} size={30} className="md:[--dot:24px]" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{t.payee}</p>
               <p className="text-xs text-ink-3">{fmtDay(t.date)}</p>

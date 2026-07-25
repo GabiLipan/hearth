@@ -184,7 +184,7 @@ export function CategoryDonut({
   const otherColor = c.ink3
   const colorOf = (s: CategorySlice) => (s.categoryId === OTHER_SLICE_ID ? otherColor : c.slot(s.slot))
   return (
-    <div className="grid items-center gap-2 sm:grid-cols-[minmax(0,220px)_1fr]">
+    <div className="grid items-center gap-3 sm:grid-cols-[220px_minmax(0,1fr)]">
       <div className="relative mx-auto w-full max-w-[220px]" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -197,6 +197,10 @@ export function CategoryDonut({
               paddingAngle={2}
               strokeWidth={2}
               stroke={c.surface}
+              // Recharts 3.x leaves a padded pie frozen at the first frame of
+              // its entrance animation, so the ring never appears. The donut is
+              // a static summary — draw it outright.
+              isAnimationActive={false}
             >
               {slices.map((s) => (
                 <Cell key={s.categoryId} fill={colorOf(s)} />
@@ -223,7 +227,9 @@ export function CategoryDonut({
           </div>
         )}
       </div>
-      <ul className="space-y-1.5">
+      {/* The legend wraps into columns on a wide card rather than stretching
+          each row until the name and its figure sit an inch apart. */}
+      <ul className="grid gap-x-6 gap-y-1.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))]">
         {slices.map((s) => (
           <li key={s.categoryId} className="flex items-center gap-2.5 text-sm">
             <span className="size-3 shrink-0 rounded-[4px]" style={{ background: colorOf(s) }} />

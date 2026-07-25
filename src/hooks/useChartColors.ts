@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useApp } from '../state/AppContext'
+import { SLOT_COUNT } from '../lib/palette'
 
 /**
  * Resolves the design-token CSS variables to concrete hex values for Recharts,
@@ -11,8 +12,9 @@ export function useChartColors() {
     const css = getComputedStyle(document.documentElement)
     const v = (name: string) => css.getPropertyValue(name).trim()
     return {
+      // Charts cycle the first eight; categories may sit on any of the twelve.
       series: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => v(`--series-${i}`)),
-      slot: (n: number) => v(`--series-${((n - 1) % 8) + 1}`),
+      slot: (n: number) => v(`--series-${((n - 1) % SLOT_COUNT) + 1}`),
       grid: v('--grid'),
       baseline: v('--baseline'),
       ink: v('--ink'),

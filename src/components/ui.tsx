@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes } from 'react'
-import { X, type LucideIcon } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react'
 import type { Category } from '../lib/db'
 import { CategoryIcon } from './CategoryIcon'
 
@@ -13,7 +13,7 @@ export function Card({ children, className, onClick }: { children: ReactNode; cl
     <div
       onClick={onClick}
       className={cx(
-        'rounded-2xl bg-surface ring-1 ring-hairline shadow-[0_1px_2px_rgba(0,0,0,0.04)]',
+        'rounded-2xl bg-surface ring-1 ring-hairline shadow-[0_1px_2px_rgba(0,0,0,0.04)] md:rounded-xl',
         onClick && 'cursor-pointer transition-transform active:scale-[0.99]',
         className,
       )}
@@ -25,8 +25,8 @@ export function Card({ children, className, onClick }: { children: ReactNode; cl
 
 export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="mb-2 mt-6 flex items-baseline justify-between px-1 first:mt-0">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-3">{children}</h2>
+    <div className="mb-2 mt-6 flex items-baseline justify-between px-1 first:mt-0 md:mb-1.5 md:mt-5">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-3 md:text-xs">{children}</h2>
       {action}
     </div>
   )
@@ -42,11 +42,12 @@ export function Button({ variant = 'primary', size = 'md', className, ...rest }:
   return (
     <button
       className={cx(
-        'inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition-colors',
+        'inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition-colors md:rounded-lg',
         'disabled:opacity-40 disabled:pointer-events-none',
-        size === 'sm' && 'h-8 px-3 text-sm',
-        size === 'md' && 'h-10 px-4 text-sm',
-        size === 'lg' && 'h-12 px-5 text-base',
+        // Touch targets on mobile, tighter hit areas for a precise cursor.
+        size === 'sm' && 'h-8 px-3 text-sm desktop:h-7 desktop:px-2.5 desktop:text-xs',
+        size === 'md' && 'h-10 px-4 text-sm desktop:h-9 desktop:px-3.5',
+        size === 'lg' && 'h-12 px-5 text-base desktop:h-10 desktop:px-4 desktop:text-sm',
         variant === 'primary' && 'bg-accent text-accent-ink hover:brightness-110 active:brightness-95',
         variant === 'ghost' && 'text-ink-2 hover:bg-surface-2',
         variant === 'subtle' && 'bg-surface-2 text-ink hover:brightness-97 dark:hover:brightness-110',
@@ -62,7 +63,7 @@ export function Button({ variant = 'primary', size = 'md', className, ...rest }:
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-ink-2">{label}</span>
+      <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-xs text-ink-3">{hint}</span>}
     </label>
@@ -75,6 +76,7 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       className={cx(
         'h-11 w-full rounded-xl bg-surface-2 px-3.5 text-ink placeholder:text-ink-3',
+        'desktop:h-9 md:rounded-lg desktop:px-3 md:text-sm',
         'ring-1 ring-transparent outline-none focus:ring-2 focus:ring-accent/60 transition-shadow',
         className,
       )}
@@ -89,6 +91,7 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
     <select
       className={cx(
         'h-11 w-full appearance-none rounded-xl bg-surface-2 px-3.5 text-ink',
+        'desktop:h-9 md:rounded-lg desktop:px-3 md:text-sm',
         'ring-1 ring-transparent outline-none focus:ring-2 focus:ring-accent/60',
         className,
       )}
@@ -110,7 +113,7 @@ export function Segmented<T extends string>({
   className?: string
 }) {
   return (
-    <div className={cx('flex rounded-xl bg-surface-2 p-1', className)} role="tablist">
+    <div className={cx('flex rounded-xl bg-surface-2 p-1 md:rounded-lg md:p-0.5', className)} role="tablist">
       {options.map((o) => (
         <button
           key={o.value}
@@ -118,7 +121,7 @@ export function Segmented<T extends string>({
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
           className={cx(
-            'flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+            'flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:rounded-md md:px-2.5 desktop:py-1',
             value === o.value ? 'bg-surface text-ink shadow-sm ring-1 ring-hairline' : 'text-ink-3 hover:text-ink-2',
           )}
         >
@@ -204,12 +207,12 @@ export function Sheet({
             // Always leave a strip of backdrop above the sheet so tap-to-dismiss
             // has a target, even when the keyboard has shrunk the viewport.
             'animate-sheet relative flex max-h-[92%] w-full flex-col overflow-hidden bg-surface',
-            'rounded-t-3xl sm:rounded-3xl sm:shadow-2xl',
-            wide ? 'sm:max-w-2xl' : 'sm:max-w-md',
+            'rounded-t-3xl sm:rounded-3xl sm:shadow-2xl md:rounded-2xl',
+            wide ? 'sm:max-w-2xl lg:max-w-3xl' : 'sm:max-w-md lg:max-w-lg',
           )}
         >
-          <div className="flex items-center justify-between px-5 pb-2 pt-4">
-            <h2 className="text-lg font-semibold">{title}</h2>
+          <div className="flex items-center justify-between px-5 pb-2 pt-4 md:px-4 md:pt-3">
+            <h2 className="text-lg font-semibold md:text-base">{title}</h2>
             <button
               onClick={onClose}
               aria-label="Close"
@@ -220,7 +223,7 @@ export function Sheet({
           </div>
           <div
             className={cx(
-              'overflow-y-auto px-5',
+              'overflow-y-auto px-5 md:px-4',
               footer ? 'pb-3' : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]',
             )}
           >
@@ -229,7 +232,7 @@ export function Sheet({
           {footer && (
             // Real bottom padding (not just the safe-area inset, which is 0 on
             // desktop) so the action never jams against the sheet's edge.
-            <div className="border-t border-hairline bg-surface px-5 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
+            <div className="border-t border-hairline bg-surface px-5 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-4 md:pb-3.5">
               {footer}
             </div>
           )}
@@ -240,15 +243,24 @@ export function Sheet({
 }
 
 /* ---------- Category chip / icon ---------- */
-export function CategoryDot({ category, size = 36 }: { category?: Category; size?: number }) {
+/**
+ * Sized through the `--dot` custom property rather than a fixed pixel prop, so
+ * callers can shrink it per breakpoint (e.g. `md:[--dot:26px]`) — desktop rows
+ * are denser than the touch-sized ones on a phone. The glyph scales with it.
+ */
+export function CategoryDot({ category, size = 36, className }: { category?: Category; size?: number; className?: string }) {
+  const colour = category ? `var(--series-${category.slot})` : 'var(--ink-3)'
   return (
     <span
-      className="grid shrink-0 place-items-center rounded-full"
+      className={cx(
+        'grid shrink-0 place-items-center rounded-full',
+        'size-[var(--dot)] [&_svg]:size-[calc(var(--dot)*0.52)]',
+        className,
+      )}
       style={{
-        width: size,
-        height: size,
-        background: category ? `color-mix(in oklab, var(--series-${category.slot}) 16%, var(--surface-2))` : 'var(--surface-2)',
-        color: category ? `var(--series-${category.slot})` : 'var(--ink-3)',
+        ['--dot' as string]: `${size}px`,
+        background: category ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))` : 'var(--surface-2)',
+        color: colour,
       }}
       aria-hidden
     >
@@ -258,10 +270,10 @@ export function CategoryDot({ category, size = 36 }: { category?: Category; size
 }
 
 /* ---------- Progress bar (budgets) ---------- */
-export function Progress({ fraction, tone }: { fraction: number; tone: 'ok' | 'warn' | 'over' }) {
+export function Progress({ fraction, tone, className }: { fraction: number; tone: 'ok' | 'warn' | 'over'; className?: string }) {
   const color = tone === 'ok' ? 'var(--accent)' : tone === 'warn' ? 'var(--warning)' : 'var(--critical)'
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-surface-2">
+    <div className={cx('h-2 w-full overflow-hidden rounded-full bg-surface-2 md:h-1.5', className)}>
       <div
         className="h-full rounded-full transition-[width] duration-500"
         style={{ width: `${Math.min(100, Math.max(2, fraction * 100))}%`, background: color }}
@@ -273,13 +285,74 @@ export function Progress({ fraction, tone }: { fraction: number; tone: 'ok' | 'w
 /* ---------- Empty state ---------- */
 export function Empty({ icon: Icon, title, hint, action }: { icon: LucideIcon; title: string; hint?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-2.5 py-12 text-center">
-      <div className="grid size-14 place-items-center rounded-2xl bg-surface-2 text-ink-3" aria-hidden>
+    <div className="flex flex-col items-center gap-2.5 py-12 text-center md:gap-2 md:py-10">
+      <div className="grid size-14 place-items-center rounded-2xl bg-surface-2 text-ink-3 md:size-12 md:rounded-xl" aria-hidden>
         <Icon size={26} strokeWidth={1.75} />
       </div>
       <p className="font-medium text-ink-2">{title}</p>
-      {hint && <p className="max-w-xs text-sm text-ink-3">{hint}</p>}
+      {hint && <p className="max-w-xs text-sm text-ink-3 md:max-w-md">{hint}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>
   )
+}
+
+/* ---------- Toolbar ---------- */
+/**
+ * The row of controls that sits above a page's content. Centred and roomy on a
+ * phone, left-aligned and compact under a cursor — every page uses this so the
+ * two form factors stay consistent with each other.
+ */
+export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cx('mb-3 flex flex-wrap items-center gap-2 md:mb-2.5 md:gap-1.5', className)}>{children}</div>
+  )
+}
+
+/* ---------- Month stepper ---------- */
+export function MonthStepper({
+  month,
+  onChange,
+  label,
+  canGoForward = true,
+}: {
+  month: string
+  onChange: (next: string) => void
+  /** Formats the month key for display. */
+  label: (key: string) => string
+  canGoForward?: boolean
+}) {
+  const step = (delta: number) => {
+    const [y, m] = month.split('-').map(Number)
+    const d = new Date(y, m - 1 + delta, 1)
+    onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return (
+    <div className="flex h-11 items-center rounded-xl bg-surface-2 desktop:h-9 md:rounded-lg">
+      <button
+        className="grid h-full w-9 place-items-center rounded-l-xl text-ink-2 hover:text-ink desktop:w-7 md:rounded-l-lg"
+        aria-label="Previous month"
+        onClick={() => step(-1)}
+      >
+        <ChevronLeft size={17} />
+      </button>
+      <span className="w-32 text-center text-sm font-semibold md:w-28">{label(month)}</span>
+      <button
+        className="grid h-full w-9 place-items-center rounded-r-xl text-ink-2 hover:text-ink disabled:opacity-30 desktop:w-7 md:rounded-r-lg"
+        aria-label="Next month"
+        disabled={!canGoForward}
+        onClick={() => step(1)}
+      >
+        <ChevronRight size={17} />
+      </button>
+    </div>
+  )
+}
+
+/* ---------- Dense table (desktop) ---------- */
+/** Shared classes so every desktop table in the app reads as one component. */
+export const table = {
+  head: 'border-b border-hairline text-left text-xs font-medium uppercase tracking-wide text-ink-3',
+  th: 'py-1.5 font-medium',
+  row: 'border-b border-hairline last:border-0 hover:bg-surface-2/50',
+  cell: 'py-2 desktop:py-1.5',
 }

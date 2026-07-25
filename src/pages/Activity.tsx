@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Search, Upload, ChevronLeft, ChevronRight, Receipt } from 'lucide-react'
+import { Search, Upload, Receipt } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
 import { notDeleted } from '../lib/data'
-import { thisMonthKey, shiftMonth, monthLabel, monthKey, fmtDay } from '../lib/dates'
+import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { Card, CategoryDot, Empty, TextInput, cx } from '../components/ui'
+import { Card, CategoryDot, Empty, TextInput, Toolbar, MonthStepper, Button, table, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { TransactionForm } from '../components/TransactionForm'
 import { ImportWizard } from '../components/ImportWizard'
@@ -20,6 +20,8 @@ export default function Activity() {
 
   const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id!, c])), [categories])
+  const accounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
+  const accMap = useMemo(() => new Map(accounts.map((a) => [a.id!, a])), [accounts])
   const searching = query.trim().length > 0
 
   const txns = useLiveQuery(async () => {
@@ -50,48 +52,37 @@ export default function Activity() {
 
   return (
     <div>
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 flex-1 basis-52">
-          <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3" />
+      <Toolbar>
+        <div className="relative min-w-0 flex-1 basis-52 md:max-w-72 md:flex-none">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
           <TextInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search all transactions"
-            className="pl-9"
+            className="pl-9! md:pl-8!"
           />
         </div>
         {!searching && (
-          <div className="flex h-11 items-center rounded-xl bg-surface-2">
-            <button className="px-2.5 text-ink-2 hover:text-ink" aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}>
-              <ChevronLeft size={18} />
-            </button>
-            <span className="w-32 text-center text-sm font-semibold">{monthLabel(month)}</span>
-            <button
-              className="px-2.5 text-ink-2 hover:text-ink disabled:opacity-30"
-              aria-label="Next month"
-              disabled={month >= thisMonthKey()}
-              onClick={() => setMonth(shiftMonth(month, 1))}
-            >
-              <ChevronRight size={18} />
-            </button>
-          </div>
+          <MonthStepper month={month} onChange={setMonth} label={monthLabel} canGoForward={month < thisMonthKey()} />
         )}
-        <button
-          onClick={() => setImportOpen(true)}
-          className="inline-flex h-11 items-center gap-2 rounded-xl bg-surface-2 px-4 text-sm font-medium text-ink hover:brightness-97 dark:hover:brightness-110"
-        >
-          <Upload size={16} /> Import CSV
-        </button>
-      </div>
+        <Button variant="subtle" onClick={() => setImportOpen(true)}>
+          <Upload size={15} /> Import CSV
+        </Button>
+        {filtered.length > 0 && (
+          <p className="ml-auto hidden text-sm text-ink-3 md:block">
+            {filtered.length} transaction{filtered.length === 1 ? '' : 's'}
+            {monthSpend > 0 && <> · {money(monthSpend)} spent</>}
+          </p>
+        )}
+      </Toolbar>
 
       {/* Category filter chips */}
-      <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 py-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
+      <div className="no-scrollbar -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 py-1 md:mx-0 md:mb-2 md:flex-wrap md:gap-1.5 md:overflow-visible md:px-0">
         <button
           onClick={() => setCatFilter(null)}
           className={cx(
-            'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition',
-            catFilter === null ? 'bg-ink text-page ring-ink' : 'bg-surface text-ink-2 ring-hairline',
+            'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition desktop:px-2.5 desktop:py-0.5 md:text-xs',
+            catFilter === null ? 'bg-ink text-page ring-ink' : 'bg-surface text-ink-2 ring-hairline hover:ring-ink-3/40',
           )}
         >
           All
@@ -102,23 +93,23 @@ export default function Activity() {
             onClick={() => setCatFilter(catFilter === c.id ? null : c.id!)}
             className={cx(
               'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition',
-              catFilter === c.id ? 'bg-ink text-page ring-ink' : 'bg-surface text-ink-2 ring-hairline',
+              'md:gap-1 desktop:px-2.5 desktop:py-0.5 md:text-xs',
+              catFilter === c.id ? 'bg-ink text-page ring-ink' : 'bg-surface text-ink-2 ring-hairline hover:ring-ink-3/40',
             )}
           >
-            <CategoryIcon icon={c.icon} emoji={c.emoji} size={15} /> {c.name}
+            <CategoryIcon icon={c.icon} emoji={c.emoji} size={14} /> {c.name}
           </button>
         ))}
       </div>
 
-      {/* Summary line */}
+      {/* Phone-only summary line — desktop shows it in the toolbar. */}
       {filtered.length > 0 && (
-        <p className="mt-3 px-1 text-sm text-ink-3">
+        <p className="mb-2 px-1 text-sm text-ink-3 md:hidden">
           {filtered.length} transaction{filtered.length === 1 ? '' : 's'}
           {monthSpend > 0 && <> · {money(monthSpend)} spent</>}
         </p>
       )}
 
-      {/* Grouped list */}
       {filtered.length === 0 ? (
         <Empty
           icon={Receipt}
@@ -126,37 +117,100 @@ export default function Activity() {
           hint={searching ? undefined : 'Add one with the + button, or import a bank statement CSV.'}
         />
       ) : (
-        <div className="mt-2 space-y-4">
-          {groups.map(([date, list]) => (
-            <div key={date}>
-              <p className="mb-1.5 px-1 text-sm font-semibold text-ink-3">{fmtDay(date)}</p>
-              <Card>
-                <ul className="divide-y divide-hairline">
-                  {list.map((t) => (
-                    <li key={t.id}>
-                      <button
-                        onClick={() => setEditing(t)}
-                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 md:gap-2.5 md:px-3.5 md:py-2"
-                      >
-                        <CategoryDot category={catMap.get(t.categoryId)} size={34} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">{t.payee}</p>
-                          <p className="truncate text-sm text-ink-3">
-                            {catMap.get(t.categoryId)?.name ?? 'Uncategorised'}
-                            {t.note ? ` · ${t.note}` : ''}
-                          </p>
-                        </div>
-                        <span className={`font-semibold tabular ${t.amountMinor > 0 ? 'text-good-text' : ''}`}>
-                          {money(t.amountMinor, { sign: t.amountMinor > 0 })}
+        <>
+          {/* Phone: cards grouped under a day heading, thumb-sized rows. */}
+          <div className="space-y-4 md:hidden">
+            {groups.map(([date, list]) => (
+              <div key={date}>
+                <p className="mb-1.5 px-1 text-sm font-semibold text-ink-3">{fmtDay(date)}</p>
+                <Card>
+                  <ul className="divide-y divide-hairline">
+                    {list.map((t) => (
+                      <li key={t.id}>
+                        <button
+                          onClick={() => setEditing(t)}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50"
+                        >
+                          <CategoryDot category={catMap.get(t.categoryId)} size={34} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{t.payee}</p>
+                            <p className="truncate text-sm text-ink-3">
+                              {catMap.get(t.categoryId)?.name ?? 'Uncategorised'}
+                              {t.note ? ` · ${t.note}` : ''}
+                            </p>
+                          </div>
+                          <span className={cx('font-semibold tabular', t.amountMinor > 0 && 'text-good-text')}>
+                            {money(t.amountMinor, { sign: t.amountMinor > 0 })}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop: one scannable table. Date becomes a column instead of a
+              heading, and the width freed up carries category, account and note. */}
+          <Card className="hidden overflow-hidden md:block">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={table.head}>
+                  <th className={cx(table.th, 'w-28 pl-3')}>Date</th>
+                  <th className={table.th}>Payee</th>
+                  <th className={cx(table.th, 'w-44')}>Category</th>
+                  <th className={cx(table.th, 'w-40')}>Account</th>
+                  <th className={cx(table.th, 'w-32 pr-3 text-right')}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((t) => {
+                  const cat = catMap.get(t.categoryId)
+                  return (
+                    <tr
+                      key={t.id}
+                      onClick={() => setEditing(t)}
+                      className={cx(table.row, 'cursor-pointer transition-colors')}
+                    >
+                      {/* A search spans every month, so it needs the year; a
+                          month view doesn't, and the weekday is more useful. */}
+                      <td className={cx(table.cell, 'pl-3 whitespace-nowrap text-ink-3 tabular')}>
+                        {searching ? fmtFullDate(t.date) : fmtDay(t.date)}
+                      </td>
+                      {/* Note rides on the same line as the payee — a second
+                          line would make row heights uneven and harder to scan. */}
+                      <td className={cx(table.cell, 'max-w-0 truncate pr-3')}>
+                        <span className="font-medium">{t.payee}</span>
+                        {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
+                      </td>
+                      <td className={cx(table.cell, 'pr-3')}>
+                        <span className="flex items-center gap-1.5 truncate text-ink-2">
+                          <span className="shrink-0" style={{ color: cat ? `var(--series-${cat.slot})` : 'var(--ink-3)' }}>
+                            <CategoryIcon icon={cat?.icon} emoji={cat?.emoji} size={14} />
+                          </span>
+                          <span className="truncate">{cat?.name ?? 'Uncategorised'}</span>
                         </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            </div>
-          ))}
-        </div>
+                      </td>
+                      <td className={cx(table.cell, 'truncate pr-3 text-ink-3')}>
+                        {t.accountId ? (accMap.get(t.accountId)?.name ?? '—') : '—'}
+                      </td>
+                      <td
+                        className={cx(
+                          table.cell,
+                          'pr-3 text-right font-semibold tabular',
+                          t.amountMinor > 0 && 'text-good-text',
+                        )}
+                      >
+                        {money(t.amountMinor, { sign: t.amountMinor > 0 })}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </Card>
+        </>
       )}
 
       <TransactionForm open={editing !== undefined} onClose={() => setEditing(undefined)} editing={editing} />

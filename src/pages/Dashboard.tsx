@@ -128,15 +128,16 @@ export default function Dashboard() {
     <div>
       {/* Masonry columns on desktop: cards pack vertically instead of aligning
           to the tallest card in a grid row, so there's no dead space between
-          cards of unequal height. Wide widgets span the full width. */}
-      <div className="lg:columns-2 lg:gap-3">
+          cards of unequal height. The column count follows the viewport — two
+          on a laptop, three or four on a wide monitor. Wide widgets span all. */}
+      <div className="md:columns-2 md:gap-2.5 2xl:columns-3 min-[2200px]:columns-4">
         {visible.map((item) => {
           const def = defOf(item.id)
           const Widget = def.component
           return (
             <div
               key={item.id}
-              className={cx('relative min-w-0 mb-3 break-inside-avoid', def.wide && 'lg:[column-span:all]')}
+              className={cx('relative min-w-0 mb-3 break-inside-avoid md:mb-2.5', def.wide && 'md:[column-span:all]')}
             >
               {editing && (
                 <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">

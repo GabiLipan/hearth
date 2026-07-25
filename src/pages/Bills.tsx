@@ -7,7 +7,11 @@ import { daysUntil, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from 
 import { postBill, skipBill, detectBillSuggestions, type BillSuggestion } from '../lib/bills'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { useApp } from '../state/AppContext'
-import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, cx } from '../components/ui'
+import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, table, cx } from '../components/ui'
+import { CategoryIcon } from '../components/CategoryIcon'
+
+/** Secondary bill lists fill the viewport in columns rather than stacking. */
+const SIDE_GRID = 'grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(min(100%,20rem),1fr))] md:gap-1.5'
 
 function DueChip({ dateISO }: { dateISO: string }) {
   const days = daysUntil(dateISO)
@@ -18,7 +22,11 @@ function DueChip({ dateISO }: { dateISO: string }) {
       : days <= 3
         ? 'bg-warning/20 text-ink'
         : 'bg-surface-2 text-ink-2'
-  return <span className={cx('rounded-full px-2.5 py-1 text-xs font-medium', tone)}>{label}</span>
+  return (
+    <span className={cx('inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium desktop:py-0.5', tone)}>
+      {label}
+    </span>
+  )
 }
 
 export default function Bills() {
@@ -39,13 +47,15 @@ export default function Bills() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <p className="text-sm text-ink-3">Recurring bills · monthly equivalent</p>
-          <p className="text-3xl font-bold tracking-tight tabular">{money(Math.round(monthlyTotal))}</p>
+      <div className="mb-4 flex items-center justify-between md:mb-2.5">
+        <div className="md:flex md:items-baseline md:gap-2">
+          <p className="text-sm text-ink-3 md:order-2">Recurring bills · monthly equivalent</p>
+          <p className="text-3xl font-bold tracking-tight tabular md:order-1 md:text-xl">
+            {money(Math.round(monthlyTotal))}
+          </p>
         </div>
         <Button onClick={() => setEditing('new')}>
-          <Plus size={16} /> New bill
+          <Plus size={15} /> New bill
         </Button>
       </div>
 
@@ -61,107 +71,187 @@ export default function Bills() {
           }
         />
       ) : (
-        <Card>
-          <ul className="divide-y divide-hairline">
-            {active.map((b) => (
-              <li key={b.id} className="flex items-center gap-3 px-4 py-3">
-                <button onClick={() => setEditing(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                  <CategoryDot category={catMap.get(b.categoryId)} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{b.name}</p>
-                    <p className="text-sm text-ink-3">
-                      {FREQ_LABEL[b.freq]}
-                      {b.autoPost ? ' · auto-recorded' : ''}
-                    </p>
-                  </div>
-                </button>
-                <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <span className="font-semibold tabular">{money(b.amountMinor)}</span>
-                  <DueChip dateISO={b.nextDue} />
-                </div>
-                {!b.autoPost && (
-                  <div className="flex shrink-0 flex-col gap-1.5">
-                    <button
-                      onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO())}
-                      title="Mark paid"
-                      aria-label={`Mark ${b.name} paid`}
-                      className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20"
-                    >
-                      <Check size={15} />
-                    </button>
-                    <button
-                      onClick={() => void skipBill(b)}
-                      title="Skip this one"
-                      aria-label={`Skip ${b.name}`}
-                      className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink"
-                    >
-                      <SkipForward size={15} />
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
-      {suggestions.length > 0 && (
         <>
-          <p className="mb-2 mt-6 flex items-center gap-1.5 px-1 text-sm font-semibold uppercase tracking-wide text-ink-3">
-            <Wand2 size={14} /> Looks recurring
-          </p>
-          <Card>
+          {/* Phone: a stacked, thumb-friendly list. */}
+          <Card className="md:hidden">
             <ul className="divide-y divide-hairline">
-              {suggestions.map((s) => (
-                <li key={s.payee} className="flex items-center gap-3 px-4 py-3">
-                  <CategoryDot category={catMap.get(s.categoryId)} size={32} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{s.payee}</p>
-                    <p className="text-sm text-ink-3">
-                      {s.count}× {s.freq} · about {money(s.amountMinor)}
-                    </p>
+              {active.map((b) => (
+                <li key={b.id} className="flex items-center gap-3 px-4 py-3">
+                  <button onClick={() => setEditing(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <CategoryDot category={catMap.get(b.categoryId)} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{b.name}</p>
+                      <p className="text-sm text-ink-3">
+                        {FREQ_LABEL[b.freq]}
+                        {b.autoPost ? ' · auto-recorded' : ''}
+                      </p>
+                    </div>
+                  </button>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <span className="font-semibold tabular">{money(b.amountMinor)}</span>
+                    <DueChip dateISO={b.nextDue} />
                   </div>
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    onClick={() =>
-                      setEditing({
-                        name: s.payee,
-                        payee: s.payee,
-                        amountMinor: s.amountMinor,
-                        categoryId: s.categoryId,
-                        freq: s.freq,
-                        nextDue: todayISO(),
-                        active: 1,
-                        autoPost: 0,
-                      } as Bill)
-                    }
-                  >
-                    Track as bill
-                  </Button>
+                  {!b.autoPost && (
+                    <div className="flex shrink-0 flex-col gap-1.5">
+                      <button
+                        onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO())}
+                        title="Mark paid"
+                        aria-label={`Mark ${b.name} paid`}
+                        className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20"
+                      >
+                        <Check size={15} />
+                      </button>
+                      <button
+                        onClick={() => void skipBill(b)}
+                        title="Skip this one"
+                        aria-label={`Skip ${b.name}`}
+                        className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink"
+                      >
+                        <SkipForward size={15} />
+                      </button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
           </Card>
+
+          {/* Desktop: the same bills as a table — every attribute gets a column
+              instead of being stacked into a two-line row. */}
+          <Card className="hidden overflow-hidden md:block">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={table.head}>
+                  <th className={cx(table.th, 'pl-3')}>Bill</th>
+                  <th className={cx(table.th, 'w-40')}>Category</th>
+                  <th className={cx(table.th, 'w-32')}>Repeats</th>
+                  <th className={cx(table.th, 'w-36')}>Next due</th>
+                  <th className={cx(table.th, 'w-28 text-right')}>Amount</th>
+                  <th className={cx(table.th, 'w-24 pr-3 text-right')}>
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {active.map((b) => {
+                  const cat = catMap.get(b.categoryId)
+                  return (
+                    <tr key={b.id} className={table.row}>
+                      <td className={cx(table.cell, 'pl-3 pr-3')}>
+                        <button onClick={() => setEditing(b)} className="block w-full truncate text-left font-medium hover:text-accent">
+                          {b.name}
+                        </button>
+                      </td>
+                      <td className={cx(table.cell, 'pr-3')}>
+                        <span className="flex items-center gap-1.5 truncate text-ink-2">
+                          <span className="shrink-0" style={{ color: cat ? `var(--series-${cat.slot})` : 'var(--ink-3)' }}>
+                            <CategoryIcon icon={cat?.icon} emoji={cat?.emoji} size={14} />
+                          </span>
+                          <span className="truncate">{cat?.name ?? '—'}</span>
+                        </span>
+                      </td>
+                      <td className={cx(table.cell, 'whitespace-nowrap pr-3 text-ink-3')}>
+                        {FREQ_LABEL[b.freq]}
+                        {b.autoPost ? ' · auto' : ''}
+                      </td>
+                      <td className={cx(table.cell, 'pr-3')}>
+                        <DueChip dateISO={b.nextDue} />
+                      </td>
+                      <td className={cx(table.cell, 'pr-3 text-right font-semibold tabular')}>{money(b.amountMinor)}</td>
+                      <td className={cx(table.cell, 'pr-3')}>
+                        {!b.autoPost && (
+                          <div className="flex justify-end gap-1">
+                            <button
+                              onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO())}
+                              title="Mark paid"
+                              aria-label={`Mark ${b.name} paid`}
+                              className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20 desktop:size-7"
+                            >
+                              <Check size={14} />
+                            </button>
+                            <button
+                              onClick={() => void skipBill(b)}
+                              title="Skip this one"
+                              aria-label={`Skip ${b.name}`}
+                              className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink desktop:size-7"
+                            >
+                              <SkipForward size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
+
+      {suggestions.length > 0 && (
+        <>
+          <p className="mb-2 mt-6 flex items-center gap-1.5 px-1 text-sm font-semibold uppercase tracking-wide text-ink-3 md:mb-1.5 md:mt-5 md:text-xs">
+            <Wand2 size={14} /> Looks recurring
+          </p>
+          {/* Auto-filling track: these pack into columns on a wide screen
+              instead of each taking a full row. */}
+          <div className={SIDE_GRID}>
+            {suggestions.map((s) => (
+              <div
+                key={s.payee}
+                className="flex items-center gap-3 rounded-2xl bg-surface px-4 py-3 ring-1 ring-hairline md:gap-2 md:rounded-xl desktop:px-2.5 desktop:py-2"
+              >
+                <CategoryDot category={catMap.get(s.categoryId)} size={32} className="md:[--dot:24px]" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium md:text-sm">{s.payee}</p>
+                  <p className="truncate text-sm text-ink-3 md:text-xs">
+                    {s.count}× {s.freq} · about {money(s.amountMinor)}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  className="shrink-0"
+                  onClick={() =>
+                    setEditing({
+                      name: s.payee,
+                      payee: s.payee,
+                      amountMinor: s.amountMinor,
+                      categoryId: s.categoryId,
+                      freq: s.freq,
+                      nextDue: todayISO(),
+                      active: 1,
+                      autoPost: 0,
+                    } as Bill)
+                  }
+                >
+                  Track
+                </Button>
+              </div>
+            ))}
+          </div>
         </>
       )}
 
       {paused.length > 0 && (
         <>
-          <p className="mb-2 mt-6 px-1 text-sm font-semibold uppercase tracking-wide text-ink-3">Paused</p>
-          <Card>
-            <ul className="divide-y divide-hairline">
-              {paused.map((b) => (
-                <li key={b.id}>
-                  <button onClick={() => setEditing(b)} className="flex w-full items-center gap-3 px-4 py-3 text-left opacity-60 hover:opacity-100">
-                    <CategoryDot category={catMap.get(b.categoryId)} size={32} />
-                    <span className="flex-1 font-medium">{b.name}</span>
-                    <span className="tabular text-sm">{money(b.amountMinor)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </Card>
+          <p className="mb-2 mt-6 px-1 text-sm font-semibold uppercase tracking-wide text-ink-3 md:mb-1.5 md:mt-5 md:text-xs">
+            Paused
+          </p>
+          <div className={SIDE_GRID}>
+            {paused.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => setEditing(b)}
+                className="flex items-center gap-3 rounded-2xl bg-surface px-4 py-3 text-left opacity-60 ring-1 ring-hairline transition hover:opacity-100 md:gap-2 md:rounded-xl desktop:px-2.5 desktop:py-2"
+              >
+                <CategoryDot category={catMap.get(b.categoryId)} size={32} className="md:[--dot:24px]" />
+                <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{b.name}</span>
+                <span className="shrink-0 text-sm tabular md:text-xs">{money(b.amountMinor)}</span>
+              </button>
+            ))}
+          </div>
         </>
       )}
 

@@ -38,16 +38,17 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-dvh md:flex">
-      {/* Desktop / iPad sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col gap-0.5 border-r border-hairline bg-surface p-3 md:flex">
-        <div className="mb-5 mt-1">
+      {/* Desktop / iPad sidebar. Sticky (not fixed) so it takes part in the flex
+          row — main then simply fills whatever width is left, at any viewport. */}
+      <aside className="sticky top-0 z-40 hidden h-dvh w-52 shrink-0 flex-col gap-0.5 self-start border-r border-hairline bg-surface p-2.5 md:flex xl:w-56">
+        <div className="mb-4 mt-1">
           <Logo />
         </div>
         <button
           onClick={() => setAddOpen(true)}
-          className="mb-3 inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110"
+          className="mb-2.5 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110"
         >
-          <Plus size={17} /> Add transaction
+          <Plus size={16} /> Add transaction
         </button>
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
@@ -56,12 +57,12 @@ export function Layout({ children }: { children: ReactNode }) {
             end={to === '/'}
             className={({ isActive }) =>
               cx(
-                'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors',
+                'flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors',
                 isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
               )
             }
           >
-            <Icon size={18} strokeWidth={2} />
+            <Icon size={17} strokeWidth={2} />
             {label}
           </NavLink>
         ))}
@@ -70,12 +71,12 @@ export function Layout({ children }: { children: ReactNode }) {
           to="/settings"
           className={({ isActive }) =>
             cx(
-              'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+              'flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors',
               isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
             )
           }
         >
-          <Settings size={18} />
+          <Settings size={17} />
           Settings
         </NavLink>
       </aside>
@@ -96,8 +97,11 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* Content */}
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-32 pt-4 md:ml-56 md:px-7 md:pb-10 md:pt-6">
+      {/* Content — fills every pixel the sidebar leaves, at any viewport width.
+          Pages decide their own column counts from there. */}
+      <main className="w-full min-w-0 flex-1 px-4 pb-32 pt-4 md:px-5 md:pb-8 md:pt-4 xl:px-6">
+        {/* Desktop page title. Mobile gets the same title in its top bar. */}
+        <h1 className="mb-3 hidden text-xl font-bold tracking-tight md:block">{title}</h1>
         {children}
       </main>
 

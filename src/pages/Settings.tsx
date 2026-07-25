@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, RefreshCw, LogOut, Users, Copy, Lock, Eye } from 'lucide-react'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, RefreshCw, LogOut, Users, Copy, Lock, Eye, Check } from 'lucide-react'
 import { db, type Category, type Account, type AccountVisibility } from '../lib/db'
 import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
 import { computeBalance, setAccountVisibility, VISIBILITY_LABEL } from '../lib/accounts'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
+import { SLOTS, SLOT_NAMES, slotVar, nextFreeSlot } from '../lib/palette'
 import { seedDemoData } from '../lib/demo'
 import { signIn, signUp, signOut, createHousehold, joinHousehold, syncNow } from '../lib/sync'
 import { useSyncState } from '../hooks/useSync'
@@ -36,7 +37,7 @@ function HouseholdSync() {
 
   if (!sync.email) {
     return (
-      <Card className="space-y-3 p-4">
+      <Card className="space-y-3 p-4 md:p-3">
         <p className="text-sm text-ink-2">
           Sign in to keep your data backed up and in sync across all your devices — your phone and laptop stay
           identical, changes appear in seconds, and everything still works offline. You can invite a partner to
@@ -77,7 +78,7 @@ function HouseholdSync() {
 
   if (!sync.householdId) {
     return (
-      <Card className="space-y-3 p-4">
+      <Card className="space-y-3 p-4 md:p-3">
         <p className="text-sm text-ink-2">
           Signed in as <span className="font-medium text-ink">{sync.email}</span>. Setting up your sync… If you'd
           rather join a partner's existing household, enter their invite code below.
@@ -114,7 +115,7 @@ function HouseholdSync() {
   }
 
   return (
-    <Card className="space-y-3 p-4">
+    <Card className="space-y-3 p-4 md:p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-1.5 rounded-full bg-good/10 px-3 py-1 text-sm font-medium text-good-text">
           <Cloud size={14} /> Syncing
@@ -192,83 +193,97 @@ export default function SettingsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   return (
-    <div className="max-w-2xl">
-      <SectionTitle>Household sync</SectionTitle>
-      <HouseholdSync />
+    // Settings are independent blocks, so on a wide screen they flow into
+    // columns rather than one long ribbon down the left edge.
+    <div className="max-w-2xl xl:max-w-none xl:columns-2 xl:gap-6 2xl:columns-3 [&>section]:break-inside-avoid">
+      <section>
+        <SectionTitle>Household sync</SectionTitle>
+        <HouseholdSync />
+      </section>
 
-      <SectionTitle>Appearance</SectionTitle>
-      <Card className="p-4">
-        <Segmented
-          value={themePref}
-          onChange={setThemePref}
-          options={[
-            { value: 'light', label: <span className="flex items-center justify-center gap-1.5"><Sun size={15} /> Light</span> },
-            { value: 'dark', label: <span className="flex items-center justify-center gap-1.5"><Moon size={15} /> Dark</span> },
-            { value: 'system', label: <span className="flex items-center justify-center gap-1.5"><MonitorSmartphone size={15} /> Auto</span> },
-          ]}
-        />
-        <div className="mt-4">
-          <Field label="Currency">
-            <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              {CURRENCIES.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-      </Card>
+      <section>
+        <SectionTitle>Appearance</SectionTitle>
+        <Card className="p-4 md:p-3">
+          <Segmented
+            value={themePref}
+            onChange={setThemePref}
+            options={[
+              { value: 'light', label: <span className="flex items-center justify-center gap-1.5"><Sun size={15} /> Light</span> },
+              { value: 'dark', label: <span className="flex items-center justify-center gap-1.5"><Moon size={15} /> Dark</span> },
+              { value: 'system', label: <span className="flex items-center justify-center gap-1.5"><MonitorSmartphone size={15} /> Auto</span> },
+            ]}
+          />
+          <div className="mt-3">
+            <Field label="Currency">
+              <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </Card>
+      </section>
 
       <AccountsSection />
 
-      <SectionTitle
-        action={
-          <button onClick={() => setEditingCat('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
-            <Plus size={14} /> Add
-          </button>
-        }
-      >
-        Categories
-      </SectionTitle>
-      <Card>
-        <ul className="divide-y divide-hairline">
-          {categories.map((c) => (
-            <li key={c.id}>
-              <button onClick={() => setEditingCat(c)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2/50">
-                <CategoryDot category={c} size={32} />
-                <span className="flex-1 font-medium">{c.name}</span>
-                <span className="text-xs uppercase tracking-wide text-ink-3">{c.kind}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
-      <SectionTitle>Learned rules</SectionTitle>
-      <Card className="p-4">
-        {rules.length === 0 ? (
-          <p className="text-sm text-ink-3">
-            Nothing learned yet. Every time you categorise a payee, Hearth remembers and applies it to future entries and imports.
-          </p>
-        ) : (
-          <ul className="max-h-64 space-y-1 overflow-y-auto">
-            {rules.map((r) => (
-              <li key={r.id} className="flex items-center gap-2 text-sm">
-                <span className="min-w-0 flex-1 truncate">
-                  “{r.match}” → {categories.find((c) => c.id === r.categoryId)?.name ?? '?'}
-                </span>
-                <button onClick={() => void removeRow('rules', r.id!)} aria-label={`Forget rule ${r.match}`} className="text-ink-3 hover:text-critical-text">
-                  <Trash2 size={14} />
+      <section>
+        <SectionTitle
+          action={
+            <button onClick={() => setEditingCat('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
+              <Plus size={14} /> Add
+            </button>
+          }
+        >
+          Categories
+        </SectionTitle>
+        <Card>
+          <ul className="divide-y divide-hairline">
+            {categories.map((c) => (
+              <li key={c.id}>
+                <button
+                  onClick={() => setEditingCat(c)}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-1.5"
+                >
+                  <CategoryDot category={c} size={32} className="md:[--dot:24px]" />
+                  <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{c.name}</span>
+                  <span className="text-xs uppercase tracking-wide text-ink-3">{c.kind}</span>
                 </button>
               </li>
             ))}
           </ul>
-        )}
-      </Card>
+        </Card>
+      </section>
 
+      <section>
+        <SectionTitle>Learned rules</SectionTitle>
+        <Card className="p-4 md:p-3">
+          {rules.length === 0 ? (
+            <p className="text-sm text-ink-3">
+              Nothing learned yet. Every time you categorise a payee, Hearth remembers and applies it to future entries and imports.
+            </p>
+          ) : (
+            <ul className="max-h-64 space-y-1 overflow-y-auto">
+              {rules.map((r) => (
+                <li key={r.id} className="flex items-center gap-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate">
+                    “{r.match}” → {categories.find((c) => c.id === r.categoryId)?.name ?? '?'}
+                  </span>
+                  <button onClick={() => void removeRow('rules', r.id!)} aria-label={`Forget rule ${r.match}`} className="text-ink-3 hover:text-critical-text">
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </section>
+
+      <section>
       <SectionTitle>Your data</SectionTitle>
-      <Card className="space-y-3 p-4">
+      <Card className="space-y-3 p-4 md:p-3">
         <p className="text-sm text-ink-2">
           Data lives on this device (and syncs via your household when signed in). Backups are handy before big
           changes, or for moving data without sync.
@@ -327,10 +342,11 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      <p className="mt-6 px-1 text-xs text-ink-3">
+      <p className="mt-4 px-1 text-xs text-ink-3">
         Hearth · a private family finance app. Install it from your browser's share / install menu for the full app
         experience.
       </p>
+      </section>
 
       <CategoryForm
         key={editingCat === 'new' ? 'new' : (editingCat?.id ?? 'closed')}
@@ -353,7 +369,7 @@ function AccountsSection() {
     a.ownerId && a.ownerId !== userId ? (a.balanceMinor ?? 0) : computeBalance(a, txns)
 
   return (
-    <>
+    <section>
       <SectionTitle
         action={
           <button onClick={() => setEditing('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
@@ -372,7 +388,7 @@ function AccountsSection() {
               <li key={a.id}>
                 <button
                   onClick={() => (mine ? setEditing(a) : undefined)}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left ${mine ? 'hover:bg-surface-2/50' : 'cursor-default'}`}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2 ${mine ? 'hover:bg-surface-2/50' : 'cursor-default'}`}
                 >
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-1.5 font-medium">
@@ -400,7 +416,7 @@ function AccountsSection() {
         open={editing !== null}
         onClose={() => setEditing(null)}
       />
-    </>
+    </section>
   )
 }
 
@@ -521,15 +537,21 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
 }
 
 function CategoryForm({ category, open, onClose }: { category?: Category; open: boolean; onClose: () => void }) {
+  const existing = useLiveQuery(() => db.categories.filter(notDeleted).toArray(), []) ?? []
   const [name, setName] = useState(category?.name ?? '')
   const [icon, setIcon] = useState(category?.icon ?? 'tag')
   const [kind, setKind] = useState<'expense' | 'income'>(category?.kind ?? 'expense')
+  const [slot, setSlot] = useState<number | null>(category?.slot ?? null)
   const canSave = name.trim().length > 0
+
+  // A new category defaults to whichever colour is least used, but only until
+  // the user picks one — then their choice sticks.
+  const effectiveSlot = slot ?? nextFreeSlot(existing.map((c) => c.slot))
 
   async function save() {
     if (!canSave) return
     if (category?.id) {
-      await updateRow('categories', category.id, { name: name.trim(), icon })
+      await updateRow('categories', category.id, { name: name.trim(), icon, slot: effectiveSlot })
     } else {
       const count = await db.categories.count()
       await createRow<Category>('categories', {
@@ -537,7 +559,7 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
         emoji: '🏷️',
         icon,
         kind,
-        slot: (count % 8) + 1,
+        slot: effectiveSlot,
         sortOrder: count,
       })
     }
@@ -578,12 +600,42 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
       }
     >
       <div className="space-y-4">
-        <Field label="Name">
-          <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pets" autoFocus />
-        </Field>
+        {/* Live preview — the icon and colour the category will actually wear. */}
+        <div className="flex items-center gap-3">
+          <CategoryDot category={{ icon, slot: effectiveSlot } as Category} size={44} />
+          <div className="min-w-0 flex-1">
+            <Field label="Name">
+              <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pets" autoFocus />
+            </Field>
+          </div>
+        </div>
+
         <div>
-          <span className="mb-1.5 block text-sm font-medium text-ink-2">Icon</span>
-          <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8">
+          <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">Colour</span>
+          <div className="flex flex-wrap gap-2">
+            {SLOTS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSlot(s)}
+                title={SLOT_NAMES[s]}
+                aria-label={SLOT_NAMES[s]}
+                aria-pressed={effectiveSlot === s}
+                className={cx(
+                  'grid size-8 place-items-center rounded-full transition desktop:size-7',
+                  effectiveSlot === s ? 'ring-2 ring-ink ring-offset-2 ring-offset-surface' : 'hover:scale-110',
+                )}
+                style={{ background: slotVar(s) }}
+              >
+                {effectiveSlot === s && <Check size={15} className="text-white drop-shadow" />}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">Icon</span>
+          <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8 md:grid-cols-10">
             {CATEGORY_ICON_KEYS.map((key) => (
               <button
                 key={key}
@@ -592,15 +644,21 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
                 aria-label={key}
                 aria-pressed={icon === key}
                 className={cx(
-                  'grid aspect-square place-items-center rounded-xl ring-1 transition',
-                  icon === key ? 'bg-accent text-accent-ink ring-accent' : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
+                  'grid aspect-square place-items-center rounded-xl ring-1 transition md:rounded-lg',
+                  icon === key ? 'ring-2 ring-ink' : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
                 )}
+                style={
+                  icon === key
+                    ? { background: `color-mix(in oklab, ${slotVar(effectiveSlot)} 16%, var(--surface-2))`, color: slotVar(effectiveSlot) }
+                    : undefined
+                }
               >
-                <CategoryIcon icon={key} size={18} />
+                <CategoryIcon icon={key} size={17} />
               </button>
             ))}
           </div>
         </div>
+
         {!category && (
           <Segmented
             value={kind}
