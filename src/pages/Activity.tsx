@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Search, Upload, Receipt } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
-import { notDeleted } from '../lib/data'
+import { useAccountMap, useCategories, useCategoryMap } from '../lib/cache'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Empty, TextInput, Toolbar, MonthStepper, Button, table, cx } from '../components/ui'
@@ -18,25 +18,24 @@ export default function Activity() {
   const [editing, setEditing] = useState<Transaction | undefined>()
   const [importOpen, setImportOpen] = useState(false)
 
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
-  const catMap = useMemo(() => new Map(categories.map((c) => [c.id!, c])), [categories])
-  const accounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
-  const accMap = useMemo(() => new Map(accounts.map((a) => [a.id!, a])), [accounts])
+  const categories = useCategories()
+  const catMap = useCategoryMap()
+  const accMap = useAccountMap()
   const searching = query.trim().length > 0
 
   const txns = useLiveQuery(async () => {
     if (searching) {
       const q = query.trim().toLowerCase()
       return db.transactions
-        .filter((t) => !t.deleted && (t.payee.toLowerCase().includes(q) || (t.note ?? '').toLowerCase().includes(q)))
+        .filter((t) => t.payee.toLowerCase().includes(q) || (t.note ?? '').toLowerCase().includes(q))
         .toArray()
     }
-    return db.transactions.filter((t) => !t.deleted && monthKey(t.date) === month).toArray()
+    return db.transactions.filter((t) => monthKey(t.date) === month).toArray()
   }, [month, query, searching])
 
   const filtered = useMemo(() => {
     const list = (txns ?? []).filter((t) => catFilter === null || t.categoryId === catFilter)
-    return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)
+    return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
   }, [txns, catFilter])
 
   const groups = useMemo(() => {
@@ -97,7 +96,7 @@ export default function Activity() {
               catFilter === c.id ? 'bg-ink text-page ring-ink' : 'bg-surface text-ink-2 ring-hairline hover:ring-ink-3/40',
             )}
           >
-            <CategoryIcon icon={c.icon} emoji={c.emoji} size={14} /> {c.name}
+            <CategoryIcon icon={c.icon} size={14} /> {c.name}
           </button>
         ))}
       </div>
@@ -131,11 +130,11 @@ export default function Activity() {
                           onClick={() => setEditing(t)}
                           className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50"
                         >
-                          <CategoryDot category={catMap.get(t.categoryId)} size={34} />
+                          <CategoryDot category={t.categoryId ? catMap.get(t.categoryId) : undefined} size={34} />
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{t.payee}</p>
                             <p className="truncate text-sm text-ink-3">
-                              {catMap.get(t.categoryId)?.name ?? 'Uncategorised'}
+                              {(t.categoryId ? catMap.get(t.categoryId) : undefined)?.name ?? 'Uncategorised'}
                               {t.note ? ` · ${t.note}` : ''}
                             </p>
                           </div>
@@ -166,7 +165,7 @@ export default function Activity() {
               </thead>
               <tbody>
                 {filtered.map((t) => {
-                  const cat = catMap.get(t.categoryId)
+                  const cat = t.categoryId ? catMap.get(t.categoryId) : undefined
                   return (
                     <tr
                       key={t.id}
@@ -187,7 +186,7 @@ export default function Activity() {
                       <td className={cx(table.cell, 'pr-3')}>
                         <span className="flex items-center gap-1.5 truncate text-ink-2">
                           <span className="shrink-0" style={{ color: cat ? `var(--series-${cat.slot})` : 'var(--ink-3)' }}>
-                            <CategoryIcon icon={cat?.icon} emoji={cat?.emoji} size={14} />
+                            <CategoryIcon icon={cat?.icon} size={14} />
                           </span>
                           <span className="truncate">{cat?.name ?? 'Uncategorised'}</span>
                         </span>

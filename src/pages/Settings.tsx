@@ -1,30 +1,32 @@
 import { useRef, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, RefreshCw, LogOut, Users, Copy, Lock, Eye, Check } from 'lucide-react'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, Check, AlertTriangle } from 'lucide-react'
 import { db, type Category, type Account, type AccountVisibility } from '../lib/db'
-import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
-import { computeBalance, setAccountVisibility, VISIBILITY_LABEL } from '../lib/accounts'
+import { create, update, remove as removeRow } from '../lib/data'
+import { balanceOf, setAccountVisibility, VISIBILITY_LABEL, VISIBILITY_HINT } from '../lib/accounts'
+import { useAccounts, useAllTransactions, useCategories, useDeadLetters, useRemoteBalances, useRules } from '../lib/cache'
+import { discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
 import { SLOTS, SLOT_NAMES, slotVar, nextFreeSlot } from '../lib/palette'
 import { seedDemoData } from '../lib/demo'
-import { signIn, signUp, signOut, createHousehold, joinHousehold, syncNow } from '../lib/sync'
+import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { Card, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, cx } from '../components/ui'
 import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
 
-function HouseholdSync() {
+/**
+ * The household card. Signing in and choosing a household happen in Onboarding
+ * now — by the time this renders, both have already happened.
+ */
+function HouseholdCard() {
   const sync = useSyncState()
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>()
   const [copied, setCopied] = useState(false)
 
-  async function run(fn: () => Promise<void>) {
+  async function run(fn: () => Promise<unknown>) {
     setBusy(true)
     setError(undefined)
     try {
@@ -35,97 +37,32 @@ function HouseholdSync() {
     setBusy(false)
   }
 
-  if (!sync.email) {
-    return (
-      <Card className="space-y-3 p-4 md:p-3">
-        <p className="text-sm text-ink-2">
-          Sign in to keep your data backed up and in sync across all your devices — your phone and laptop stay
-          identical, changes appear in seconds, and everything still works offline. You can invite a partner to
-          share a household too.
-        </p>
-        <Segmented
-          value={mode}
-          onChange={setMode}
-          options={[
-            { value: 'signin', label: 'Sign in' },
-            { value: 'signup', label: 'Create account' },
-          ]}
-        />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Email">
-            <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="you@example.com" />
-          </Field>
-          <Field label="Password" hint={mode === 'signup' ? 'At least 6 characters.' : undefined}>
-            <TextInput
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              placeholder="••••••••"
-            />
-          </Field>
-        </div>
-        {error && <p className="text-sm text-critical-text">{error}</p>}
-        <Button
-          disabled={busy || !email.trim() || password.length < 6}
-          onClick={() => run(() => (mode === 'signup' ? signUp(email.trim(), password) : signIn(email.trim(), password)))}
-        >
-          <Cloud size={15} /> {busy ? 'Working…' : mode === 'signup' ? 'Create account' : 'Sign in'}
-        </Button>
-      </Card>
-    )
-  }
-
-  if (!sync.householdId) {
-    return (
-      <Card className="space-y-3 p-4 md:p-3">
-        <p className="text-sm text-ink-2">
-          Signed in as <span className="font-medium text-ink">{sync.email}</span>. Setting up your sync… If you'd
-          rather join a partner's existing household, enter their invite code below.
-        </p>
-        <div className="flex flex-wrap items-end gap-2">
-          <Button disabled={busy} onClick={() => run(createHousehold)}>
-            <Users size={15} /> Set up sync
-          </Button>
-          <span className="text-sm text-ink-3">or</span>
-          <TextInput
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-            placeholder="Invite code"
-            className="w-36 uppercase"
-          />
-          <Button
-            variant="subtle"
-            disabled={busy || joinCode.trim().length < 6}
-            onClick={() => {
-              if (confirm('Joining replaces any data on this device with the household’s shared data. Continue?')) {
-                void run(() => joinHousehold(joinCode))
-              }
-            }}
-          >
-            Join
-          </Button>
-        </div>
-        {error && <p className="text-sm text-critical-text">{error}</p>}
-        <button onClick={() => void signOut()} className="text-sm text-ink-3 underline-offset-2 hover:underline">
-          Sign out
-        </button>
-      </Card>
-    )
-  }
-
   return (
     <Card className="space-y-3 p-4 md:p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1.5 rounded-full bg-good/10 px-3 py-1 text-sm font-medium text-good-text">
-          <Cloud size={14} /> Syncing
-        </span>
+        {sync.online ? (
+          <span className="flex items-center gap-1.5 rounded-full bg-good/10 px-3 py-1 text-sm font-medium text-good-text">
+            <Cloud size={14} /> Synced
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-ink-2">
+            <CloudOff size={14} /> Offline
+          </span>
+        )}
         <span className="text-sm text-ink-2">{sync.email}</span>
         {sync.syncing && <RefreshCw size={14} className="animate-spin text-ink-3" />}
         {sync.lastSyncAt && !sync.syncing && (
           <span className="text-xs text-ink-3">updated {new Date(sync.lastSyncAt).toLocaleTimeString()}</span>
         )}
       </div>
+
+      {sync.pending > 0 && (
+        <p className="text-sm text-ink-3">
+          {sync.pending} change{sync.pending === 1 ? '' : 's'} waiting to be saved
+          {sync.online ? '…' : ' — they will go up when you are back online.'}
+        </p>
+      )}
+
       {sync.joinCode && (
         <div className="flex items-center gap-2 rounded-xl bg-surface-2 px-4 py-3">
           <div className="min-w-0 flex-1">
@@ -145,11 +82,15 @@ function HouseholdSync() {
           </Button>
         </div>
       )}
+
       {sync.error && <p className="text-sm text-critical-text">Last sync problem: {sync.error}</p>}
+      {error && <p className="text-sm text-critical-text">{error}</p>}
+
       <details className="text-sm">
-        <summary className="cursor-pointer text-ink-3 hover:text-ink-2">Joining your partner instead?</summary>
+        <summary className="cursor-pointer text-ink-3 hover:text-ink-2">Join a different household</summary>
         <p className="mt-2 text-xs text-ink-3">
-          Enter their invite code to share one household. This replaces the data on this device with theirs.
+          Enter your partner's invite code to share one household. This device's copy is replaced by theirs, and
+          anything not yet saved is discarded.
         </p>
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <TextInput
@@ -162,7 +103,7 @@ function HouseholdSync() {
             variant="subtle"
             disabled={busy || joinCode.trim().length < 6}
             onClick={() => {
-              if (confirm('Joining replaces the data on this device with your partner’s shared household. Continue?')) {
+              if (confirm('Joining replaces this device\u2019s data with your partner\u2019s household. Continue?')) {
                 void run(() => joinHousehold(joinCode))
               }
             }}
@@ -170,24 +111,74 @@ function HouseholdSync() {
             Join
           </Button>
         </div>
-        {error && <p className="mt-2 text-sm text-critical-text">{error}</p>}
       </details>
-      <div className="flex gap-2">
-        <Button size="sm" variant="subtle" disabled={sync.syncing} onClick={() => void syncNow()}>
+
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="subtle" disabled={sync.syncing || !sync.online} onClick={() => void syncNow()}>
           <RefreshCw size={14} /> Sync now
         </Button>
         <Button size="sm" variant="ghost" onClick={() => void signOut()}>
           <LogOut size={14} /> Sign out
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            if (confirm('Leave this household? Your data stays with the household; this device is disconnected from it.')) {
+              void run(leaveHousehold)
+            }
+          }}
+        >
+          Leave household
         </Button>
       </div>
     </Card>
   )
 }
 
+/**
+ * Writes the server refused for a reason retrying cannot fix. Shown here rather
+ * than as a toast because the failure usually happens while offline, long after
+ * the user has put the phone down \u2014 a change that could not be saved must not
+ * disappear quietly.
+ */
+function UnsavedChanges() {
+  const deadLetters = useDeadLetters()
+  if (deadLetters.length === 0) return null
+  return (
+    <section>
+      <SectionTitle>Couldn\u2019t be saved</SectionTitle>
+      <Card className="space-y-3 p-4 md:p-3">
+        <p className="flex items-start gap-2 text-sm text-ink-2">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
+          These changes were rejected by the server. Usually it means the thing they referred to was deleted on another
+          device.
+        </p>
+        <ul className="space-y-2">
+          {deadLetters.map((d) => (
+            <li key={d.id} className="rounded-xl bg-surface-2 px-3 py-2 text-sm">
+              <p className="font-medium">{d.summary}</p>
+              <p className="text-xs text-ink-3">{d.message}</p>
+              <div className="mt-1.5 flex gap-2">
+                <Button size="sm" variant="subtle" onClick={() => void retryDeadLetter(d.id)}>
+                  Try again
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void discardDeadLetter(d.id)}>
+                  Discard
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
+  )
+}
+
 export default function SettingsPage() {
   const { themePref, setThemePref, currency, setCurrency } = useApp()
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
-  const rules = useLiveQuery(async () => (await db.rules.filter(notDeleted).toArray()).sort((a, b) => b.createdAt - a.createdAt), []) ?? []
+  const categories = useCategories()
+  const rules = useRules()
   const [editingCat, setEditingCat] = useState<Category | 'new' | null>(null)
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -197,9 +188,11 @@ export default function SettingsPage() {
     // columns rather than one long ribbon down the left edge.
     <div className="max-w-2xl xl:max-w-none xl:columns-2 xl:gap-6 2xl:columns-3 [&>section]:break-inside-avoid">
       <section>
-        <SectionTitle>Household sync</SectionTitle>
-        <HouseholdSync />
+        <SectionTitle>Household</SectionTitle>
+        <HouseholdCard />
       </section>
+
+      <UnsavedChanges />
 
       <section>
         <SectionTitle>Appearance</SectionTitle>
@@ -271,7 +264,7 @@ export default function SettingsPage() {
                   <span className="min-w-0 flex-1 truncate">
                     “{r.match}” → {categories.find((c) => c.id === r.categoryId)?.name ?? '?'}
                   </span>
-                  <button onClick={() => void removeRow('rules', r.id!)} aria-label={`Forget rule ${r.match}`} className="text-ink-3 hover:text-critical-text">
+                  <button onClick={() => void removeRow('rules', r.id)} aria-label={`Forget rule ${r.match}`} className="text-ink-3 hover:text-critical-text">
                     <Trash2 size={14} />
                   </button>
                 </li>
@@ -361,12 +354,12 @@ export default function SettingsPage() {
 function AccountsSection() {
   const { money } = useApp()
   const { userId } = useSyncState()
-  const accounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
-  const txns = useLiveQuery(() => db.transactions.filter(notDeleted).toArray(), []) ?? []
+  const accounts = useAccounts()
+  const txns = useAllTransactions() ?? []
+  const remoteBalances = useRemoteBalances()
   const [editing, setEditing] = useState<Account | 'new' | null>(null)
 
-  const balanceOf = (a: Account) =>
-    a.ownerId && a.ownerId !== userId ? (a.balanceMinor ?? 0) : computeBalance(a, txns)
+  const balance = (a: Account) => balanceOf(a, txns, remoteBalances, userId)
 
   return (
     <section>
@@ -382,7 +375,7 @@ function AccountsSection() {
       <Card>
         <ul className="divide-y divide-hairline">
           {accounts.map((a) => {
-            const vis = a.visibility ?? 'shared'
+            const vis = a.visibility
             const mine = !a.ownerId || a.ownerId === userId
             return (
               <li key={a.id}>
@@ -401,8 +394,8 @@ function AccountsSection() {
                       {!mine ? " · partner's" : vis !== 'shared' ? ` · ${VISIBILITY_LABEL[vis].toLowerCase()}` : ''}
                     </p>
                   </div>
-                  <span className={`font-semibold tabular ${balanceOf(a) < 0 ? 'text-critical-text' : ''}`}>
-                    {money(balanceOf(a))}
+                  <span className={`font-semibold tabular ${balance(a) < 0 ? 'text-critical-text' : ''}`}>
+                    {money(balance(a))}
                   </span>
                 </button>
               </li>
@@ -422,42 +415,42 @@ function AccountsSection() {
 
 function AccountForm({ account, open, onClose }: { account?: Account; open: boolean; onClose: () => void }) {
   const { currency } = useApp()
-  const { userId, householdId } = useSyncState()
+  const { userId } = useSyncState()
   const [name, setName] = useState(account?.name ?? '')
   const [kind, setKind] = useState<Account['kind']>(account?.kind ?? 'current')
   const [visibility, setVisibility] = useState<AccountVisibility>(account?.visibility ?? 'shared')
   const [opening, setOpening] = useState(
-    account?.openingBalanceMinor != null ? String(account.openingBalanceMinor / 100) : '',
+    account?.openingBalanceMinor ? String(account.openingBalanceMinor / 100) : '',
   )
   const canSave = name.trim().length > 0
 
-  const visOptions: { value: AccountVisibility; hint: string }[] = [
-    { value: 'shared', hint: 'You both see the account and all its transactions.' },
-    { value: 'balance', hint: 'Your partner sees the account and its balance, but none of the transactions.' },
-    { value: 'private', hint: 'Only you ever see this account.' },
-  ]
+  const visOptions: AccountVisibility[] = ['shared', 'balance', 'private']
 
   async function save() {
     if (!canSave) return
-    const openingMinor = parseAmount(opening) ?? undefined
+    const openingMinor = parseAmount(opening) ?? 0
     if (account?.id) {
-      await updateRow('accounts', account.id, { name: name.trim(), kind, openingBalanceMinor: openingMinor })
+      await update('accounts', account.id, { name: name.trim(), kind, openingBalanceMinor: openingMinor })
+      // Separate call: changing privacy has server-side consequences (the
+      // household's visibility epoch bumps, and the partner re-pulls).
       await setAccountVisibility({ ...account, openingBalanceMinor: openingMinor }, visibility, userId)
     } else {
-      await createRow<Account>('accounts', {
+      await create('accounts', {
         name: name.trim(),
         kind,
         visibility,
+        // A non-shared account needs an owner: it is who it is private *to*.
         ownerId: visibility === 'shared' ? undefined : userId,
         openingBalanceMinor: openingMinor,
+        sortOrder: 0,
       })
     }
     onClose()
   }
 
-  async function remove() {
+  async function deleteAccount() {
     if (!account?.id) return
-    const used = await db.transactions.where('accountId').equals(account.id).filter(notDeleted).count()
+    const used = await db.transactions.where('accountId').equals(account.id).count()
     if (used > 0) {
       alert(`"${account.name}" has ${used} transactions, so it can't be deleted.`)
       return
@@ -476,7 +469,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
       footer={
         <div className="flex gap-2">
           {account?.id && (
-            <Button variant="danger" size="lg" onClick={remove}>
+            <Button variant="danger" size="lg" onClick={deleteAccount}>
               Delete
             </Button>
           )}
@@ -508,27 +501,30 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
           <div className="space-y-2">
             {visOptions.map((o) => (
               <label
-                key={o.value}
+                key={o}
                 className={`flex cursor-pointer items-start gap-3 rounded-xl px-4 py-3 ring-1 transition ${
-                  visibility === o.value ? 'bg-accent/8 ring-accent' : 'bg-surface-2 ring-transparent'
+                  visibility === o ? 'bg-accent/8 ring-accent' : 'bg-surface-2 ring-transparent'
                 }`}
               >
                 <input
                   type="radio"
                   name="visibility"
-                  checked={visibility === o.value}
-                  onChange={() => setVisibility(o.value)}
+                  checked={visibility === o}
+                  onChange={() => setVisibility(o)}
                   className="mt-0.5 accent-[var(--accent)]"
                 />
                 <span>
-                  <span className="block text-sm font-medium">{VISIBILITY_LABEL[o.value]}</span>
-                  <span className="block text-xs text-ink-3">{o.hint}</span>
+                  <span className="block text-sm font-medium">{VISIBILITY_LABEL[o]}</span>
+                  <span className="block text-xs text-ink-3">{VISIBILITY_HINT[o]}</span>
                 </span>
               </label>
             ))}
           </div>
-          {visibility !== 'shared' && !householdId && (
-            <p className="mt-2 text-xs text-ink-3">Privacy applies once you're signed in to household sync.</p>
+          {visibility === 'balance' && (
+            <p className="mt-2 text-xs text-ink-3">
+              A balance is still a number they can watch change, so this hides what you spent it on rather than how
+              much you have.
+            </p>
           )}
         </div>
       </div>
@@ -537,7 +533,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
 }
 
 function CategoryForm({ category, open, onClose }: { category?: Category; open: boolean; onClose: () => void }) {
-  const existing = useLiveQuery(() => db.categories.filter(notDeleted).toArray(), []) ?? []
+  const existing = useCategories()
   const [name, setName] = useState(category?.name ?? '')
   const [icon, setIcon] = useState(category?.icon ?? 'tag')
   const [kind, setKind] = useState<'expense' | 'income'>(category?.kind ?? 'expense')
@@ -551,31 +547,24 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
   async function save() {
     if (!canSave) return
     if (category?.id) {
-      await updateRow('categories', category.id, { name: name.trim(), icon, slot: effectiveSlot })
+      await update('categories', category.id, { name: name.trim(), icon, slot: effectiveSlot })
     } else {
       const count = await db.categories.count()
-      await createRow<Category>('categories', {
-        name: name.trim(),
-        emoji: '🏷️',
-        icon,
-        kind,
-        slot: effectiveSlot,
-        sortOrder: count,
-      })
+      await create('categories', { name: name.trim(), icon, kind, slot: effectiveSlot, sortOrder: count })
     }
     onClose()
   }
 
-  async function remove() {
+  async function deleteCategory() {
     if (!category?.id) return
-    const used = await db.transactions.where('categoryId').equals(category.id).filter(notDeleted).count()
+    const used = await db.transactions.where('categoryId').equals(category.id).count()
     if (used > 0) {
       alert(`"${category.name}" is used by ${used} transactions, so it can't be deleted. Recategorise them first.`)
       return
     }
     if (confirm(`Delete category "${category.name}"?`)) {
       const budgets = await db.budgets.where('categoryId').equals(category.id).toArray()
-      for (const b of budgets) await removeRow('budgets', b.id!)
+      for (const b of budgets) await removeRow('budgets', b.id)
       await removeRow('categories', category.id)
       onClose()
     }
@@ -589,7 +578,7 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
       footer={
         <div className="flex gap-2">
           {category?.id && (
-            <Button variant="danger" size="lg" onClick={remove}>
+            <Button variant="danger" size="lg" onClick={deleteCategory}>
               Delete
             </Button>
           )}

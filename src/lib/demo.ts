@@ -1,6 +1,6 @@
 import { format, subMonths, addDays, startOfMonth } from 'date-fns'
-import { db, ensureDefaults, type Transaction, type Bill, type Budget } from './db'
-import { createMany, notDeleted } from './data'
+import { db, type Transaction, type Bill, type Budget } from './db'
+import { createMany } from './data'
 
 /** Deterministic pseudo-random so demo data is stable between runs. */
 function mulberry32(seed: number) {
@@ -13,14 +13,22 @@ function mulberry32(seed: number) {
   }
 }
 
+type NewTransaction = Omit<Transaction, 'id' | 'updatedAt'>
+type NewBill = Omit<Bill, 'id' | 'updatedAt'>
+type NewBudget = Omit<Budget, 'id' | 'updatedAt'>
+
 export async function seedDemoData() {
-  await ensureDefaults()
-  const cats = await db.categories.filter(notDeleted).toArray()
-  const byName = (n: string) => cats.find((c) => c.name === n)!.id!
-  const account = (await db.accounts.filter(notDeleted).toArray())[0]?.id
+  // The household's categories and starter account are seeded server-side by
+  // create_household(), so demo data attaches to whatever is already there
+  // rather than inventing its own.
+  const cats = await db.categories.toArray()
+  const byName = (n: string) => cats.find((c) => c.name === n)?.id
+  const account = (await db.accounts.toArray())[0]?.id
+  if (!account) throw new Error('No account to attach demo data to')
   const rand = mulberry32(42)
   const today = new Date()
-  const txns: Transaction[] = []
+  const now = new Date().toISOString()
+  const txns: NewTransaction[] = []
 
   const shops: [string, string, number, number][] = [
     // payee, category, typical £, monthly count
@@ -48,7 +56,7 @@ export async function seedDemoData() {
       categoryId: byName('Salary'),
       accountId: account,
       amountMinor: 412000,
-      createdAt: Date.now(),
+      createdAt: now,
     })
     txns.push({
       date: format(monthStart, 'yyyy-MM-dd'),
@@ -56,7 +64,7 @@ export async function seedDemoData() {
       categoryId: byName('Salary'),
       accountId: account,
       amountMinor: 358000,
-      createdAt: Date.now(),
+      createdAt: now,
     })
     for (const [payee, cat, typical, perMonth] of shops) {
       for (let i = 0; i < perMonth; i++) {
@@ -68,7 +76,7 @@ export async function seedDemoData() {
           categoryId: byName(cat),
           accountId: account,
           amountMinor: -Math.round(typical * wobble),
-          createdAt: Date.now(),
+          createdAt: now,
         })
       }
     }
@@ -81,20 +89,20 @@ export async function seedDemoData() {
     if (base <= today) base.setMonth(base.getMonth() + 1)
     return format(base, 'yyyy-MM-dd')
   }
-  const bills: Bill[] = [
-    { name: 'Rent', payee: 'Foxtons Lettings', amountMinor: -185000, categoryId: byName('Home & utilities'), accountId: account, freq: 'monthly', nextDue: day(1), active: 1, autoPost: 1 },
-    { name: 'Council tax', payee: 'Hackney Council', amountMinor: -16200, categoryId: byName('Home & utilities'), accountId: account, freq: 'monthly', nextDue: day(3), active: 1, autoPost: 1 },
-    { name: 'Energy', payee: 'Octopus Energy', amountMinor: -13400, categoryId: byName('Home & utilities'), accountId: account, freq: 'monthly', nextDue: day(12), active: 1, autoPost: 1 },
-    { name: 'Broadband', payee: 'Hyperoptic', amountMinor: -3500, categoryId: byName('Home & utilities'), accountId: account, freq: 'monthly', nextDue: day(15), active: 1, autoPost: 1 },
-    { name: 'Netflix', payee: 'Netflix.com', amountMinor: -1599, categoryId: byName('Subscriptions'), accountId: account, freq: 'monthly', nextDue: day(18), active: 1, autoPost: 1 },
-    { name: 'Spotify Duo', payee: 'Spotify', amountMinor: -1499, categoryId: byName('Subscriptions'), accountId: account, freq: 'monthly', nextDue: day(21), active: 1, autoPost: 1 },
-    { name: 'Car insurance', payee: 'Admiral Insurance', amountMinor: -6200, categoryId: byName('Transport'), accountId: account, freq: 'monthly', nextDue: day(24), active: 1, autoPost: 1 },
+  const bills: NewBill[] = [
+    { name: 'Rent', payee: 'Foxtons Lettings', amountMinor: -185000, categoryId: byName('Home & utilities'), accountId: account, freq: 'monthly', nextDue: day(1), active: true, autoPost: true },
+    { name: 'Council tax', payee: 'Hackney Council', amountMinor: -16200, categoryId: byName('Home & utilities'), accountId: account, freq: 'monthly', nextDue: day(3), active: true, autoPost: true },
+    { name: 'Energy', payee: 'Octopus Energy', amountMinor: -13400, categoryId: byName('Home & utilities'), accountId: account, freq: 'monthly', nextDue: day(12), active: true, autoPost: true },
+    { name: 'Broadband', payee: 'Hyperoptic', amountMinor: -3500, categoryId: byName('Home & utilities'), accountId: account, freq: 'monthly', nextDue: day(15), active: true, autoPost: true },
+    { name: 'Netflix', payee: 'Netflix.com', amountMinor: -1599, categoryId: byName('Subscriptions'), accountId: account, freq: 'monthly', nextDue: day(18), active: true, autoPost: true },
+    { name: 'Spotify Duo', payee: 'Spotify', amountMinor: -1499, categoryId: byName('Subscriptions'), accountId: account, freq: 'monthly', nextDue: day(21), active: true, autoPost: true },
+    { name: 'Car insurance', payee: 'Admiral Insurance', amountMinor: -6200, categoryId: byName('Transport'), accountId: account, freq: 'monthly', nextDue: day(24), active: true, autoPost: true },
   ]
   await createMany('bills', bills)
 
   // Bill history so charts include them
-  const billHistory: Transaction[] = []
-  const billDefs = await db.bills.filter(notDeleted).toArray()
+  const billHistory: NewTransaction[] = []
+  const billDefs = await db.bills.toArray()
   for (let m = 5; m >= 0; m--) {
     const monthStart = startOfMonth(subMonths(today, m))
     for (const b of billDefs) {
@@ -109,7 +117,7 @@ export async function seedDemoData() {
         accountId: account,
         amountMinor: b.amountMinor,
         billId: b.id,
-        createdAt: Date.now(),
+        createdAt: now,
       })
     }
   }
@@ -126,6 +134,8 @@ export async function seedDemoData() {
     ['Health', 8000],
     ['Fun & leisure', 10000],
   ]
-  const budgets: Budget[] = budgetDefs.map(([name, amountMinor]) => ({ categoryId: byName(name), amountMinor }))
+  const budgets: NewBudget[] = budgetDefs
+    .map(([name, amountMinor]) => ({ categoryId: byName(name), amountMinor }))
+    .filter((b): b is NewBudget => !!b.categoryId)
   await createMany('budgets', budgets)
 }

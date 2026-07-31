@@ -28,6 +28,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # Both are publishable and end up in the bundle by design — they name
+          # the project, they do not grant access to it. Access is decided by
+          # row level security against the signed-in user's token. Kept as repo
+          # secrets so the project can be repointed without a code change.
+          # Never add SUPABASE_SERVICE_ROLE_KEY here: it bypasses RLS entirely.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -5,7 +5,7 @@ import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account } from '../lib/db'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
 import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
-import { computeBalance } from '../lib/accounts'
+import { balanceOf } from '../lib/accounts'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Progress, cx } from './ui'
 import { CategoryIcon } from './CategoryIcon'
@@ -17,6 +17,8 @@ export interface HomeData {
   budgets: Budget[]
   bills: Bill[]
   accounts: Account[]
+  /** Server-computed balances for accounts whose transactions we cannot read. */
+  remoteBalances: Map<string, number>
   userId?: string
 }
 
@@ -108,12 +110,12 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
   const spent = useMemo(() => {
     const m = new Map<string, number>()
     for (const t of data.txns) {
-      if (t.amountMinor >= 0 || t.deleted || monthKey(t.date) !== month()) continue
+      if (t.amountMinor >= 0 || !t.categoryId || monthKey(t.date) !== month()) continue
       m.set(t.categoryId, (m.get(t.categoryId) ?? 0) - t.amountMinor)
     }
     return m
   }, [data.txns])
-  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id!, c])), [data.categories])
+  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   const rows = data.budgets
     .filter((b) => !b.ownerId && catMap.has(b.categoryId)) // the household's budgets
     .map((b) => ({
@@ -153,7 +155,7 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
           return (
             <li key={cat.id} className="flex items-center gap-2.5 md:gap-2">
               <span className="grid w-5 shrink-0 place-items-center" style={{ color: `var(--series-${cat.slot})` }} aria-hidden>
-                <CategoryIcon icon={cat.icon} emoji={cat.emoji} size={15} />
+                <CategoryIcon icon={cat.icon} size={15} />
               </span>
               <span className="w-24 truncate text-sm text-ink-2 sm:w-32">{cat.name}</span>
               <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-surface-2 md:h-1.5">
@@ -186,9 +188,8 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
 export function AccountsWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
   if (data.accounts.length === 0) return null
-  const balanceOf = (a: Account) =>
-    a.ownerId && a.ownerId !== data.userId ? (a.balanceMinor ?? 0) : computeBalance(a, data.txns)
-  const total = data.accounts.reduce((s, a) => s + balanceOf(a), 0)
+  const balance = (a: Account) => balanceOf(a, data.txns, data.remoteBalances, data.userId)
+  const total = data.accounts.reduce((s, a) => s + balance(a), 0)
   return (
     <Card className="p-4 md:p-3">
       <div className="mb-2 flex items-baseline justify-between">
@@ -197,8 +198,8 @@ export function AccountsWidget({ data }: { data: HomeData }) {
       </div>
       <ul className="divide-y divide-hairline">
         {data.accounts.map((a) => {
-          const vis = a.visibility ?? 'shared'
-          const bal = balanceOf(a)
+          const vis = a.visibility
+          const bal = balance(a)
           return (
             <li key={a.id} className="flex items-center gap-2 py-2 md:py-1">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
@@ -243,9 +244,9 @@ export function TrendWidget({ data }: { data: HomeData }) {
 /* ---------- Upcoming bills ---------- */
 export function BillsWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
-  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id!, c])), [data.categories])
+  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   const upcoming = data.bills
-    .filter((b) => b.active && !b.deleted && daysUntil(b.nextDue) <= 14)
+    .filter((b) => b.active && daysUntil(b.nextDue) <= 14)
     .sort((a, b) => a.nextDue.localeCompare(b.nextDue))
     .slice(0, 5)
   if (upcoming.length === 0) return null
@@ -262,7 +263,7 @@ export function BillsWidget({ data }: { data: HomeData }) {
           const days = daysUntil(b.nextDue)
           return (
             <li key={b.id} className="flex items-center gap-2.5 py-2 md:gap-2 md:py-1">
-              <CategoryDot category={catMap.get(b.categoryId)} size={30} className="md:[--dot:24px]" />
+              <CategoryDot category={b.categoryId ? catMap.get(b.categoryId) : undefined} size={30} className="md:[--dot:24px]" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{b.name}</p>
                 <p className="text-xs text-ink-3">
@@ -281,9 +282,9 @@ export function BillsWidget({ data }: { data: HomeData }) {
 /* ---------- Recent activity ---------- */
 export function RecentWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
-  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id!, c])), [data.categories])
+  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   const recent = useMemo(
-    () => [...data.txns].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt).slice(0, 5),
+    () => [...data.txns].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).slice(0, 5),
     [data.txns],
   )
   if (recent.length === 0) return null
@@ -298,7 +299,7 @@ export function RecentWidget({ data }: { data: HomeData }) {
       <ul className="divide-y divide-hairline">
         {recent.map((t) => (
           <li key={t.id} className="flex items-center gap-2.5 py-2 md:gap-2 md:py-1">
-            <CategoryDot category={catMap.get(t.categoryId)} size={30} className="md:[--dot:24px]" />
+            <CategoryDot category={t.categoryId ? catMap.get(t.categoryId) : undefined} size={30} className="md:[--dot:24px]" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{t.payee}</p>
               <p className="text-xs text-ink-3">{fmtDay(t.date)}</p>

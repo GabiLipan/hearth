@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, setSetting } from '../lib/db'
+import { rpc } from '../lib/api'
 import { fmtMoney } from '../lib/money'
 
 export type ThemePref = 'light' | 'dark' | 'system'
@@ -55,10 +56,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setThemePrefState(t)
   }, [])
 
-  const currency = useLiveQuery(async () => (await db.kv.get('currency'))?.value, [], undefined) ?? 'GBP'
+  // The currency belongs to the household so both people see amounts the same
+  // way. It is cached locally (and refreshed on every pull) so the app can
+  // format money offline without waiting for the server.
+  const currency = useLiveQuery(async () => (await db.meta.get('currency'))?.value, [], undefined) ?? 'GBP'
 
   const setCurrency = useCallback((c: string) => {
     void setSetting('currency', c)
+    void rpc('set_household_currency', { p_currency: c })
   }, [])
 
   const money = useCallback(

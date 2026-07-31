@@ -264,7 +264,7 @@ export function CategoryDot({ category, size = 36, className }: { category?: Cat
       }}
       aria-hidden
     >
-      <CategoryIcon icon={category?.icon} emoji={category?.emoji} size={Math.round(size * 0.52)} />
+      <CategoryIcon icon={category?.icon} size={Math.round(size * 0.52)} />
     </span>
   )
 }

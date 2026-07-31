@@ -1,8 +1,7 @@
 import { useEffect, useState, type ComponentType } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Sparkles, SlidersHorizontal, Check, ChevronUp, ChevronDown, EyeOff, Plus } from 'lucide-react'
-import { db, getSetting, setSetting } from '../lib/db'
-import { notDeleted } from '../lib/data'
+import { getSetting, setSetting } from '../lib/db'
+import { useAccounts, useAllTransactions, useBills, useBudgets, useCategories, useRemoteBalances } from '../lib/cache'
 import { seedDemoData } from '../lib/demo'
 import { useSyncState } from '../hooks/useSync'
 import { Button, Empty, cx } from '../components/ui'
@@ -59,11 +58,12 @@ function normaliseLayout(stored: LayoutItem[] | null): LayoutItem[] {
 
 export default function Dashboard() {
   const { userId } = useSyncState()
-  const txns = useLiveQuery(() => db.transactions.filter(notDeleted).toArray(), [])
-  const categories = useLiveQuery(() => db.categories.filter(notDeleted).toArray(), []) ?? []
-  const budgets = useLiveQuery(() => db.budgets.filter(notDeleted).toArray(), []) ?? []
-  const bills = useLiveQuery(() => db.bills.filter(notDeleted).toArray(), []) ?? []
-  const accounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
+  const txns = useAllTransactions()
+  const categories = useCategories()
+  const budgets = useBudgets()
+  const bills = useBills()
+  const accounts = useAccounts()
+  const remoteBalances = useRemoteBalances()
   const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT)
   const [editing, setEditing] = useState(false)
   const [seeding, setSeeding] = useState(false)
@@ -119,7 +119,7 @@ export default function Dashboard() {
     )
   }
 
-  const data: HomeData = { txns: txns ?? [], categories, budgets, bills, accounts, userId }
+  const data: HomeData = { txns: txns ?? [], categories, budgets, bills, accounts, remoteBalances, userId }
   const visible = layout.filter((l) => l.on)
   const hidden = layout.filter((l) => !l.on)
   const defOf = (id: string) => WIDGETS.find((w) => w.id === id)!

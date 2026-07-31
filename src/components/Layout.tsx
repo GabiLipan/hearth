@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus } from 'lucide-react'
+import { Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle } from 'lucide-react'
+import { useSyncState } from '../hooks/useSync'
 import { cx } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
@@ -97,6 +98,8 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
+      <SyncBanner />
+
       {/* Content — fills every pixel the sidebar leaves, at any viewport width.
           Pages decide their own column counts from there. */}
       <main className="w-full min-w-0 flex-1 px-4 pb-32 pt-4 md:px-5 md:pb-8 md:pt-4 xl:px-6">
@@ -137,6 +140,41 @@ export function Layout({ children }: { children: ReactNode }) {
       </nav>
 
       <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} />
+    </div>
+  )
+}
+
+/**
+ * Says out loud when the app is not in step with the server.
+ *
+ * Deliberately a persistent strip rather than a toast: a write usually fails
+ * while offline, minutes after the phone was put down, and a message that
+ * disappears after three seconds is a message nobody sees. Silence here is what
+ * "my change vanished" feels like from the inside.
+ */
+function SyncBanner() {
+  const { online, pending, deadLetters } = useSyncState()
+  if (deadLetters === 0 && (online || pending === 0)) return null
+
+  const failed = deadLetters > 0
+  return (
+    <div
+      className={cx(
+        'flex items-center gap-2 px-4 py-2 text-sm md:px-5',
+        failed ? 'bg-critical/10 text-critical-text' : 'bg-surface-2 text-ink-2',
+      )}
+    >
+      {failed ? <AlertTriangle size={15} className="shrink-0" /> : <CloudOff size={15} className="shrink-0" />}
+      <span className="min-w-0 flex-1 truncate">
+        {failed
+          ? `${deadLetters} change${deadLetters === 1 ? '' : 's'} couldn\u2019t be saved`
+          : `Offline — ${pending} change${pending === 1 ? '' : 's'} will go up when you reconnect`}
+      </span>
+      {failed && (
+        <NavLink to="/settings" className="shrink-0 font-medium underline underline-offset-2">
+          Review
+        </NavLink>
+      )}
     </div>
   )
 }

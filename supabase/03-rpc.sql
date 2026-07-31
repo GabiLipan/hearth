@@ -121,6 +121,23 @@ begin
   update public.profiles set household_id = null where id = (select auth.uid());
 end $$;
 
+-- The currency is a property of the household, not of a device, so both people
+-- see amounts the same way. `households` has no UPDATE policy — every change to
+-- it goes through a function that decides what may be changed.
+create or replace function public.set_household_currency(p_currency text)
+returns public.households
+language plpgsql security definer set search_path = public as $$
+declare h public.households;
+begin
+  if p_currency !~ '^[A-Z]{3}$' then
+    raise exception 'Not a currency code' using errcode = '22023';
+  end if;
+  update public.households set currency = p_currency
+   where id = public.my_household()
+  returning * into h;
+  return h;
+end $$;
+
 -- ---------- constrained upserts ----------
 
 -- `budgets` has two partial unique indexes (household vs personal) that
@@ -367,6 +384,7 @@ declare f text;
 begin
   foreach f in array array[
     'create_household(text)', 'join_household(text)', 'leave_household()',
+    'set_household_currency(text)',
     'upsert_budget(uuid,uuid,boolean,bigint)', 'upsert_rule(uuid,text,uuid)',
     'post_due_bills(date)', 'post_bill(uuid,date)', 'skip_bill(uuid)',
     'account_balances()', 'sync_checksums()', 'wipe_household()',

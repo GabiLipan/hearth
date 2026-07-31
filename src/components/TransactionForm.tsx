@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ScanLine } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
+import { useAccounts, useCategories } from '../lib/cache'
 import { scanReceipt } from '../lib/receipt'
 import { canUseAccount } from '../lib/accounts'
 import { useSyncState } from '../hooks/useSync'
@@ -10,7 +11,7 @@ import { todayISO } from '../lib/dates'
 import { learnRule, suggestCategory, prettyPayee } from '../lib/rules'
 import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
-import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
+import { create, update, remove } from '../lib/data'
 import { useApp } from '../state/AppContext'
 import { Sheet, Field, TextInput, Select, Segmented, Button, cx } from './ui'
 import { CategoryIcon } from './CategoryIcon'
@@ -26,11 +27,11 @@ export function TransactionForm({
 }) {
   const { currency, money } = useApp()
   const { userId } = useSyncState()
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
-  const allAccounts = useLiveQuery(() => db.accounts.filter(notDeleted).toArray(), []) ?? []
+  const categories = useCategories()
+  const allAccounts = useAccounts()
   const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
   const payees = useLiveQuery(async () => {
-    const txns = await db.transactions.orderBy('date').reverse().limit(400).filter(notDeleted).toArray()
+    const txns = await db.transactions.orderBy('date').reverse().limit(400).toArray()
     return [...new Set(txns.map((t) => prettyPayee(t.payee)))].slice(0, 60)
   }, []) ?? []
 
@@ -103,14 +104,14 @@ export function TransactionForm({
 
   const visibleCategories = useMemo(() => categories.filter((c) => c.kind === kind), [categories, kind])
   const amountMinor = parseAmount(amount)
-  const canSave = amountMinor !== null && amountMinor > 0 && payee.trim() && categoryId !== undefined
+  const canSave = amountMinor !== null && amountMinor > 0 && payee.trim() && categoryId !== undefined && accountId !== undefined
 
   async function save() {
     if (!canSave) return
     const signed = kind === 'expense' ? -Math.abs(amountMinor!) : Math.abs(amountMinor!)
     if (!editing) {
       // Same amount, similar payee, within a few days — probably the same purchase.
-      const existing = await db.transactions.filter(notDeleted).toArray()
+      const existing = await db.transactions.toArray()
       const dup = findLikelyDuplicate({ date, payee: payee.trim(), amountMinor: signed }, existing)
       if (
         dup &&
@@ -122,24 +123,26 @@ export function TransactionForm({
       }
     }
     if (editing) {
-      await updateRow('transactions', editing.id!, {
+      await update('transactions', editing.id, {
         amountMinor: signed,
         payee: payee.trim(),
-        categoryId: categoryId!,
+        categoryId,
         date,
-        accountId,
+        accountId: accountId!,
+        // Explicitly undefined rather than omitted: that is what clears the note
+        // rather than leaving the old one in place (see mapping.ts).
         note: note.trim() || undefined,
       })
     } else {
-      await createRow<Transaction>('transactions', {
+      await create('transactions', {
         amountMinor: signed,
         payee: payee.trim(),
-        categoryId: categoryId!,
+        categoryId,
         date,
-        accountId,
+        accountId: accountId!,
         note: note.trim() || undefined,
         createdBy: userId,
-        createdAt: Date.now(),
+        createdAt: new Date().toISOString(),
       })
     }
     // The quiet automation: every save teaches the categoriser.
@@ -160,7 +163,7 @@ export function TransactionForm({
               size="lg"
               onClick={async () => {
                 if (confirm('Delete this transaction?')) {
-                  await removeRow('transactions', editing.id!)
+                  await remove('transactions', editing.id)
                   onClose()
                 }
               }}
@@ -262,7 +265,7 @@ export function TransactionForm({
                     : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
                 )}
               >
-                <CategoryIcon icon={c.icon} emoji={c.emoji} size={16} /> {c.name}
+                <CategoryIcon icon={c.icon} size={16} /> {c.name}
               </button>
             ))}
           </div>

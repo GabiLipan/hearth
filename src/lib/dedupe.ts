@@ -28,8 +28,8 @@ export function findLikelyDuplicate(
   let best: Transaction | undefined
   let bestGap = Infinity
   for (const t of existing) {
-    if (t.deleted || t.amountMinor !== cand.amountMinor) continue
-    if (usedIds?.has(t.id!)) continue
+    if (t.amountMinor !== cand.amountMinor) continue
+    if (usedIds?.has(t.id)) continue
     const gap = Math.abs(differenceInCalendarDays(parseISO(t.date), parseISO(cand.date)))
     if (gap > 3) continue
     if (!payeeSimilar(t.payee, cand.payee)) continue

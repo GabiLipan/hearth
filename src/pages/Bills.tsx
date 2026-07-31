@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Plus, Check, SkipForward, Wand2, CalendarClock } from 'lucide-react'
-import { db, type Bill, type BillFreq } from '../lib/db'
-import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
+import type { Bill, BillFreq } from '../lib/db'
+import { create, update, remove as removeRow } from '../lib/data'
+import { useAccounts, useBills, useCategories, useCategoryMap } from '../lib/cache'
+import { canUseAccount } from '../lib/accounts'
+import { syncNow } from '../lib/session'
 import { daysUntil, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from '../lib/dates'
 import { postBill, skipBill, detectBillSuggestions, type BillSuggestion } from '../lib/bills'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -31,9 +33,8 @@ function DueChip({ dateISO }: { dateISO: string }) {
 
 export default function Bills() {
   const { money } = useApp()
-  const bills = useLiveQuery(() => db.bills.filter(notDeleted).toArray(), []) ?? []
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
-  const catMap = useMemo(() => new Map(categories.map((c) => [c.id!, c])), [categories])
+  const bills = useBills()
+  const catMap = useCategoryMap()
   const [editing, setEditing] = useState<Bill | 'new' | null>(null)
   const [suggestions, setSuggestions] = useState<BillSuggestion[]>([])
 
@@ -78,7 +79,7 @@ export default function Bills() {
               {active.map((b) => (
                 <li key={b.id} className="flex items-center gap-3 px-4 py-3">
                   <button onClick={() => setEditing(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                    <CategoryDot category={catMap.get(b.categoryId)} />
+                    <CategoryDot category={b.categoryId ? catMap.get(b.categoryId) : undefined} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{b.name}</p>
                       <p className="text-sm text-ink-3">
@@ -94,7 +95,7 @@ export default function Bills() {
                   {!b.autoPost && (
                     <div className="flex shrink-0 flex-col gap-1.5">
                       <button
-                        onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO())}
+                        onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO()).then(() => syncNow())}
                         title="Mark paid"
                         aria-label={`Mark ${b.name} paid`}
                         className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20"
@@ -102,7 +103,7 @@ export default function Bills() {
                         <Check size={15} />
                       </button>
                       <button
-                        onClick={() => void skipBill(b)}
+                        onClick={() => void skipBill(b).then(() => syncNow())}
                         title="Skip this one"
                         aria-label={`Skip ${b.name}`}
                         className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink"
@@ -134,7 +135,7 @@ export default function Bills() {
               </thead>
               <tbody>
                 {active.map((b) => {
-                  const cat = catMap.get(b.categoryId)
+                  const cat = b.categoryId ? catMap.get(b.categoryId) : undefined
                   return (
                     <tr key={b.id} className={table.row}>
                       <td className={cx(table.cell, 'pl-3 pr-3')}>
@@ -145,7 +146,7 @@ export default function Bills() {
                       <td className={cx(table.cell, 'pr-3')}>
                         <span className="flex items-center gap-1.5 truncate text-ink-2">
                           <span className="shrink-0" style={{ color: cat ? `var(--series-${cat.slot})` : 'var(--ink-3)' }}>
-                            <CategoryIcon icon={cat?.icon} emoji={cat?.emoji} size={14} />
+                            <CategoryIcon icon={cat?.icon} size={14} />
                           </span>
                           <span className="truncate">{cat?.name ?? '—'}</span>
                         </span>
@@ -162,7 +163,7 @@ export default function Bills() {
                         {!b.autoPost && (
                           <div className="flex justify-end gap-1">
                             <button
-                              onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO())}
+                              onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO()).then(() => syncNow())}
                               title="Mark paid"
                               aria-label={`Mark ${b.name} paid`}
                               className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20 desktop:size-7"
@@ -170,7 +171,7 @@ export default function Bills() {
                               <Check size={14} />
                             </button>
                             <button
-                              onClick={() => void skipBill(b)}
+                              onClick={() => void skipBill(b).then(() => syncNow())}
                               title="Skip this one"
                               aria-label={`Skip ${b.name}`}
                               className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink desktop:size-7"
@@ -202,7 +203,7 @@ export default function Bills() {
                 key={s.payee}
                 className="flex items-center gap-3 rounded-2xl bg-surface px-4 py-3 ring-1 ring-hairline md:gap-2 md:rounded-xl desktop:px-2.5 desktop:py-2"
               >
-                <CategoryDot category={catMap.get(s.categoryId)} size={32} className="md:[--dot:24px]" />
+                <CategoryDot category={s.categoryId ? catMap.get(s.categoryId) : undefined} size={32} className="md:[--dot:24px]" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium md:text-sm">{s.payee}</p>
                   <p className="truncate text-sm text-ink-3 md:text-xs">
@@ -219,10 +220,11 @@ export default function Bills() {
                       payee: s.payee,
                       amountMinor: s.amountMinor,
                       categoryId: s.categoryId,
+                      accountId: s.accountId,
                       freq: s.freq,
                       nextDue: todayISO(),
-                      active: 1,
-                      autoPost: 0,
+                      active: true,
+                      autoPost: false,
                     } as Bill)
                   }
                 >
@@ -246,7 +248,7 @@ export default function Bills() {
                 onClick={() => setEditing(b)}
                 className="flex items-center gap-3 rounded-2xl bg-surface px-4 py-3 text-left opacity-60 ring-1 ring-hairline transition hover:opacity-100 md:gap-2 md:rounded-xl desktop:px-2.5 desktop:py-2"
               >
-                <CategoryDot category={catMap.get(b.categoryId)} size={32} className="md:[--dot:24px]" />
+                <CategoryDot category={b.categoryId ? catMap.get(b.categoryId) : undefined} size={32} className="md:[--dot:24px]" />
                 <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{b.name}</span>
                 <span className="shrink-0 text-sm tabular md:text-xs">{money(b.amountMinor)}</span>
               </button>
@@ -267,7 +269,9 @@ export default function Bills() {
 
 function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose: () => void }) {
   const { currency } = useApp()
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
+  const categories = useCategories()
+  const allAccounts = useAccounts()
+  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a)), [allAccounts])
   const expenseCats = categories.filter((c) => c.kind === 'expense')
   const [name, setName] = useState(bill?.name ?? '')
   const [payee, setPayee] = useState(bill?.payee ?? '')
@@ -275,11 +279,17 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
   const [categoryId, setCategoryId] = useState<string | undefined>(bill?.categoryId)
   const [freq, setFreq] = useState<BillFreq>(bill?.freq ?? 'monthly')
   const [nextDue, setNextDue] = useState(bill?.nextDue ?? todayISO())
+  // A bill is paid from an account, and every transaction it posts needs one.
+  const [accountId, setAccountId] = useState<string | undefined>(bill?.accountId)
   const [autoPost, setAutoPost] = useState<boolean>(bill ? !!bill.autoPost : true)
   const [active, setActive] = useState<boolean>(bill ? !!bill.active : true)
 
+  useEffect(() => {
+    if (!accountId && accounts.length) setAccountId(accounts[0].id)
+  }, [accounts, accountId])
+
   const minor = parseAmount(amount)
-  const canSave = name.trim() && minor !== null && minor > 0 && categoryId !== undefined && nextDue
+  const canSave = name.trim() && minor !== null && minor > 0 && categoryId !== undefined && nextDue && accountId
 
   async function save() {
     if (!canSave) return
@@ -287,18 +297,19 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
       name: name.trim(),
       payee: payee.trim() || name.trim(),
       amountMinor: -Math.abs(minor!),
-      categoryId: categoryId!,
+      categoryId,
+      accountId: accountId!,
       freq,
       nextDue,
-      active: (active ? 1 : 0) as 1 | 0,
-      autoPost: (autoPost ? 1 : 0) as 1 | 0,
+      active,
+      autoPost,
     }
-    if (bill?.id) await updateRow('bills', bill.id, data)
-    else await createRow<Bill>('bills', data)
+    if (bill?.id) await update('bills', bill.id, data)
+    else await create('bills', data)
     onClose()
   }
 
-  async function remove() {
+  async function deleteBill() {
     if (bill?.id && confirm(`Delete "${bill.name}"? Past transactions are kept.`)) {
       await removeRow('bills', bill.id)
       onClose()
@@ -313,7 +324,7 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
       footer={
         <div className="flex gap-2">
           {bill?.id && (
-            <Button variant="danger" size="lg" onClick={remove}>
+            <Button variant="danger" size="lg" onClick={deleteBill}>
               Delete
             </Button>
           )}
@@ -340,6 +351,15 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
             {expenseCats.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Paid from">
+          <Select value={accountId ?? ''} onChange={(e) => setAccountId(e.target.value || undefined)}>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
               </option>
             ))}
           </Select>
