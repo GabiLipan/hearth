@@ -1,6 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle } from 'lucide-react'
+import {
+  Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle,
+  PanelLeftClose, PanelLeftOpen,
+} from 'lucide-react'
 import { useSyncState } from '../hooks/useSync'
 import { cx } from './ui'
 import { BrandMark } from './BrandMark'
@@ -23,62 +26,98 @@ const TITLES: Record<string, string> = {
   '/settings': 'Settings',
 }
 
-function Logo() {
-  return (
-    <div className="flex items-center gap-2.5 px-2">
-      <BrandMark size={30} className="drop-shadow-sm" />
-      <span className="text-lg font-bold tracking-tight">Hearth</span>
-    </div>
-  )
-}
+/**
+ * Whether the desktop sidebar is collapsed to icons.
+ *
+ * Read synchronously from localStorage rather than restored in an effect, so
+ * the rail never paints wide and then snaps narrow on load. It is a property of
+ * this screen, not of the household, so it stays device-local and unsynced —
+ * the same reasoning as the theme.
+ */
+const COLLAPSED_KEY = 'hearth-sidebar-collapsed'
+const readCollapsed = () => localStorage.getItem(COLLAPSED_KEY) === '1'
 
 export function Layout({ children }: { children: ReactNode }) {
   const [addOpen, setAddOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
   const { pathname } = useLocation()
   const title = TITLES[pathname] ?? 'Hearth'
+
+  function toggleSidebar() {
+    setCollapsed((was) => {
+      const next = !was
+      localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0')
+      return next
+    })
+  }
+
+  // Collapsed items lose their visible label, so the accessible name has to come
+  // from somewhere — `title` also gives a native tooltip on hover.
+  const navItem = (isActive: boolean) =>
+    cx(
+      'flex items-center rounded-lg py-1.5 text-sm font-medium transition-colors',
+      collapsed ? 'justify-center px-0' : 'gap-2.5 px-2.5',
+      isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
+    )
 
   return (
     <div className="min-h-dvh md:flex">
       {/* Desktop / iPad sidebar. Sticky (not fixed) so it takes part in the flex
           row — main then simply fills whatever width is left, at any viewport. */}
-      <aside className="sticky top-0 z-40 hidden h-dvh w-52 shrink-0 flex-col gap-0.5 self-start border-r border-hairline bg-surface p-2.5 md:flex xl:w-56">
-        <div className="mb-4 mt-1">
-          <Logo />
+      <aside
+        className={cx(
+          'sticky top-0 z-40 hidden h-dvh shrink-0 flex-col gap-0.5 self-start border-r border-hairline bg-surface p-2.5 md:flex',
+          'transition-[width] duration-200 ease-out motion-reduce:transition-none',
+          collapsed ? 'w-[3.75rem] items-stretch' : 'w-52 xl:w-56',
+        )}
+      >
+        <div className={cx('mb-4 mt-1 flex items-center', collapsed ? 'flex-col gap-2' : 'justify-between gap-1 px-2')}>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <BrandMark size={30} className="shrink-0 drop-shadow-sm" />
+            {!collapsed && <span className="truncate text-lg font-bold tracking-tight">Hearth</span>}
+          </div>
+          <button
+            onClick={toggleSidebar}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className="grid size-7 shrink-0 place-items-center rounded-md text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
         </div>
+
         <button
           onClick={() => setAddOpen(true)}
-          className="mb-2.5 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110"
+          title={collapsed ? 'Add transaction' : undefined}
+          aria-label="Add transaction"
+          className={cx(
+            'mb-2.5 inline-flex h-9 items-center justify-center rounded-lg bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110',
+            !collapsed && 'gap-2',
+          )}
         >
-          <Plus size={16} /> Add transaction
+          <Plus size={16} />
+          {!collapsed && 'Add transaction'}
         </button>
+
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
-            className={({ isActive }) =>
-              cx(
-                'flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors',
-                isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
-              )
-            }
+            title={collapsed ? label : undefined}
+            className={({ isActive }) => navItem(isActive)}
           >
-            <Icon size={17} strokeWidth={2} />
-            {label}
+            <Icon size={17} strokeWidth={2} className="shrink-0" />
+            {!collapsed && label}
           </NavLink>
         ))}
+
         <div className="flex-1" />
-        <NavLink
-          to="/settings"
-          className={({ isActive }) =>
-            cx(
-              'flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors',
-              isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
-            )
-          }
-        >
-          <Settings size={17} />
-          Settings
+
+        <NavLink to="/settings" title={collapsed ? 'Settings' : undefined} className={({ isActive }) => navItem(isActive)}>
+          <Settings size={17} className="shrink-0" />
+          {!collapsed && 'Settings'}
         </NavLink>
       </aside>
 
