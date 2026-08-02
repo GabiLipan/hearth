@@ -1,12 +1,13 @@
-import { useMemo, useRef, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileUp, CheckCircle2 } from 'lucide-react'
-import { db, ensureDefaults, type Transaction } from '../lib/db'
+import { db } from '../lib/db'
+import { useAccounts, useCategories } from '../lib/cache'
+import { canUseAccount } from '../lib/accounts'
 import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping, type ImportRow } from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
 import { matchRule, prettyPayee, learnRule, buildHistoryMatcher } from '../lib/rules'
 import { findLikelyDuplicate } from '../lib/dedupe'
-import { createMany, notDeleted } from '../lib/data'
+import { createMany } from '../lib/data'
 import { useSyncState } from '../hooks/useSync'
 import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
@@ -18,7 +19,7 @@ interface ReviewRow {
   date: string
   payee: string
   amountMinor: number
-  categoryId: string
+  categoryId?: string
   duplicate: boolean // exact re-import of a previously imported row
   /** fuzzy match against an existing (usually manual) entry — needs the user's call */
   possibleDup?: { payee: string; date: string }
@@ -29,7 +30,13 @@ interface ReviewRow {
 export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { money } = useApp()
   const { userId } = useSyncState()
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
+  const categories = useCategories()
+  const allAccounts = useAccounts()
+  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
+  // A statement belongs to one account, and every transaction now needs one, so
+  // this is asked rather than guessed — importing into the wrong account would
+  // quietly corrupt two balances at once.
+  const [accountId, setAccountId] = useState<string | undefined>()
   const [step, setStep] = useState<Step>('pick')
   const [csv, setCsv] = useState<ParsedCSV | null>(null)
   const [mapping, setMapping] = useState<ColumnMapping | null>(null)
@@ -79,6 +86,10 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     setStep('map')
   }
 
+  useEffect(() => {
+    if (!accountId && accounts.length) setAccountId(accounts[0].id)
+  }, [accounts, accountId])
+
   const preview = useMemo(() => {
     if (!csv || !mapping) return []
     return extractRows(csv, mapping).slice(0, 3)
@@ -87,15 +98,11 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   async function buildReview(source?: ImportRow[]) {
     const extracted = (source ?? (csv && mapping ? extractRows(csv, mapping) : [])).filter((r) => r.valid)
     if (extracted.length === 0) return
-    const [rules, existing] = await Promise.all([
-      db.rules.filter(notDeleted).toArray(),
-      db.transactions.filter(notDeleted).toArray(),
+    const [rules, existing, cats] = await Promise.all([
+      db.rules.toArray(),
+      db.transactions.toArray(),
+      db.categories.toArray(),
     ])
-    let cats = await db.categories.filter(notDeleted).toArray()
-    if (!cats.some((c) => c.kind === 'expense')) {
-      await ensureDefaults()
-      cats = await db.categories.filter(notDeleted).toArray()
-    }
     const existingHashes = new Set(existing.map((t) => t.importHash ?? importHash(t)))
     const fallbackExpense = cats.find((c) => c.kind === 'expense' && c.name === 'Other') ?? cats.find((c) => c.kind === 'expense')
     const fallbackIncome = cats.find((c) => c.kind === 'income') ?? fallbackExpense
@@ -110,7 +117,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       if (!duplicate) {
         const match = findLikelyDuplicate(r, existing, matchedIds)
         if (match) {
-          matchedIds.add(match.id!)
+          matchedIds.add(match.id)
           possibleDup = { payee: match.payee, date: match.date }
         }
       }
@@ -124,7 +131,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
         date: r.date,
         payee: prettyPayee(r.payee),
         amountMinor: r.amountMinor,
-        categoryId: categoryId!,
+        categoryId,
         duplicate,
         possibleDup,
         include: !duplicate && !possibleDup,
@@ -137,22 +144,22 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   }
 
   async function doImport() {
+    if (!accountId) return
     const toImport = rows.filter((r) => r.include)
-    await createMany<Transaction>(
-      'transactions',
-      toImport.map((r) => ({
-        date: r.date,
-        payee: r.payee,
-        categoryId: r.categoryId,
-        amountMinor: r.amountMinor,
-        importHash: importHash(r),
-        createdBy: userId,
-        createdAt: Date.now(),
-      })),
-    )
+    const now = new Date().toISOString()
+    await createMany('transactions', toImport.map((r) => ({
+      date: r.date,
+      payee: r.payee,
+      categoryId: r.categoryId,
+      accountId,
+      amountMinor: r.amountMinor,
+      importHash: importHash(r),
+      createdBy: userId,
+      createdAt: now,
+    })))
     // Learn from every category the user corrected by hand.
     for (const r of toImport) {
-      if (r.userTouched && r.amountMinor < 0) await learnRule(r.payee, r.categoryId)
+      if (r.userTouched && r.amountMinor < 0 && r.categoryId) await learnRule(r.payee, r.categoryId)
     }
     setImportedCount(toImport.length)
     setStep('done')
@@ -274,6 +281,15 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
             )}
             . Fix any categories — Hearth learns from your corrections.
           </p>
+          <Field label="Import into">
+            <Select value={accountId ?? ''} onChange={(e) => setAccountId(e.target.value || undefined)}>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
           <div className="max-h-[46dvh] space-y-1 overflow-y-auto pr-1">
             {rows.map((r, i) => (
               <div

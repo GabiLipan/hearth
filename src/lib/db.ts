@@ -1,357 +1,266 @@
 import Dexie, { type EntityTable } from 'dexie'
 
 /**
- * Amounts are integer minor units (pence/cents). Negative = money out.
- * All synced rows carry: `id` (uuid string), `updatedAt` (client ms, used for
- * last-write-wins), `dirty` (1 = has local changes not yet pushed) and
- * `deleted` (soft-delete tombstone so deletions sync too).
+ * The local cache.
+ *
+ * This is NOT the source of truth — Supabase is. Everything in the entity
+ * tables below is a mirror of rows the server has confirmed, kept so the app
+ * paints instantly and still works with no signal. Anything the user changes
+ * is applied here optimistically *and* written to `outbox`, which is the only
+ * thing that is genuinely local state.
+ *
+ * Consequences worth knowing before changing anything here:
+ *
+ *  - **The cache holds live rows only.** A delete removes the row outright.
+ *    Tombstones exist on the server (so the other device learns about the
+ *    deletion) but they are never stored here, which is why no query in the app
+ *    filters on a `deleted` flag any more — and why the Dexie indexes below are
+ *    actually usable rather than degrading into full scans.
+ *  - **There is no `dirty` flag.** Whether a row has unsent changes is answered
+ *    by the outbox, not by a bit on the row. The old design had both and they
+ *    could disagree.
+ *  - **`updatedAt` is the server's timestamp**, an ISO string exactly as
+ *    PostgREST emitted it. Never round-trip it through `new Date()`: PostgREST
+ *    emits microseconds and JS truncates to milliseconds, and the pull cursor
+ *    is compared as a string.
+ *  - **The cache does not enforce foreign keys.** A transaction can arrive
+ *    before the category it points at, so `categoryId` may dangle; the UI
+ *    renders that as "Uncategorised" rather than crashing.
+ *
+ * Amounts are integer minor units (pence). Negative = money out.
  */
-export interface SyncedRow {
-  id?: string
-  updatedAt?: number
-  dirty?: 0 | 1
-  deleted?: 0 | 1
-}
 
-export interface Transaction extends SyncedRow {
-  date: string // yyyy-MM-dd
+export interface Transaction {
+  id: string
+  accountId: string
+  categoryId?: string
+  billId?: string
+  date: string // yyyy-MM-dd (server column `occurred_on`)
   payee: string
   note?: string
-  categoryId: string
-  accountId?: string
   amountMinor: number
+  /** `date|amount|payee` fingerprint feeding the import wizard's duplicate check. */
   importHash?: string
-  billId?: string
-  createdBy?: string // auth user id of whoever recorded it (feeds personal budgets)
-  createdAt: number
+  createdBy?: string
+  createdAt: string
+  updatedAt: string
 }
 
-export interface Category extends SyncedRow {
+export interface Category {
+  id: string
   name: string
-  emoji: string // legacy / fallback for categories created before icons
-  icon?: string // key into CATEGORY_ICONS (lucide); preferred over emoji
-  slot: number // 1..8 -> --series-N color
+  icon: string // key into CATEGORY_ICONS
+  slot: number // 1..8 -> --series-N colour
   kind: 'expense' | 'income'
   sortOrder: number
+  updatedAt: string
 }
 
-export interface Budget extends SyncedRow {
+export interface Budget {
+  id: string
   categoryId: string
-  amountMinor: number // monthly budget, positive
-  ownerId?: string // undefined = household budget; a user id = that person's own budget
+  /** null/undefined = a household budget; set = that person's own, private to them. */
+  ownerId?: string
+  amountMinor: number // positive, monthly
+  updatedAt: string
 }
 
 export type BillFreq = 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'yearly'
 
-export interface Bill extends SyncedRow {
+export interface Bill {
+  id: string
   name: string
   payee: string
   amountMinor: number // negative (outgoing)
-  categoryId: string
-  accountId?: string
+  categoryId?: string
+  accountId: string
   freq: BillFreq
   nextDue: string // yyyy-MM-dd
-  active: 1 | 0
-  autoPost: 1 | 0
+  active: boolean
+  autoPost: boolean
+  createdBy?: string
+  updatedAt: string
 }
 
-export interface Rule extends SyncedRow {
-  match: string // lowercased substring matched against payee
+export interface Rule {
+  id: string
+  match: string // normalised lowercase payee substring
   categoryId: string
-  createdAt: number
+  createdBy?: string
+  createdAt: string
+  updatedAt: string
 }
 
 /**
- * Account visibility (enforced server-side by RLS on the `private` column):
- * - 'shared': account and its transactions sync to the whole household
- * - 'balance': partner sees the account and its balance, not its transactions
- * - 'private': partner never sees the account at all
+ * Account visibility, enforced by RLS on the server (see supabase/02-rls.sql):
+ *  - 'shared'  — partner sees the account and every transaction on it
+ *  - 'balance' — partner sees the account and its total, but no line items
+ *  - 'private' — partner sees nothing at all
  */
 export type AccountVisibility = 'shared' | 'balance' | 'private'
 
-export interface Account extends SyncedRow {
+export interface Account {
+  id: string
   name: string
   kind: 'current' | 'credit' | 'savings' | 'cash'
-  visibility?: AccountVisibility // undefined = 'shared' (pre-privacy rows)
-  ownerId?: string // auth user id of the creator; undefined = household-owned
-  openingBalanceMinor?: number
-  balanceMinor?: number // maintained by the owner's device, synced for display
+  visibility: AccountVisibility
+  ownerId?: string
+  openingBalanceMinor: number
+  sortOrder: number
+  createdBy?: string
+  updatedAt: string
 }
 
 /**
- * When an account becomes more private, a purge record tells every non-owner
- * device to drop its local copies of that account's transactions.
+ * Balances for accounts whose transactions this device cannot see (a partner's
+ * 'balance'-tier account). Read from the server's `account_balances()` function,
+ * which sums the rows RLS hides from us. For accounts we CAN see in full the
+ * balance is computed locally instead, so optimistic edits show up immediately.
  */
-export interface Purge extends SyncedRow {
+export interface CachedBalance {
   accountId: string
-  ownerId: string
-  createdAt: number
+  balanceMinor: number
+  fetchedAt: number
 }
 
-export interface KV {
+export const SYNCED_TABLES = ['categories', 'accounts', 'bills', 'transactions', 'budgets', 'rules'] as const
+export type SyncedTable = (typeof SYNCED_TABLES)[number]
+
+export interface TableRowMap {
+  categories: Category
+  accounts: Account
+  bills: Bill
+  transactions: Transaction
+  budgets: Budget
+  rules: Rule
+}
+
+/* ---------- outbox ---------- */
+
+export type OutboxOp = 'insert' | 'update' | 'delete'
+export type OutboxStatus = 'pending' | 'blocked'
+
+/**
+ * One pending write. Flushed strictly in `seq` order, which is also what
+ * guarantees a category is created before the transaction that references it.
+ *
+ * `payload` is the whole row for an insert and ONLY the changed fields for an
+ * update — that field-level granularity is what stops two people editing
+ * different fields of the same transaction from overwriting each other.
+ */
+export interface OutboxEntry {
+  seq?: number
+  table: SyncedTable
+  op: OutboxOp
+  rowId: string
+  /** `${table}:${rowId}` — the key later entries name in `refs`. */
+  rowKey: string
+  payload: Record<string, unknown>
+  /** rowKeys this entry depends on, so a failure can quarantine its dependants. */
+  refs: string[]
+  createdAt: number
+  attempts: number
+  /** Epoch ms; the flush skips entries backing off after a transient failure. */
+  nextAttemptAt: number
+  status: OutboxStatus
+  lastError?: string
+}
+
+/**
+ * A write the server refused for a reason retrying cannot fix — a foreign key
+ * that no longer exists, an RLS denial, an update matching zero rows. Kept so
+ * the user is told rather than silently losing the change, and so the
+ * optimistic row it created can be rolled back.
+ */
+export interface DeadLetter {
+  id: string
+  table: SyncedTable
+  op: OutboxOp
+  rowId: string
+  payload: Record<string, unknown>
+  /** Plain English, e.g. "Tesco, £12.40, 3 Mar" — shown in Settings. */
+  summary: string
+  code?: string
+  message: string
+  failedAt: number
+}
+
+export interface Meta {
   key: string
   value: string
 }
 
-export const SYNCED_TABLES = ['transactions', 'categories', 'budgets', 'bills', 'rules', 'accounts', 'purges'] as const
-export type SyncedTable = (typeof SYNCED_TABLES)[number]
-
-export const db = new Dexie('hearth-finance') as Dexie & {
+export const db = new Dexie('hearth') as Dexie & {
   transactions: EntityTable<Transaction, 'id'>
   categories: EntityTable<Category, 'id'>
   budgets: EntityTable<Budget, 'id'>
   bills: EntityTable<Bill, 'id'>
   rules: EntityTable<Rule, 'id'>
   accounts: EntityTable<Account, 'id'>
-  purges: EntityTable<Purge, 'id'>
-  kv: EntityTable<KV, 'key'>
+  balances: EntityTable<CachedBalance, 'accountId'>
+  outbox: EntityTable<OutboxEntry, 'seq'>
+  deadLetters: EntityTable<DeadLetter, 'id'>
+  meta: EntityTable<Meta, 'key'>
 }
 
+// A new database name, not a migration: the old `hearth-finance` store held
+// rows keyed by ids that no longer mean anything (`def-groceries`, numeric
+// auto-increments) and carried `dirty`/`deleted` flags this design does not
+// have. It is abandoned rather than converted, and the server is re-pulled.
 db.version(1).stores({
-  transactions: '++id, date, categoryId, accountId, importHash, billId',
-  categories: '++id, kind, sortOrder',
-  budgets: '++id, &categoryId',
-  bills: '++id, nextDue, active',
-  rules: '++id, categoryId',
-  accounts: '++id',
-  kv: 'key',
-})
-
-// v2: drop the unique index on budgets.categoryId (sync upserts need plain puts)
-db.version(2).stores({
-  budgets: '++id, categoryId',
-})
-
-// v3: purge records for account-privacy changes
-db.version(3).stores({
-  purges: '++id, accountId',
+  transactions: 'id, date, categoryId, accountId, importHash, billId, updatedAt',
+  categories: 'id, kind, sortOrder, updatedAt',
+  budgets: 'id, categoryId, updatedAt',
+  bills: 'id, nextDue, active, updatedAt',
+  rules: 'id, match, categoryId, updatedAt',
+  accounts: 'id, sortOrder, updatedAt',
+  balances: 'accountId',
+  outbox: '++seq, rowKey, status, table',
+  deadLetters: 'id, failedAt',
+  meta: 'key',
 })
 
 export const newId = () => crypto.randomUUID()
 
+export const rowKey = (table: SyncedTable, id: string) => `${table}:${id}`
+
+/* ---------- device-local settings ---------- */
+//
+// These never sync. Theme and the dashboard layout are properties of *this*
+// screen, not of the household — the old design synced neither but exported
+// both, which is how one device's sync cursor could be restored onto another.
+
 export async function getSetting(key: string): Promise<string | undefined> {
-  return (await db.kv.get(key))?.value
+  return (await db.meta.get(key))?.value
 }
 
 export async function setSetting(key: string, value: string) {
-  await db.kv.put({ key, value })
+  await db.meta.put({ key, value })
 }
 
 export async function delSetting(key: string) {
-  await db.kv.delete(key)
+  await db.meta.delete(key)
 }
 
-/**
- * One-time migration: rows created before sync support have auto-increment
- * numeric ids. Rewrite them (and every cross-reference) with uuid strings so
- * ids are globally unique across the household's devices.
- */
-export async function migrateIdsToUuid() {
-  if (await getSetting('uuidMigrated')) return
-  await db.transaction('rw', [db.transactions, db.categories, db.budgets, db.bills, db.rules, db.accounts, db.kv], async () => {
-    const now = Date.now()
-    const remap = async (table: SyncedTable) => {
-      const map = new Map<number, string>()
-      const rows = await db.table(table).toArray()
-      for (const row of rows) {
-        if (typeof row.id !== 'number') continue
-        const id = newId()
-        map.set(row.id, id)
-        await db.table(table).delete(row.id)
-        await db.table(table).add({ ...row, id, updatedAt: now, dirty: 1 })
-      }
-      return map
-    }
-    const catMap = await remap('categories')
-    const accMap = await remap('accounts')
-    const billMap = await remap('bills')
-    await remap('budgets')
-    await remap('rules')
-    await remap('transactions')
-    const fixRef = (v: unknown, map: Map<number, string>) => (typeof v === 'number' ? map.get(v) : (v as string | undefined))
-    await db.transactions.toCollection().modify((t) => {
-      t.categoryId = fixRef(t.categoryId, catMap)!
-      t.accountId = fixRef(t.accountId, accMap)
-      t.billId = fixRef(t.billId, billMap)
-    })
-    await db.budgets.toCollection().modify((b) => {
-      b.categoryId = fixRef(b.categoryId, catMap)!
-    })
-    await db.bills.toCollection().modify((b) => {
-      b.categoryId = fixRef(b.categoryId, catMap)!
-      b.accountId = fixRef(b.accountId, accMap)
-    })
-    await db.rules.toCollection().modify((r) => {
-      r.categoryId = fixRef(r.categoryId, catMap)!
-    })
-    await db.kv.put({ key: 'uuidMigrated', value: '1' })
+/** Wipe every cached row, keeping the outbox and device settings intact. */
+export async function clearCache() {
+  await db.transaction('rw', [db.transactions, db.categories, db.budgets, db.bills, db.rules, db.accounts, db.balances], async () => {
+    await Promise.all([
+      db.transactions.clear(),
+      db.categories.clear(),
+      db.budgets.clear(),
+      db.bills.clear(),
+      db.rules.clear(),
+      db.accounts.clear(),
+      db.balances.clear(),
+    ])
   })
 }
 
-// Built-in categories carry stable `def-*` ids. Because every device seeds the
-// same ids, two people seeding defaults and then syncing collapse onto one row
-// instead of creating a duplicate per device (see dedupeCategories).
-const DEFAULT_CATEGORIES: (Omit<Category, 'id'> & { id: string })[] = [
-  { id: 'def-groceries', name: 'Groceries', emoji: '🛒', icon: 'cart', slot: 2, kind: 'expense', sortOrder: 0 },
-  { id: 'def-home-utilities', name: 'Home & utilities', emoji: '🏠', icon: 'home', slot: 5, kind: 'expense', sortOrder: 1 },
-  { id: 'def-transport', name: 'Transport', emoji: '🚗', icon: 'car', slot: 1, kind: 'expense', sortOrder: 2 },
-  { id: 'def-dining-out', name: 'Dining out', emoji: '🍽️', icon: 'dining', slot: 8, kind: 'expense', sortOrder: 3 },
-  { id: 'def-shopping', name: 'Shopping', emoji: '🛍️', icon: 'bag', slot: 7, kind: 'expense', sortOrder: 4 },
-  { id: 'def-subscriptions', name: 'Subscriptions', emoji: '📺', icon: 'tv', slot: 6, kind: 'expense', sortOrder: 5 },
-  { id: 'def-health', name: 'Health', emoji: '💊', icon: 'health', slot: 4, kind: 'expense', sortOrder: 6 },
-  { id: 'def-fun-leisure', name: 'Fun & leisure', emoji: '🎉', icon: 'fun', slot: 3, kind: 'expense', sortOrder: 7 },
-  { id: 'def-other', name: 'Other', emoji: '📦', icon: 'package', slot: 1, kind: 'expense', sortOrder: 8 },
-  { id: 'def-salary', name: 'Salary', emoji: '💼', icon: 'wallet', slot: 2, kind: 'income', sortOrder: 9 },
-  { id: 'def-other-income', name: 'Other income', emoji: '💰', icon: 'coins', slot: 4, kind: 'income', sortOrder: 10 },
-]
-
-// The starter account carries a stable id for the same reason the categories
-// do: every device seeds the same "Joint account" row, so they collapse onto
-// one instead of piling up a duplicate per device.
-const DEFAULT_ACCOUNT = { id: 'acct-joint', name: 'Joint account', kind: 'current' as const }
-
-/**
- * Seed (or revive) the default categories and account. Counts only live rows so
- * that after a wipe — which tombstones everything — the defaults come back:
- * `put` overwrites their own tombstones with fresh, live copies that sync.
- */
-export async function ensureDefaults() {
-  const now = Date.now()
-  const liveCategories = await db.categories.filter((c) => !c.deleted).count()
-  if (liveCategories === 0) {
-    await db.categories.bulkPut(DEFAULT_CATEGORIES.map((c) => ({ ...c, deleted: 0, dirty: 1 as const, updatedAt: now })))
-  }
-  const liveAccounts = await db.accounts.filter((a) => !a.deleted).count()
-  if (liveAccounts === 0) {
-    await db.accounts.put({ ...DEFAULT_ACCOUNT, deleted: 0, dirty: 1, updatedAt: now })
-  }
-  // Backfill icons onto default categories seeded before icons existed.
-  for (const c of DEFAULT_CATEGORIES) {
-    const existing = await db.categories.get(c.id)
-    if (existing && !existing.deleted && !existing.icon) {
-      await db.categories.update(c.id, { icon: c.icon, dirty: 1, updatedAt: now })
-    }
-  }
-}
-
-const norm = (s: string) => s.trim().toLowerCase()
-const catKey = (kind: string, name: string) => `${kind}::${norm(name)}`
-
-// name+kind -> the canonical id built-in categories should collapse onto.
-const DEFAULT_CANONICAL = new Map(DEFAULT_CATEGORIES.map((c) => [catKey(c.kind, c.name), c.id]))
-
-function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
-  const groups = new Map<string, T[]>()
-  for (const item of items) {
-    const k = key(item)
-    const bucket = groups.get(k)
-    if (bucket) bucket.push(item)
-    else groups.set(k, [item])
-  }
-  return groups
-}
-
-/**
- * Collapse categories that share a name+kind into a single canonical row,
- * repointing every transaction/bill/budget/rule onto it and tombstoning the
- * losers so the cleanup propagates through sync. Built-in categories collapse
- * onto their stable `def-*` id; custom duplicates collapse onto their
- * lowest id (a deterministic choice, so every device picks the same survivor).
- *
- * Runs on boot and at the start of each sync. When the data is already clean it
- * only reads the (tiny) categories/accounts tables and returns, so it's cheap
- * to repeat.
- */
-export async function dedupeSyncedData() {
-  await dedupeCategories()
-  await dedupeAccounts()
-}
-
-async function dedupeCategories() {
-  const cats = await db.categories.filter((c) => !c.deleted).toArray()
-  const now = Date.now()
-  let changed = false
-
-  for (const [key, members] of groupBy(cats, (c) => catKey(c.kind, c.name))) {
-    const canonicalId = DEFAULT_CANONICAL.get(key) ?? members.map((m) => m.id!).sort()[0]
-    const canonical = members.find((m) => m.id === canonicalId)
-    const losers = members.filter((m) => m.id !== canonicalId)
-    if (canonical && losers.length === 0) continue // already clean
-
-    // Preserve the fields of whichever copy is most-used, tie-break by id.
-    if (!canonical) {
-      const counts = await Promise.all(members.map((m) => db.transactions.where('categoryId').equals(m.id!).count()))
-      const source = members
-        .map((m, i) => ({ m, n: counts[i] }))
-        .sort((a, b) => b.n - a.n || (a.m.id! < b.m.id! ? -1 : 1))[0].m
-      await db.categories.put({ ...source, id: canonicalId, deleted: 0, dirty: 1, updatedAt: now })
-    }
-
-    for (const loser of losers) {
-      const from = loser.id!
-      await db.transactions.where('categoryId').equals(from).modify({ categoryId: canonicalId, dirty: 1, updatedAt: now })
-      await db.budgets.where('categoryId').equals(from).modify({ categoryId: canonicalId, dirty: 1, updatedAt: now })
-      await db.rules.where('categoryId').equals(from).modify({ categoryId: canonicalId, dirty: 1, updatedAt: now })
-      await db.bills.filter((b) => b.categoryId === from).modify({ categoryId: canonicalId, dirty: 1, updatedAt: now })
-      await db.categories.update(from, { deleted: 1, dirty: 1, updatedAt: now })
-    }
-    changed = true
-  }
-
-  if (changed) {
-    await dedupeDuplicateRows()
-  }
-}
-
-/** After repointing, two budgets (or rules) can point at the same key — keep one. */
-async function dedupeDuplicateRows() {
-  const now = Date.now()
-  const budgets = await db.budgets.filter((b) => !b.deleted).toArray()
-  for (const [, members] of groupBy(budgets, (b) => `${b.categoryId}::${b.ownerId ?? ''}`)) {
-    if (members.length < 2) continue
-    const survivor = members.map((m) => m.id!).sort()[0]
-    for (const m of members) if (m.id !== survivor) await db.budgets.update(m.id!, { deleted: 1, dirty: 1, updatedAt: now })
-  }
-  const rules = await db.rules.filter((r) => !r.deleted).toArray()
-  for (const [, members] of groupBy(rules, (r) => norm(r.match))) {
-    if (members.length < 2) continue
-    const survivor = members.map((m) => m.id!).sort()[0]
-    for (const m of members) if (m.id !== survivor) await db.rules.update(m.id!, { deleted: 1, dirty: 1, updatedAt: now })
-  }
-}
-
-/**
- * Collapse duplicate starter "Joint account" rows onto the stable default id,
- * repointing their transactions and bills. Deliberately narrow: it only touches
- * plain, unowned, shared accounts (the seeded default and simple duplicates),
- * never a private or personally-owned account a partner shouldn't see merged.
- */
-async function dedupeAccounts() {
-  const now = Date.now()
-  const accounts = await db.accounts.filter((a) => !a.deleted).toArray()
-  const defaults = accounts.filter(
-    (a) =>
-      a.kind === DEFAULT_ACCOUNT.kind &&
-      norm(a.name) === norm(DEFAULT_ACCOUNT.name) &&
-      !a.ownerId &&
-      (a.visibility === undefined || a.visibility === 'shared'),
-  )
-  const extras = defaults.filter((a) => a.id !== DEFAULT_ACCOUNT.id)
-  if (extras.length === 0) return
-
-  if (!defaults.some((a) => a.id === DEFAULT_ACCOUNT.id)) {
-    // Re-key the most-used duplicate to the stable id, preserving its fields.
-    const counts = await Promise.all(defaults.map((a) => db.transactions.where('accountId').equals(a.id!).count()))
-    const source = defaults
-      .map((a, i) => ({ a, n: counts[i] }))
-      .sort((x, y) => y.n - x.n || (x.a.id! < y.a.id! ? -1 : 1))[0].a
-    await db.accounts.put({ ...source, id: DEFAULT_ACCOUNT.id, deleted: 0, dirty: 1, updatedAt: now })
-  }
-
-  for (const loser of extras) {
-    const from = loser.id!
-    await db.transactions.where('accountId').equals(from).modify({ accountId: DEFAULT_ACCOUNT.id, dirty: 1, updatedAt: now })
-    await db.bills.filter((b) => b.accountId === from).modify({ accountId: DEFAULT_ACCOUNT.id, dirty: 1, updatedAt: now })
-    await db.accounts.update(from, { deleted: 1, dirty: 1, updatedAt: now })
-  }
+/** Sign-out / leave-household: everything goes, including pending writes. */
+export async function clearEverything() {
+  await clearCache()
+  await db.outbox.clear()
+  await db.deadLetters.clear()
+  await db.meta.clear()
 }

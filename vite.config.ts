@@ -19,7 +19,17 @@ export default defineConfig({
         // ONNX Runtime's WASM is loaded from a CDN at runtime, so keep the copy
         // Vite emits into the bundle out of the precache manifest.
         globIgnores: ['**/*.wasm'],
+        // Never let the service worker touch Supabase. A cached PostgREST
+        // response replayed to the pull loop would write stale rows into the
+        // cache with nothing to reveal they were stale — and the cache would
+        // then look authoritative. All API traffic must reach the network or
+        // fail honestly so the outbox can retry.
+        navigateFallbackDenylist: [/^https:\/\/[a-z0-9-]+\.supabase\.co\//],
         runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/[a-z0-9-]+\.supabase\.co\//,
+            handler: 'NetworkOnly',
+          },
           {
             urlPattern: /\/models\//,
             handler: 'CacheFirst',

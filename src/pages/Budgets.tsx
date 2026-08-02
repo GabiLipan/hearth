@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Plus, Target } from 'lucide-react'
-import { db, type Category, type Budget } from '../lib/db'
-import { createRow, updateRow, removeRow, notDeleted } from '../lib/data'
-import { thisMonthKey, monthLabel, monthKey } from '../lib/dates'
+import type { Category } from '../lib/db'
+import { create, update, remove } from '../lib/data'
+import { useBudgets, useCategories, useTransactionsInMonth } from '../lib/cache'
+import { thisMonthKey, monthLabel } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -26,9 +26,9 @@ export default function Budgets() {
   const [editingCat, setEditingCat] = useState<Category | null>(null)
   const [amount, setAmount] = useState('')
 
-  const categories = useLiveQuery(() => db.categories.orderBy('sortOrder').filter(notDeleted).toArray(), []) ?? []
-  const allBudgets = useLiveQuery(() => db.budgets.filter(notDeleted).toArray(), []) ?? []
-  const txns = useLiveQuery(() => db.transactions.filter((t) => !t.deleted && monthKey(t.date) === month).toArray(), [month]) ?? []
+  const categories = useCategories()
+  const allBudgets = useBudgets()
+  const txns = useTransactionsInMonth(month)
 
   const mine = scope === 'mine' && !!userId
   const budgets = useMemo(
@@ -41,21 +41,22 @@ export default function Budgets() {
     for (const t of txns) {
       if (t.amountMinor >= 0) continue
       if (mine && t.createdBy !== userId) continue // personal budgets track what *you* recorded
+      if (!t.categoryId) continue
       m.set(t.categoryId, (m.get(t.categoryId) ?? 0) - t.amountMinor)
     }
     return m
   }, [txns, mine, userId])
 
   const expenseCats = categories.filter((c) => c.kind === 'expense')
-  const budgeted = expenseCats.filter((c) => budgetMap.has(c.id!))
-  const unbudgeted = expenseCats.filter((c) => !budgetMap.has(c.id!))
-  const totalBudget = budgeted.reduce((s, c) => s + budgetMap.get(c.id!)!.amountMinor, 0)
-  const totalSpent = budgeted.reduce((s, c) => s + (spentMap.get(c.id!) ?? 0), 0)
+  const budgeted = expenseCats.filter((c) => budgetMap.has(c.id))
+  const unbudgeted = expenseCats.filter((c) => !budgetMap.has(c.id))
+  const totalBudget = budgeted.reduce((s, c) => s + budgetMap.get(c.id)!.amountMinor, 0)
+  const totalSpent = budgeted.reduce((s, c) => s + (spentMap.get(c.id) ?? 0), 0)
   const totalFrac = totalBudget > 0 ? totalSpent / totalBudget : 0
   const isCurrent = month === thisMonthKey()
 
   function openEditor(cat: Category) {
-    const existing = budgetMap.get(cat.id!)
+    const existing = budgetMap.get(cat.id)
     setAmount(existing ? String(existing.amountMinor / 100) : '')
     setEditingCat(cat)
   }
@@ -63,15 +64,17 @@ export default function Budgets() {
   async function saveBudget() {
     if (!editingCat) return
     const minor = parseAmount(amount)
-    const existing = budgetMap.get(editingCat.id!)
+    const existing = budgetMap.get(editingCat.id)
     if (minor === null || minor <= 0) {
-      if (existing) await removeRow('budgets', existing.id!)
+      if (existing) await remove('budgets', existing.id)
     } else if (existing) {
-      await updateRow('budgets', existing.id!, { amountMinor: minor })
+      await update('budgets', existing.id, { amountMinor: minor })
     } else {
-      await createRow<Budget>('budgets', {
-        categoryId: editingCat.id!,
+      await create('budgets', {
+        categoryId: editingCat.id,
         amountMinor: minor,
+        // A budget with an owner is private to them; the server enforces that,
+        // so the partner never sees a "just mine" figure.
         ownerId: mine ? userId : undefined,
       })
     }
@@ -143,8 +146,8 @@ export default function Budgets() {
 
           <div className={BUDGET_GRID}>
             {budgeted.map((c) => {
-              const budget = budgetMap.get(c.id!)!.amountMinor
-              const spent = spentMap.get(c.id!) ?? 0
+              const budget = budgetMap.get(c.id)!.amountMinor
+              const spent = spentMap.get(c.id) ?? 0
               const frac = spent / budget
               const left = budget - spent
               return (
@@ -202,7 +205,7 @@ export default function Budgets() {
                 <CategoryDot category={c} size={30} className="md:[--dot:24px]" />
                 <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{c.name}</span>
                 <span className="shrink-0 text-sm text-ink-3 tabular md:text-xs">
-                  {money(spentMap.get(c.id!) ?? 0)} spent
+                  {money(spentMap.get(c.id) ?? 0)} spent
                 </span>
                 <span className="flex shrink-0 items-center gap-0.5 text-sm font-medium text-accent md:text-xs">
                   <Plus size={13} /> Budget

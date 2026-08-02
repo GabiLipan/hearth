@@ -1,9 +1,29 @@
 import { createClient } from '@supabase/supabase-js'
 
-// These identify the household's Supabase project. The publishable key is
-// designed to ship in client bundles — data access is enforced by Row Level
-// Security on the server, not by secrecy of this key.
-export const SUPABASE_URL = 'https://mwcsglhtygpuvgdyjfpq.supabase.co'
-export const SUPABASE_KEY = 'sb_publishable_cmtPOngJ16UK9F9rggclFA_gTEfC5Ys'
+const url = import.meta.env.VITE_SUPABASE_URL
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+/**
+ * Whether the app has been pointed at a Supabase project yet. Checked by
+ * AuthGate so a missing `.env` produces instructions rather than a white
+ * screen — throwing here would take the whole bundle down at import time.
+ */
+export const isConfigured = Boolean(url && anonKey)
+
+/**
+ * The publishable key ships in the bundle by design. It names the project; it
+ * does not grant access to anything. Every request carries the signed-in user's
+ * token, and row level security decides per row what that user may see — see
+ * supabase/02-rls.sql. A stranger with this key and no session gets an empty
+ * result, not an error.
+ *
+ * The `service_role` key is the one that must never appear here, in the repo,
+ * or in a build secret: it bypasses row level security entirely.
+ */
+export const supabase = createClient(url || 'https://unconfigured.invalid', anonKey || 'unconfigured', {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+})

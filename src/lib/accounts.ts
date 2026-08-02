@@ -1,5 +1,5 @@
-import { db, type Account, type AccountVisibility, type Purge, type Transaction } from './db'
-import { createRow, updateRow, notDeleted } from './data'
+import { update } from './data'
+import type { Account, AccountVisibility, Transaction } from './db'
 
 export const VISIBILITY_LABEL: Record<AccountVisibility, string> = {
   shared: 'Shared with household',
@@ -7,55 +7,65 @@ export const VISIBILITY_LABEL: Record<AccountVisibility, string> = {
   private: 'Private',
 }
 
-/** Can this device's user record spending against the account? */
+export const VISIBILITY_HINT: Record<AccountVisibility, string> = {
+  shared: 'Both of you see this account and everything on it.',
+  balance: 'They see the account and what it holds, but not what you spent it on.',
+  private: 'They cannot see this account at all.',
+}
+
+/** Can this user record spending against the account? */
 export function canUseAccount(a: Account, myUserId?: string) {
-  const vis = a.visibility ?? 'shared'
-  return vis === 'shared' || !a.ownerId || a.ownerId === myUserId
+  return a.visibility === 'shared' || !a.ownerId || a.ownerId === myUserId
 }
 
-/** Live balance from local data — correct on the owner's device. */
+/** Can this user read the account's individual transactions? Mirrors the server's RLS. */
+export function canSeeTransactions(a: Account, myUserId?: string) {
+  return a.visibility === 'shared' || (!!myUserId && a.ownerId === myUserId)
+}
+
+/** Balance from the transactions we hold locally. */
 export function computeBalance(account: Account, txns: Transaction[]) {
-  const sum = txns.reduce(
-    (s, t) => (t.accountId === account.id && !t.deleted ? s + t.amountMinor : s),
-    0,
-  )
-  return (account.openingBalanceMinor ?? 0) + sum
+  const sum = txns.reduce((s, t) => (t.accountId === account.id ? s + t.amountMinor : s), 0)
+  return account.openingBalanceMinor + sum
 }
 
 /**
- * Persist balances for accounts this user owns (or unowned household accounts)
- * so partners with balance-only visibility see an up-to-date figure. Called
- * before every sync push; only writes when the number actually changed.
+ * An account's balance.
+ *
+ * Computed locally whenever this device can see the underlying transactions, so
+ * that adding one moves the number immediately rather than after a round trip.
+ * For a partner's balance-only account we cannot see the line items at all, so
+ * the figure comes from the server's `account_balances()` function, which sums
+ * the rows RLS hides from us.
+ *
+ * There is deliberately no stored `balanceMinor` column any more. The old one
+ * was recomputed and re-uploaded by both devices on every sync, so an account
+ * neither person owned had its balance overwritten back and forth forever.
  */
-export async function recomputeOwnedBalances(myUserId?: string) {
-  const [accounts, txns] = await Promise.all([
-    db.accounts.filter(notDeleted).toArray(),
-    db.transactions.filter(notDeleted).toArray(),
-  ])
-  for (const a of accounts) {
-    if (a.ownerId && a.ownerId !== myUserId) continue
-    const balance = computeBalance(a, txns)
-    if (balance !== (a.balanceMinor ?? null)) {
-      await updateRow('accounts', a.id!, { balanceMinor: balance })
-    }
-  }
+export function balanceOf(
+  account: Account,
+  txns: Transaction[],
+  remoteBalances: Map<string, number>,
+  myUserId?: string,
+): number {
+  if (canSeeTransactions(account, myUserId)) return computeBalance(account, txns)
+  return remoteBalances.get(account.id) ?? account.openingBalanceMinor
 }
 
 /**
- * Apply a visibility change with its sync side-effects:
- * - more private: emit a purge so partner devices drop the transactions
- * - any change: re-push the account's transactions so the server's `private`
- *   flag matches the new visibility
+ * Change an account's privacy.
+ *
+ * A plain field update now: the server bumps the household's visibility epoch,
+ * and the partner's device responds by dropping its cache and re-pulling. The
+ * old client had to emit a "purge" record by hand for the partner to act on,
+ * which only covered the case it remembered to emit — not a transaction being
+ * moved onto a private account, nor an ownership change, nor someone leaving.
  */
 export async function setAccountVisibility(account: Account, visibility: AccountVisibility, myUserId?: string) {
-  const before = account.visibility ?? 'shared'
-  if (before === visibility) return
-  await updateRow('accounts', account.id!, { visibility, ownerId: account.ownerId ?? myUserId })
-  await db.transactions.where('accountId').equals(account.id!).modify((t) => {
-    t.dirty = 1
+  if (account.visibility === visibility) return
+  await update('accounts', account.id, {
+    visibility,
+    // A non-shared account needs an owner: it is who it is private *to*.
+    ownerId: account.ownerId ?? myUserId,
   })
-  const rank: Record<AccountVisibility, number> = { shared: 0, balance: 1, private: 2 }
-  if (rank[visibility] > rank[before] && myUserId) {
-    await createRow<Purge>('purges', { accountId: account.id!, ownerId: myUserId, createdAt: Date.now() })
-  }
 }

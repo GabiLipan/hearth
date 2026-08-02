@@ -1,58 +1,49 @@
 import { db, type Bill, type Transaction } from './db'
-import { advanceDue, todayISO } from './dates'
+import { todayISO } from './dates'
 import { normalizePayee, prettyPayee } from './rules'
-import { createRow, updateRow, notDeleted } from './data'
+import { rpc } from './api'
 import { differenceInCalendarDays, parseISO } from 'date-fns'
 
 /**
- * Post a bill occurrence as a transaction and advance its next-due date.
- * The transaction id is derived from bill + due date so that two devices
- * auto-posting the same occurrence converge on one row instead of duplicating.
+ * Recording a bill happens on the SERVER, not here.
+ *
+ * A bill occurrence is identified by (bill, due date), and `bill_postings` has
+ * that as its primary key — so two devices catching up on the same overdue bill
+ * produce one transaction, not two, and `next_due` advances exactly once. The
+ * old client approximated this by deriving the transaction's id from the bill
+ * and due date, which converged only after a sync had merged the duplicates.
+ *
+ * This makes bill posting online-only. That is a deliberate trade: it is a
+ * background convenience, nothing is lost by deferring it, and it catches up on
+ * reconnect — whereas queueing it offline would mean teaching the outbox to
+ * replay RPCs, for no benefit the user would ever notice.
  */
-export async function postBill(bill: Bill, onDate?: string) {
-  const date = onDate ?? bill.nextDue
-  await createRow<Transaction>('transactions', {
-    id: `autopost-${bill.id}-${bill.nextDue}`,
-    date,
-    payee: bill.payee || bill.name,
-    note: bill.name,
-    categoryId: bill.categoryId,
-    accountId: bill.accountId,
-    amountMinor: bill.amountMinor,
-    billId: bill.id,
-    createdAt: Date.now(),
-  })
-  await updateRow('bills', bill.id!, { nextDue: advanceDue(bill.nextDue, bill.freq) })
+
+/** Record this occurrence now. Returns the new transaction id, or null if the other device got there first. */
+export async function postBill(bill: Bill, onDate?: string): Promise<string | null> {
+  return rpc<string | null>('post_bill', { p_bill_id: bill.id, p_on_date: onDate ?? null })
 }
 
 /** Skip an occurrence without recording a payment. */
-export async function skipBill(bill: Bill) {
-  await updateRow('bills', bill.id!, { nextDue: advanceDue(bill.nextDue, bill.freq) })
+export async function skipBill(bill: Bill): Promise<void> {
+  await rpc('skip_bill', { p_bill_id: bill.id })
 }
 
 /**
- * Runs at startup: for auto-post bills, record every occurrence that has come
- * due. Caps at 24 iterations as a safety valve.
+ * Catch up every auto-post bill that has come due, in one server-side
+ * transaction. Runs after the first successful sync rather than at boot: a
+ * device that has not yet pulled has no idea which occurrences already exist.
  */
-export async function autoPostDueBills() {
-  const today = todayISO()
-  const due = await db.bills.where('nextDue').belowOrEqual(today).filter(notDeleted).toArray()
-  for (const bill of due) {
-    if (!bill.active || !bill.autoPost) continue
-    let guard = 0
-    let current = bill
-    while (current.nextDue <= today && guard++ < 24) {
-      await postBill(current)
-      current = (await db.bills.get(bill.id!))!
-    }
-  }
+export async function autoPostDueBills(): Promise<number> {
+  return rpc<number>('post_due_bills', { p_until: todayISO() })
 }
 
 export interface BillSuggestion {
   payee: string
   amountMinor: number
   freq: 'weekly' | 'monthly'
-  categoryId: string
+  categoryId?: string
+  accountId: string
   lastDate: string
   count: number
 }
@@ -62,10 +53,7 @@ export interface BillSuggestion {
  * cadence with similar amounts — candidates for tracked bills.
  */
 export async function detectBillSuggestions(): Promise<BillSuggestion[]> {
-  const [txns, bills] = await Promise.all([
-    db.transactions.filter(notDeleted).toArray(),
-    db.bills.filter(notDeleted).toArray(),
-  ])
+  const [txns, bills] = await Promise.all([db.transactions.toArray(), db.bills.toArray()])
   const existing = new Set(bills.map((b) => normalizePayee(b.payee || b.name)))
   const groups = new Map<string, Transaction[]>()
   for (const t of txns) {
@@ -99,6 +87,7 @@ export async function detectBillSuggestions(): Promise<BillSuggestion[]> {
       amountMinor: -Math.round(mean),
       freq,
       categoryId: last.categoryId,
+      accountId: last.accountId,
       lastDate: last.date,
       count: list.length,
     })

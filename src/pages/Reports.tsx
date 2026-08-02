@@ -1,8 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Table2, ChartPie } from 'lucide-react'
-import { db } from '../lib/db'
-import { notDeleted } from '../lib/data'
+import { useAllTransactions, useCategories } from '../lib/cache'
 import { thisMonthKey, monthLabel } from '../lib/dates'
 import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
 import { useApp } from '../state/AppContext'
@@ -16,8 +14,8 @@ export default function Reports() {
   const [range, setRange] = useState<'6' | '12'>('6')
   const [view, setView] = useState<'charts' | 'table'>('charts')
 
-  const txns = useLiveQuery(() => db.transactions.filter(notDeleted).toArray(), [])
-  const categories = useLiveQuery(() => db.categories.filter(notDeleted).toArray(), []) ?? []
+  const txns = useAllTransactions()
+  const categories = useCategories()
 
   const slices = useMemo(() => spendByCategory(txns ?? [], categories, month, 8), [txns, categories, month])
   const series = useMemo(() => monthlySeries(txns ?? [], categories, Number(range)), [txns, categories, range])
@@ -78,7 +76,7 @@ export default function Reports() {
                   <td className={table.cell}>
                     <span className="inline-flex items-center gap-2">
                       <span style={{ color: `var(--series-${s.slot})` }}>
-                        <CategoryIcon icon={s.icon} emoji={s.emoji} size={15} />
+                        <CategoryIcon icon={s.icon} size={15} />
                       </span>
                       {s.name}
                     </span>

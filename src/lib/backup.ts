@@ -1,14 +1,24 @@
-import { db, ensureDefaults, SYNCED_TABLES } from './db'
+import { db, SYNCED_TABLES, type SyncedTable } from './db'
+import { createMany } from './data'
+import { rpc } from './api'
+import { fullPull } from './pull'
 
-const TABLES = ['transactions', 'categories', 'budgets', 'bills', 'rules', 'accounts', 'kv'] as const
+/**
+ * Backup and restore.
+ *
+ * A snapshot is a convenience, not the sync mechanism it used to double as.
+ * Notably it no longer includes the key-value table: that used to carry the
+ * household id and the sync cursor, so restoring one device's backup onto
+ * another transplanted its sync state along with the data.
+ */
 
-/** Full-household JSON snapshot — used for backup and for device-to-device transfer. */
+/** Full-household JSON snapshot. */
 export async function exportJSON(): Promise<string> {
   const dump: Record<string, unknown[]> = {}
-  for (const name of TABLES) {
+  for (const name of SYNCED_TABLES) {
     dump[name] = await db.table(name).toArray()
   }
-  return JSON.stringify({ app: 'hearth', version: 1, exportedAt: new Date().toISOString(), data: dump }, null, 2)
+  return JSON.stringify({ app: 'hearth', version: 2, exportedAt: new Date().toISOString(), data: dump }, null, 2)
 }
 
 export function downloadJSON(json: string) {
@@ -21,38 +31,40 @@ export function downloadJSON(json: string) {
   URL.revokeObjectURL(url)
 }
 
-/** Replace everything with a snapshot's contents. */
+/**
+ * Add a snapshot's contents to the current household.
+ *
+ * This adds rather than replaces, and it goes through the normal write path so
+ * every row is queued for the server like any other change. Restoring straight
+ * into the cache would produce rows the server has never heard of, which the
+ * next reconcile would notice as a count mismatch and quietly delete again.
+ *
+ * Ids are preserved, so re-importing the same file twice is a no-op rather than
+ * a second copy of everything.
+ */
 export async function importJSON(text: string) {
   const parsed = JSON.parse(text)
   if (parsed?.app !== 'hearth' || !parsed.data) throw new Error('Not a Hearth backup file')
-  await db.transaction('rw', db.tables, async () => {
-    for (const name of TABLES) {
-      await db.table(name).clear()
-      const rows = parsed.data[name]
-      if (!Array.isArray(rows) || !rows.length) continue
-      // Restored rows are marked dirty so a synced household pushes them.
-      const stamped = name === 'kv' ? rows : rows.map((r: object) => ({ ...r, dirty: 1 }))
-      await db.table(name).bulkPut(stamped)
-    }
-  })
+
+  // Parents before children, so a transaction is never queued ahead of the
+  // account it belongs to.
+  const order: SyncedTable[] = ['categories', 'accounts', 'bills', 'transactions', 'budgets', 'rules']
+  for (const name of order) {
+    const rows = parsed.data[name]
+    if (!Array.isArray(rows) || !rows.length) continue
+    await createMany(name, rows)
+  }
 }
 
+/**
+ * Delete everything in the household.
+ *
+ * Done server-side so it is one atomic operation that the other device learns
+ * about through ordinary tombstones. The RPC re-seeds the starter categories
+ * and account afterwards, because a transaction cannot be recorded without an
+ * account and a wipe that removed the last one would brick the add form.
+ */
 export async function clearAllData() {
-  const now = Date.now()
-  await db.transaction('rw', db.tables, async () => {
-    // Soft-delete every synced row (rather than a local `clear()`, which leaves
-    // no tombstone — so the next pull would just resurrect everything and the
-    // wipe would never reach the other device). `kv` is left alone so the
-    // household connection and settings survive and can push these deletions.
-    for (const name of SYNCED_TABLES) {
-      await db.table(name).toCollection().modify((r) => {
-        r.deleted = 1
-        r.dirty = 1
-        r.updatedAt = now
-      })
-    }
-  })
-  // Revive the starter categories + account (their stable ids overwrite their
-  // own tombstones), so the app isn't left empty and uncategorised.
-  await ensureDefaults()
+  await rpc('wipe_household')
+  await fullPull()
 }

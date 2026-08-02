@@ -1,5 +1,5 @@
 import { db, type Rule, type Transaction } from './db'
-import { createRow, updateRow, notDeleted } from './data'
+import { create, update } from './data'
 
 /** Normalise a bank-statement payee for matching: lowercase, strip refs/numbers. */
 export function normalizePayee(raw: string) {
@@ -37,11 +37,14 @@ export function matchRule(payee: string, rules: Rule[]): Rule | undefined {
 export async function learnRule(payee: string, categoryId: string) {
   const match = normalizePayee(payee)
   if (match.length < 3) return
-  const existing = await db.rules.filter((r) => r.match === match && !r.deleted).first()
+  const existing = await db.rules.where('match').equals(match).first()
   if (existing) {
-    await updateRow('rules', existing.id!, { categoryId })
+    await update('rules', existing.id, { categoryId })
   } else {
-    await createRow<Rule>('rules', { match, categoryId, createdAt: Date.now() })
+    // Written server-side by `upsert_rule`, so two devices learning the same
+    // payee during a shared import converge on one rule rather than colliding
+    // on the unique index. See RPC_WRITERS in outbox.ts.
+    await create('rules', { match, categoryId, createdAt: new Date().toISOString() })
   }
 }
 
@@ -52,9 +55,9 @@ export async function learnRule(payee: string, categoryId: string) {
  */
 export function buildHistoryMatcher(txns: Transaction[]): (payee: string) => string | undefined {
   const entries = new Map<string, string>()
-  const sorted = [...txns].sort((a, b) => a.createdAt - b.createdAt)
+  const sorted = [...txns].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   for (const t of sorted) {
-    if (t.amountMinor >= 0 || t.deleted) continue
+    if (t.amountMinor >= 0 || !t.categoryId) continue
     const n = normalizePayee(t.payee)
     if (n.length >= 4) entries.set(n, t.categoryId)
   }
@@ -79,9 +82,9 @@ export function buildHistoryMatcher(txns: Transaction[]): (payee: string) => str
 
 /** Suggest a category for a payee from rules, else fuzzily from past transactions. */
 export async function suggestCategory(payee: string): Promise<string | undefined> {
-  const rules = await db.rules.filter(notDeleted).toArray()
+  const rules = await db.rules.toArray()
   const rule = matchRule(payee, rules)
   if (rule) return rule.categoryId
-  const txns = await db.transactions.filter(notDeleted).toArray()
+  const txns = await db.transactions.toArray()
   return buildHistoryMatcher(txns)(payee)
 }
