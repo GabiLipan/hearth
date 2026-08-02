@@ -1,45 +1,47 @@
 import { useId } from 'react'
 
 /**
- * Hearth's mark: a warm flame-droplet of light held in a cool glass squircle —
- * warmth at the heart of home, rendered liquid-glass. Ids are per-instance so
- * several marks can render on one page without gradient collisions.
+ * Hearth's mark: the mouth of a fireplace, lit from within, standing on a
+ * hearthstone.
+ *
+ * Geometry is deliberate. The arch runs from y41 to y127 and the stone to y136,
+ * putting the visual centre at 88.5 on a 180 tile — a couple of pixels above
+ * the true centre, because a shape centred by measurement reads as sinking.
+ * Both are centred on x90.
+ *
+ * Ids are per-instance so several marks can render on one page without their
+ * gradients colliding.
  */
+const ARCH = 'M52 127 V79 a38 38 0 0 1 76 0 v48 z'
+
 export function BrandMark({ size = 32, className }: { size?: number; className?: string }) {
   const id = useId().replace(/:/g, '')
-  const drop = 'M90 50 C110 78 118 94 118 112 a28 28 0 0 1 -56 0 c0 -16 8 -34 28 -62 z'
   return (
     <svg width={size} height={size} viewBox="0 0 180 180" className={className} aria-hidden role="img">
       <defs>
-        <linearGradient id={`${id}g`} x1="0" y1="0" x2="0.35" y2="1">
-          <stop offset="0" stopColor="#eef1f6" />
-          <stop offset="1" stopColor="#ccd4e2" />
+        <linearGradient id={`${id}bg`} x1="0" y1="0" x2="0.3" y2="1">
+          <stop offset="0" stopColor="#2A2320" />
+          <stop offset="1" stopColor="#14100E" />
         </linearGradient>
-        <radialGradient id={`${id}d`} cx="42%" cy="33%" r="80%">
-          <stop offset="0" stopColor="#ffe7ad" />
-          <stop offset="0.4" stopColor="#ff9d4d" />
-          <stop offset="1" stopColor="#ef4e3a" />
+        <radialGradient id={`${id}glow`} cx="50%" cy="58%" r="62%">
+          <stop offset="0" stopColor="#FFD08A" />
+          <stop offset="0.42" stopColor="#F4813A" />
+          <stop offset="1" stopColor="#C0361A" />
         </radialGradient>
-        <linearGradient id={`${id}s`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#fff" stopOpacity="0.9" />
-          <stop offset="0.22" stopColor="#fff" stopOpacity="0.08" />
-          <stop offset="1" stopColor="#fff" stopOpacity="0" />
-        </linearGradient>
-        <filter id={`${id}b`} x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="5" />
+        <filter id={`${id}b`} x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="13" />
         </filter>
         <clipPath id={`${id}c`}>
-          <rect width="180" height="180" rx="44" />
+          <rect width="180" height="180" rx="40" />
         </clipPath>
       </defs>
       <g clipPath={`url(#${id}c)`}>
-        <rect width="180" height="180" fill={`url(#${id}g)`} />
-        <path d={drop} fill="#ff7a45" opacity="0.35" filter={`url(#${id}b)`} />
-        <path d={drop} fill={`url(#${id}d)`} />
-        <ellipse cx="79" cy="99" rx="8" ry="13" fill="#fff" opacity="0.5" />
-        <path d="M0 0 h180 v54 q-90 24 -180 0 z" fill={`url(#${id}s)`} />
+        <rect width="180" height="180" fill={`url(#${id}bg)`} />
+        {/* The fire spilling past the opening, so the glow reads as light rather than paint. */}
+        <path d={ARCH} fill="#F4813A" opacity="0.55" filter={`url(#${id}b)`} />
+        <path d={ARCH} fill={`url(#${id}glow)`} />
+        <rect x="34" y="127" width="112" height="9" rx="4.5" fill="#F6E3CB" opacity="0.22" />
       </g>
-      <rect x="1" y="1" width="178" height="178" rx="43" fill="none" stroke="#fff" strokeOpacity="0.55" />
     </svg>
   )
 }

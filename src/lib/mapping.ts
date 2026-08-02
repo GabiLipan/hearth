@@ -38,11 +38,14 @@ const appName = (k: string) => FROM_DB[k] ?? snakeToCamel(k)
  * name fails loudly at the boundary instead of being posted and dropped.
  */
 const WRITABLE: Record<SyncedTable, readonly string[]> = {
-  categories: ['id', 'name', 'icon', 'slot', 'kind', 'sortOrder'],
+  categories: ['id', 'name', 'icon', 'slot', 'kind', 'sortOrder', 'parentId', 'ownerId'],
   accounts: ['id', 'name', 'kind', 'visibility', 'ownerId', 'openingBalanceMinor', 'sortOrder'],
+  goals: ['id', 'name', 'icon', 'slot', 'targetMinor', 'targetDate', 'ownerId', 'accountId', 'sortOrder'],
   bills: ['id', 'name', 'payee', 'amountMinor', 'categoryId', 'accountId', 'freq', 'nextDue', 'active', 'autoPost'],
+  // transferId and goalId are set by create_transfer server-side, never posted
+  // directly — a client that could write transferId could fabricate half a transfer.
   transactions: ['id', 'accountId', 'categoryId', 'billId', 'date', 'payee', 'note', 'amountMinor', 'importHash'],
-  budgets: ['id', 'categoryId', 'ownerId', 'amountMinor'],
+  budgets: ['id', 'categoryId', 'ownerId', 'amountMinor', 'month'],
   rules: ['id', 'match', 'categoryId'],
 } as const
 
@@ -50,8 +53,9 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
 const READABLE: Record<SyncedTable, readonly string[]> = {
   categories: [...WRITABLE.categories, 'updatedAt', 'deletedAt'],
   accounts: [...WRITABLE.accounts, 'createdBy', 'updatedAt', 'deletedAt'],
+  goals: [...WRITABLE.goals, 'createdBy', 'updatedAt', 'deletedAt'],
   bills: [...WRITABLE.bills, 'createdBy', 'updatedAt', 'deletedAt'],
-  transactions: [...WRITABLE.transactions, 'createdBy', 'createdAt', 'updatedAt', 'deletedAt'],
+  transactions: [...WRITABLE.transactions, 'transferId', 'goalId', 'createdBy', 'createdAt', 'updatedAt', 'deletedAt'],
   budgets: [...WRITABLE.budgets, 'updatedAt', 'deletedAt'],
   rules: [...WRITABLE.rules, 'createdBy', 'createdAt', 'updatedAt', 'deletedAt'],
 } as const

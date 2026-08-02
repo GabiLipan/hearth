@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileUp, CheckCircle2 } from 'lucide-react'
 import { db } from '../lib/db'
 import { useAccounts, useCategories } from '../lib/cache'
+import { fullName } from '../lib/categories'
 import { canUseAccount } from '../lib/accounts'
 import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping, type ImportRow } from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
@@ -31,6 +32,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   const { money } = useApp()
   const { userId } = useSyncState()
   const categories = useCategories()
+  const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const allAccounts = useAccounts()
   const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
   // A statement belongs to one account, and every transaction now needs one, so
@@ -332,10 +334,12 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                     aria-label="Category"
                   >
                     {categories
-                      .filter((c) => c.kind === 'expense')
+                      .filter((c) => c.kind === 'expense' && !c.ownerId)
                       .map((c) => (
+                        // The full path, since a bare "Insurance" is ambiguous
+                        // once several categories have one.
                         <option key={c.id} value={c.id}>
-                          {c.name}
+                          {fullName(c, catMap)}
                         </option>
                       ))}
                   </select>

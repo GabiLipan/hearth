@@ -5,6 +5,7 @@ import { db, type Transaction } from '../lib/db'
 import { useAccounts, useCategories } from '../lib/cache'
 import { scanReceipt } from '../lib/receipt'
 import { canUseAccount } from '../lib/accounts'
+import { grouped, styleOf, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { todayISO } from '../lib/dates'
@@ -102,7 +103,30 @@ export function TransactionForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payee, open])
 
-  const visibleCategories = useMemo(() => categories.filter((c) => c.kind === kind), [categories, kind])
+  const account = useMemo(() => accounts.find((a) => a.id === accountId), [accounts, accountId])
+  const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+
+  /**
+   * What can be chosen here: the right kind, and — for a personal category —
+   * only when recording against your own non-shared account, which is the rule
+   * the database enforces. Offering one the server would reject would just be a
+   * confusing failure at save time.
+   */
+  const visibleGroups = useMemo(
+    () => grouped(usableOn(categories, account, userId).filter((c) => c.kind === kind)),
+    [categories, account, userId, kind],
+  )
+
+  // If the account changes to one where the chosen category is not allowed,
+  // clear it rather than letting the save fail.
+  useEffect(() => {
+    if (!categoryId) return
+    const stillAllowed = visibleGroups.some(
+      (g) => g.parent.id === categoryId || g.children.some((c) => c.id === categoryId),
+    )
+    if (!stillAllowed) setCategoryId(undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId])
   const amountMinor = parseAmount(amount)
   const canSave = amountMinor !== null && amountMinor > 0 && payee.trim() && categoryId !== undefined && accountId !== undefined
 
@@ -249,24 +273,34 @@ export function TransactionForm({
             Category
             {suggested && <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent">auto-suggested</span>}
           </span>
-          <div className="flex flex-wrap gap-2">
-            {visibleCategories.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => {
-                  setCategoryId(c.id)
-                  setSuggested(false)
-                }}
-                className={cx(
-                  'flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium ring-1 transition',
-                  categoryId === c.id
-                    ? 'bg-accent text-accent-ink ring-accent'
-                    : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
-                )}
-              >
-                <CategoryIcon icon={c.icon} size={16} /> {c.name}
-              </button>
+          <div className="space-y-2">
+            {visibleGroups.map(({ parent, children }) => (
+              <div key={parent.id} className="flex flex-wrap items-center gap-1.5">
+                <CategoryChip
+                  category={parent}
+                  style={styleOf(parent, catMap)}
+                  selected={categoryId === parent.id}
+                  onSelect={() => {
+                    setCategoryId(parent.id)
+                    setSuggested(false)
+                  }}
+                />
+                {/* Children sit on the same line as their parent, so picking the
+                    more specific one is a nudge rather than a separate step. */}
+                {children.map((child) => (
+                  <CategoryChip
+                    key={child.id}
+                    category={child}
+                    style={styleOf(child, catMap)}
+                    child
+                    selected={categoryId === child.id}
+                    onSelect={() => {
+                      setCategoryId(child.id)
+                      setSuggested(false)
+                    }}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         </div>
@@ -291,5 +325,31 @@ export function TransactionForm({
         </Field>
       </div>
     </Sheet>
+  )
+}
+
+function CategoryChip({
+  category, style, selected, child, onSelect,
+}: {
+  category: { id: string; name: string }
+  style: { icon: string; slot: number }
+  selected: boolean
+  child?: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cx(
+        'flex items-center gap-1.5 rounded-full font-medium ring-1 transition',
+        child ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm',
+        selected
+          ? 'bg-accent text-accent-ink ring-accent'
+          : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
+      )}
+    >
+      <CategoryIcon icon={style.icon} size={child ? 14 : 16} /> {category.name}
+    </button>
   )
 }

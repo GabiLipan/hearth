@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useMemo } from 'react'
-import { db, type Account, type Bill, type Budget, type Category, type Rule, type Transaction } from './db'
+import { db, type Account, type Bill, type Budget, type Category, type Goal, type Rule, type Transaction } from './db'
 import { monthKey } from './dates'
 
 /**
@@ -28,8 +28,18 @@ export function useAccounts(): Account[] {
   return useLiveQuery(() => db.accounts.orderBy('sortOrder').toArray(), [], []) ?? []
 }
 
+/** Every budget, all months. Used for history and the sparklines. */
 export function useBudgets(): Budget[] {
   return useLiveQuery(() => db.budgets.toArray(), [], []) ?? []
+}
+
+/** The budgets that apply to one month. `month` is a yyyy-MM key. */
+export function useBudgetsForMonth(month: string): Budget[] {
+  return useLiveQuery(() => db.budgets.where('month').equals(`${month}-01`).toArray(), [month], []) ?? []
+}
+
+export function useGoals(): Goal[] {
+  return useLiveQuery(() => db.goals.orderBy('sortOrder').toArray(), [], []) ?? []
 }
 
 export function useBills(): Bill[] {

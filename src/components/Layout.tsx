@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, Target,
 } from 'lucide-react'
 import { useSyncState } from '../hooks/useSync'
 import { cx } from './ui'
@@ -14,6 +14,7 @@ const NAV = [
   { to: '/activity', label: 'Activity', icon: Receipt },
   { to: '/budgets', label: 'Budgets', icon: PiggyBank },
   { to: '/bills', label: 'Bills', icon: CalendarClock },
+  { to: '/goals', label: 'Goals', icon: Target },
   { to: '/reports', label: 'Reports', icon: ChartPie },
 ]
 
@@ -22,6 +23,7 @@ const TITLES: Record<string, string> = {
   '/activity': 'Activity',
   '/budgets': 'Budgets',
   '/bills': 'Bills',
+  '/goals': 'Goals',
   '/reports': 'Reports',
   '/settings': 'Settings',
 }

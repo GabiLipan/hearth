@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, Check, AlertTriangle } from 'lucide-react'
 import { db, type Category, type Account, type AccountVisibility } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import { balanceOf, setAccountVisibility, VISIBILITY_LABEL, VISIBILITY_HINT } from '../lib/accounts'
 import { useAccounts, useAllTransactions, useCategories, useDeadLetters, useRemoteBalances, useRules } from '../lib/cache'
+import { grouped, styleOf, topLevel } from '../lib/categories'
 import { discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
@@ -178,6 +179,7 @@ function UnsavedChanges() {
 export default function SettingsPage() {
   const { themePref, setThemePref, currency, setCurrency } = useApp()
   const categories = useCategories()
+  const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const rules = useRules()
   const [editingCat, setEditingCat] = useState<Category | 'new' | null>(null)
   const [busy, setBusy] = useState(false)
@@ -234,16 +236,33 @@ export default function SettingsPage() {
         </SectionTitle>
         <Card>
           <ul className="divide-y divide-hairline">
-            {categories.map((c) => (
-              <li key={c.id}>
+            {grouped(categories).map(({ parent, children }) => (
+              <li key={parent.id}>
                 <button
-                  onClick={() => setEditingCat(c)}
+                  onClick={() => setEditingCat(parent)}
                   className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-1.5"
                 >
-                  <CategoryDot category={c} size={32} className="md:[--dot:24px]" />
-                  <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{c.name}</span>
-                  <span className="text-xs uppercase tracking-wide text-ink-3">{c.kind}</span>
+                  <CategoryDot category={{ ...parent, ...styleOf(parent, catMap) }} size={32} className="md:[--dot:24px]" />
+                  <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{parent.name}</span>
+                  {parent.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
+                  <span className="text-xs uppercase tracking-wide text-ink-3">{parent.kind}</span>
                 </button>
+                {children.length > 0 && (
+                  <ul className="border-t border-hairline/60 bg-surface-2/30">
+                    {children.map((child) => (
+                      <li key={child.id}>
+                        <button
+                          onClick={() => setEditingCat(child)}
+                          className="flex w-full items-center gap-3 py-2 pl-11 pr-4 text-left hover:bg-surface-2/60 md:gap-2.5 md:pl-10 md:pr-3 desktop:py-1.5"
+                        >
+                          <CategoryDot category={{ ...child, ...styleOf(child, catMap) }} size={22} />
+                          <span className="min-w-0 flex-1 truncate text-sm">{child.name}</span>
+                          {child.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>
@@ -534,23 +553,54 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
 
 function CategoryForm({ category, open, onClose }: { category?: Category; open: boolean; onClose: () => void }) {
   const existing = useCategories()
+  const { userId } = useSyncState()
+  const catMap = useMemo(() => new Map(existing.map((c) => [c.id, c])), [existing])
   const [name, setName] = useState(category?.name ?? '')
-  const [icon, setIcon] = useState(category?.icon ?? 'tag')
+  const [icon, setIcon] = useState<string | undefined>(category?.icon)
   const [kind, setKind] = useState<'expense' | 'income'>(category?.kind ?? 'expense')
   const [slot, setSlot] = useState<number | null>(category?.slot ?? null)
+  const [parentId, setParentId] = useState<string | undefined>(category?.parentId)
+  const [personal, setPersonal] = useState(!!category?.ownerId)
   const canSave = name.trim().length > 0
 
-  // A new category defaults to whichever colour is least used, but only until
-  // the user picks one — then their choice sticks.
-  const effectiveSlot = slot ?? nextFreeSlot(existing.map((c) => c.slot))
+  // Only a top-level category of the same kind can be a parent, and a category
+  // that already has children of its own cannot become one.
+  const hasChildren = existing.some((c) => c.parentId === category?.id)
+  const parentOptions = topLevel(existing).filter((c) => c.kind === kind && c.id !== category?.id)
+  const parent = parentId ? catMap.get(parentId) : undefined
+
+  // A new top-level category defaults to whichever colour is least used, so it
+  // is visually distinct from what is already there. A subcategory instead
+  // shows its parent's, and stores nothing — which is what keeps the two in
+  // step when the parent changes later.
+  const autoSlot = nextFreeSlot(existing.map((c) => c.slot).filter((n): n is number => n != null))
+  const inherited = parent ? styleOf(parent, catMap) : undefined
+  const effectiveSlot = slot ?? inherited?.slot ?? autoSlot
+  const effectiveIcon = icon ?? inherited?.icon ?? 'tag'
+  const overriding = parentId != null && (icon != null || slot != null)
 
   async function save() {
     if (!canSave) return
+    // Null icon and slot mean "inherit"; only send values when this is a
+    // top-level category or the user has deliberately overridden them.
+    const style = parentId && !overriding ? { icon: undefined, slot: undefined } : { icon: effectiveIcon, slot: effectiveSlot }
     if (category?.id) {
-      await update('categories', category.id, { name: name.trim(), icon, slot: effectiveSlot })
+      await update('categories', category.id, {
+        name: name.trim(),
+        parentId,
+        ownerId: personal ? userId : undefined,
+        ...style,
+      })
     } else {
       const count = await db.categories.count()
-      await create('categories', { name: name.trim(), icon, kind, slot: effectiveSlot, sortOrder: count })
+      await create('categories', {
+        name: name.trim(),
+        kind,
+        sortOrder: count,
+        parentId,
+        ownerId: personal ? userId : undefined,
+        ...style,
+      })
     }
     onClose()
   }
@@ -591,7 +641,7 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
       <div className="space-y-4">
         {/* Live preview — the icon and colour the category will actually wear. */}
         <div className="flex items-center gap-3">
-          <CategoryDot category={{ icon, slot: effectiveSlot } as Category} size={44} />
+          <CategoryDot category={{ icon: effectiveIcon, slot: effectiveSlot } as Category} size={44} />
           <div className="min-w-0 flex-1">
             <Field label="Name">
               <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pets" autoFocus />
@@ -599,8 +649,44 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
           </div>
         </div>
 
+        {!hasChildren && (
+          <Field
+            label="Part of"
+            hint={parentId ? "It takes its parent's colour and icon, and its spending counts towards their budget." : undefined}
+          >
+            <Select value={parentId ?? ''} onChange={(e) => setParentId(e.target.value || undefined)}>
+              <option value="">Nothing — this is a top-level category</option>
+              {parentOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        {userId && (
+          <label className="flex items-start gap-3 rounded-xl bg-surface-2 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={personal}
+              onChange={(e) => setPersonal(e.target.checked)}
+              className="mt-0.5 size-4 accent-[var(--accent)]"
+            />
+            <span>
+              <span className="block text-sm font-medium">Keep this to myself</span>
+              <span className="block text-xs text-ink-3">
+                Your partner won't see it, and it can only be used on your own private accounts.
+              </span>
+            </span>
+          </label>
+        )}
+
         <div>
-          <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">Colour</span>
+          <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">
+            Colour
+            {parentId && !overriding && <span className="ml-1.5 font-normal text-ink-3">· inherited</span>}
+          </span>
           <div className="flex flex-wrap gap-2">
             {SLOTS.map((s) => (
               <button
@@ -623,7 +709,10 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
         </div>
 
         <div>
-          <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">Icon</span>
+          <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">
+            Icon
+            {parentId && !overriding && <span className="ml-1.5 font-normal text-ink-3">· inherited</span>}
+          </span>
           <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8 md:grid-cols-10">
             {CATEGORY_ICON_KEYS.map((key) => (
               <button

@@ -16,13 +16,20 @@ describe('column naming', () => {
   })
 
   it('asks the server only for columns it knows about', () => {
-    expect(selectColumns('budgets')).toBe('id,category_id,owner_id,amount_minor,updated_at,deleted_at')
+    expect(selectColumns('budgets')).toBe('id,category_id,owner_id,amount_minor,month,updated_at,deleted_at')
   })
 
   it('refuses to write a column the client does not own', () => {
     // household_id, created_by and updated_at are trigger-stamped. A typo should
     // fail here rather than being posted and silently dropped.
     expect(() => patchToDb('transactions', { householdId: 'x' })).toThrow(/not a client-writable column/i)
+  })
+
+  it('refuses to write a transfer id, which only the server may set', () => {
+    // Both legs of a transfer are created together by create_transfer. A client
+    // able to write transferId could fabricate half a transfer, and the money
+    // would appear to come from nowhere.
+    expect(() => patchToDb('transactions', { transferId: 'x' })).toThrow(/not a client-writable column/i)
   })
 })
 

@@ -35,6 +35,10 @@ export interface Transaction {
   accountId: string
   categoryId?: string
   billId?: string
+  /** Set on both legs of a transfer. Neither leg is spending or income. */
+  transferId?: string
+  /** Money paid into a savings goal — set on the incoming leg. */
+  goalId?: string
   date: string // yyyy-MM-dd (server column `occurred_on`)
   payee: string
   note?: string
@@ -49,10 +53,20 @@ export interface Transaction {
 export interface Category {
   id: string
   name: string
-  icon: string // key into CATEGORY_ICONS
-  slot: number // 1..8 -> --series-N colour
+  /**
+   * Undefined on a subcategory means "inherit from my parent", so changing a
+   * parent's colour carries to its children instead of them drifting apart.
+   * Always set on a top-level category — resolve with `styleOf` in categories.ts
+   * rather than reading these directly.
+   */
+  icon?: string // key into CATEGORY_ICONS
+  slot?: number // 1..12 -> --series-N colour
   kind: 'expense' | 'income'
   sortOrder: number
+  /** Set on a subcategory. Nesting stops at one level. */
+  parentId?: string
+  /** null = the household's; set = that person's own, usable only on their non-shared accounts. */
+  ownerId?: string
   updatedAt: string
 }
 
@@ -61,7 +75,33 @@ export interface Budget {
   categoryId: string
   /** null/undefined = a household budget; set = that person's own, private to them. */
   ownerId?: string
-  amountMinor: number // positive, monthly
+  amountMinor: number // positive
+  /**
+   * The first of the month this budget applies to (yyyy-MM-01). A budget is a
+   * fact about a particular month, which is what makes history — and therefore
+   * suggestions and past adherence — possible at all.
+   */
+  month: string
+  updatedAt: string
+}
+
+/**
+ * A pot you save towards, as opposed to a ceiling that resets. Deliberately not
+ * a budget: folding either into the other makes both harder to explain.
+ */
+export interface Goal {
+  id: string
+  name: string
+  icon: string
+  slot: number
+  targetMinor: number
+  targetDate?: string // yyyy-MM-dd
+  /** null = the household's; set = that person's own. */
+  ownerId?: string
+  /** Optionally, the account the money actually sits in. */
+  accountId?: string
+  sortOrder: number
+  createdBy?: string
   updatedAt: string
 }
 
@@ -123,12 +163,15 @@ export interface CachedBalance {
   fetchedAt: number
 }
 
-export const SYNCED_TABLES = ['categories', 'accounts', 'bills', 'transactions', 'budgets', 'rules'] as const
+// Parents before children: a full pull applies them in this order, so a
+// transaction is never written before the account it belongs to.
+export const SYNCED_TABLES = ['categories', 'accounts', 'goals', 'bills', 'transactions', 'budgets', 'rules'] as const
 export type SyncedTable = (typeof SYNCED_TABLES)[number]
 
 export interface TableRowMap {
   categories: Category
   accounts: Account
+  goals: Goal
   bills: Bill
   transactions: Transaction
   budgets: Budget
@@ -197,6 +240,7 @@ export const db = new Dexie('hearth') as Dexie & {
   bills: EntityTable<Bill, 'id'>
   rules: EntityTable<Rule, 'id'>
   accounts: EntityTable<Account, 'id'>
+  goals: EntityTable<Goal, 'id'>
   balances: EntityTable<CachedBalance, 'accountId'>
   outbox: EntityTable<OutboxEntry, 'seq'>
   deadLetters: EntityTable<DeadLetter, 'id'>
@@ -218,6 +262,16 @@ db.version(1).stores({
   outbox: '++seq, rowKey, status, table',
   deadLetters: 'id, failedAt',
   meta: 'key',
+})
+
+// v2 adds goals and the indexes the new columns need. Dexie keeps the existing
+// rows; anything missing is filled in by the next pull, and a version bump is
+// cheap because the cache is derived rather than authoritative.
+db.version(2).stores({
+  transactions: 'id, date, categoryId, accountId, importHash, billId, transferId, goalId, updatedAt',
+  categories: 'id, kind, sortOrder, parentId, updatedAt',
+  budgets: 'id, categoryId, month, [categoryId+month], updatedAt',
+  goals: 'id, sortOrder, updatedAt',
 })
 
 export const newId = () => crypto.randomUUID()
@@ -244,7 +298,7 @@ export async function delSetting(key: string) {
 
 /** Wipe every cached row, keeping the outbox and device settings intact. */
 export async function clearCache() {
-  await db.transaction('rw', [db.transactions, db.categories, db.budgets, db.bills, db.rules, db.accounts, db.balances], async () => {
+  await db.transaction('rw', [db.transactions, db.categories, db.budgets, db.bills, db.rules, db.accounts, db.goals, db.balances], async () => {
     await Promise.all([
       db.transactions.clear(),
       db.categories.clear(),
@@ -252,6 +306,7 @@ export async function clearCache() {
       db.bills.clear(),
       db.rules.clear(),
       db.accounts.clear(),
+      db.goals.clear(),
       db.balances.clear(),
     ])
   })

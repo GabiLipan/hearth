@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Activity from './pages/Activity'
 import Budgets from './pages/Budgets'
 import Bills from './pages/Bills'
+import Goals from './pages/Goals'
 import Reports from './pages/Reports'
 import SettingsPage from './pages/Settings'
 
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/activity" element={<Activity />} />
             <Route path="/budgets" element={<Budgets />} />
             <Route path="/bills" element={<Bills />} />
+            <Route path="/goals" element={<Goals />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>

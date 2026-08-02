@@ -231,6 +231,7 @@ const RPC_WRITERS: Partial<Record<SyncedTable, (entry: OutboxEntry) => Promise<u
       p_category_id: e.payload.categoryId,
       p_personal: e.payload.ownerId != null,
       p_amount_minor: e.op === 'delete' ? null : e.payload.amountMinor,
+      p_month: e.payload.month,
     }),
   rules: (e) =>
     e.op === 'delete'
@@ -343,6 +344,7 @@ const SINGULAR: Record<SyncedTable, string> = {
   transactions: 'transaction',
   categories: 'category',
   accounts: 'account',
+  goals: 'goal',
   budgets: 'budget',
   bills: 'bill',
   rules: 'rule',

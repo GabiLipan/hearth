@@ -232,7 +232,7 @@ describe('rpc-backed tables', () => {
     // budgets and rules have partial/expression unique indexes that PostgREST's
     // `on_conflict` cannot name, so a plain insert would fail the moment both
     // devices set the same budget.
-    await create('budgets', { categoryId: 'cat-1', amountMinor: 5000, ownerId: undefined })
+    await create('budgets', { categoryId: 'cat-1', amountMinor: 5000, ownerId: undefined, month: '2026-03-01' })
     await flushNow()
 
     expect(insertRows).not.toHaveBeenCalled()
@@ -241,11 +241,12 @@ describe('rpc-backed tables', () => {
       p_category_id: 'cat-1',
       p_personal: false,
       p_amount_minor: 5000,
+      p_month: '2026-03-01',
     })
   })
 
   it('removes a budget by upserting a null amount', async () => {
-    const id = await create('budgets', { categoryId: 'cat-1', amountMinor: 5000, ownerId: undefined })
+    const id = await create('budgets', { categoryId: 'cat-1', amountMinor: 5000, ownerId: undefined, month: '2026-03-01' })
     await flushNow()
     vi.clearAllMocks()
     await remove('budgets', id)
@@ -255,7 +256,7 @@ describe('rpc-backed tables', () => {
   })
 
   it('marks a personal budget as personal', async () => {
-    await create('budgets', { categoryId: 'cat-1', amountMinor: 5000, ownerId: 'user-1' })
+    await create('budgets', { categoryId: 'cat-1', amountMinor: 5000, ownerId: 'user-1', month: '2026-03-01' })
     await flushNow()
     expect(rpc).toHaveBeenCalledWith('upsert_budget', expect.objectContaining({ p_personal: true }))
   })

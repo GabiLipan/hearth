@@ -1,5 +1,12 @@
 import type { Category, Transaction } from './db'
+import { budgetCategoryId, styleOf } from './categories'
 import { monthKey, shiftMonth, thisMonthKey, monthLabel } from './dates'
+
+/**
+ * Moving your own money between accounts is neither spending nor income, so
+ * both legs of a transfer are excluded from every total on this page.
+ */
+export const isTransfer = (t: Transaction) => t.transferId != null
 
 export const OTHER_SLICE_ID = '__other__'
 
@@ -19,17 +26,20 @@ export function spendByCategory(txns: Transaction[], categories: Category[], mon
   for (const t of txns) {
     // A transaction can point at a category this device has not pulled yet, or
     // one the other person deleted; it simply does not count towards a slice.
-    if (t.amountMinor >= 0 || !t.categoryId || monthKey(t.date) !== month) continue
+    if (t.amountMinor >= 0 || !t.categoryId || isTransfer(t) || monthKey(t.date) !== month) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
-    totals.set(t.categoryId, (totals.get(t.categoryId) ?? 0) - t.amountMinor)
+    // Subcategory spending rolls up: "Insurance" shows under "Home & utilities".
+    const key = budgetCategoryId(cat)!
+    totals.set(key, (totals.get(key) ?? 0) - t.amountMinor)
   }
   const grand = [...totals.values()].reduce((s, v) => s + v, 0)
   if (grand === 0) return []
   const slices: CategorySlice[] = [...totals.entries()]
     .map(([categoryId, totalMinor]) => {
       const c = catMap.get(categoryId)!
-      return { categoryId, name: c.name, icon: c.icon, slot: c.slot, totalMinor, fraction: totalMinor / grand }
+      const style = styleOf(c, catMap)
+      return { categoryId, name: c.name, icon: style.icon, slot: style.slot, totalMinor, fraction: totalMinor / grand }
     })
     .sort((a, b) => b.totalMinor - a.totalMinor)
   if (slices.length <= maxSlices) return slices
@@ -56,6 +66,7 @@ export function monthlySeries(txns: Transaction[], categories: Category[], n: nu
   for (let i = n - 1; i >= 0; i--) keys.push(shiftMonth(now, -i))
   const byKey = new Map(keys.map((k) => [k, { spend: 0, income: 0 }]))
   for (const t of txns) {
+    if (isTransfer(t)) continue
     const k = monthKey(t.date)
     const agg = byKey.get(k)
     if (!agg) continue
@@ -74,9 +85,63 @@ export function monthTotals(txns: Transaction[], month: string) {
   let spend = 0
   let income = 0
   for (const t of txns) {
-    if (monthKey(t.date) !== month) continue
+    if (isTransfer(t) || monthKey(t.date) !== month) continue
     if (t.amountMinor < 0) spend -= t.amountMinor
     else income += t.amountMinor
   }
   return { spend, income, net: income - spend }
+}
+
+/**
+ * Spend per budget-category for each of the given months, in the order given.
+ *
+ * Subcategories roll up to their parent, transfers are excluded, and a month
+ * with no spending is a zero rather than a gap — a sparkline with holes in it
+ * reads as missing data rather than as a quiet month.
+ */
+export function monthlySpendByCategory(
+  txns: Transaction[],
+  categories: Category[],
+  months: string[],
+): Map<string, number[]> {
+  const catMap = new Map(categories.map((c) => [c.id, c]))
+  const index = new Map(months.map((m, i) => [m, i]))
+  const out = new Map<string, number[]>()
+
+  for (const t of txns) {
+    if (t.amountMinor >= 0 || !t.categoryId || isTransfer(t)) continue
+    const i = index.get(monthKey(t.date))
+    if (i === undefined) continue
+    const key = budgetCategoryId(catMap.get(t.categoryId))
+    if (!key) continue
+    let series = out.get(key)
+    if (!series) {
+      series = months.map(() => 0)
+      out.set(key, series)
+    }
+    series[i] -= t.amountMinor
+  }
+  return out
+}
+
+/**
+ * A typical month's spend for a category: the median of the months given,
+ * rounded to the nearest pound.
+ *
+ * Median rather than mean because one annual insurance payment should not drag
+ * the suggestion up for the other eleven months. Returns undefined when there
+ * is not enough history to be worth suggesting from.
+ */
+export function typicalSpend(series: number[] | undefined): number | undefined {
+  const months = (series ?? []).filter((v) => v > 0)
+  if (months.length < 2) return undefined
+  const sorted = [...months].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  const median = sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+  return Math.round(median / 100) * 100
+}
+
+/** The n month keys ending at `month`, oldest first. */
+export function monthsEndingAt(month: string, n: number): string[] {
+  return Array.from({ length: n }, (_, i) => shiftMonth(month, -(n - 1 - i)))
 }

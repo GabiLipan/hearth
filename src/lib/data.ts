@@ -23,12 +23,14 @@ import { enqueue } from './outbox'
  * exist.
  */
 const FOREIGN_KEYS: Record<SyncedTable, Record<string, SyncedTable>> = {
-  transactions: { accountId: 'accounts', categoryId: 'categories', billId: 'bills' },
+  transactions: { accountId: 'accounts', categoryId: 'categories', billId: 'bills', goalId: 'goals' },
   bills: { accountId: 'accounts', categoryId: 'categories' },
   budgets: { categoryId: 'categories' },
   rules: { categoryId: 'categories' },
+  goals: { accountId: 'accounts' },
   accounts: {},
-  categories: {},
+  // A subcategory depends on its parent existing first.
+  categories: { parentId: 'categories' },
 }
 
 /**
