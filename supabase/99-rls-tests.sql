@@ -88,8 +88,8 @@ begin
     (private_acct, groceries, current_date, 'Gift shop', -4000);
 
   -- One household budget, one personal.
-  perform public.upsert_budget(null, groceries, false, 50000);
-  perform public.upsert_budget(null, groceries, true,  9900);
+  perform public.upsert_budget(null, groceries, false, 50000, current_date);
+  perform public.upsert_budget(null, groceries, true,  9900, current_date);
 end $$;
 
 -- Seeding sanity: defaults came from the server, exactly once.
@@ -322,13 +322,13 @@ begin
   perform pg_temp.check('re-learning a payee changes the category', r.category_id = other, '');
 
   -- Changing a budget must update in place, and null removes it.
-  perform public.upsert_budget(null, groceries, false, 12345);
+  perform public.upsert_budget(null, groceries, false, 12345, current_date);
   select count(*) into n from public.budgets where owner_id is null and deleted_at is null;
   perform pg_temp.check('changing a household budget updates in place', n = 1, n::text);
   perform pg_temp.check('changing a household budget stores the new amount',
     (select amount_minor from public.budgets where owner_id is null and deleted_at is null) = 12345, '');
 
-  perform public.upsert_budget(null, groceries, false, null);
+  perform public.upsert_budget(null, groceries, false, null, current_date);
   select count(*) into n from public.budgets where owner_id is null and deleted_at is null;
   perform pg_temp.check('a null amount removes the budget', n = 0, n::text);
 end $$;
