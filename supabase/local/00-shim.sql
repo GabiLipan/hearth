@@ -10,8 +10,11 @@
 
 create schema if not exists auth;
 
+-- No default on `id`, matching the real table: Supabase's auth service always
+-- supplies one. A default here would let the tests pass locally and fail on the
+-- real project, which is exactly what it did.
 create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key,
   email text unique not null
 );
 

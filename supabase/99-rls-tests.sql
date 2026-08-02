@@ -34,12 +34,17 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', u)::text, true);
 end $$;
 
+-- Ids are supplied explicitly: Supabase's real `auth.users.id` has no default
+-- (the auth service always provides one), unlike the local shim's table.
 do $$
-declare gabi uuid; partner uuid; stranger uuid;
+declare
+  gabi uuid := gen_random_uuid();
+  partner uuid := gen_random_uuid();
+  stranger uuid := gen_random_uuid();
 begin
-  insert into auth.users (email) values ('gabi@test.local')     returning id into gabi;
-  insert into auth.users (email) values ('partner@test.local')  returning id into partner;
-  insert into auth.users (email) values ('stranger@test.local') returning id into stranger;
+  insert into auth.users (id, email) values (gabi, 'gabi@test.local');
+  insert into auth.users (id, email) values (partner, 'partner@test.local');
+  insert into auth.users (id, email) values (stranger, 'stranger@test.local');
   perform set_config('test.gabi', gabi::text, true);
   perform set_config('test.partner', partner::text, true);
   perform set_config('test.stranger', stranger::text, true);
