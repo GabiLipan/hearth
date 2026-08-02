@@ -5,9 +5,12 @@
 -- reason (permission denied rather than "the policy filtered it out"), so this
 -- mirrors the real project's grants.
 --
--- Note there is no DELETE grant: deletion in this app is `set deleted_at`, and
--- there are no DELETE policies anywhere. See the note at the end of 02-rls.sql.
+-- The DELETE grant is included deliberately, because Supabase grants it. What
+-- stops a hard delete is the absence of a DELETE *policy*, not the absence of
+-- the privilege — and those two fail differently: no privilege raises an error,
+-- while no policy silently matches zero rows. Withholding the grant here made
+-- the "nobody can hard-delete" test pass locally for the wrong reason.
 
 grant usage on schema public to anon, authenticated;
-grant select, insert, update on all tables in schema public to authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;

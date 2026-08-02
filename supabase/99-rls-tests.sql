@@ -159,7 +159,7 @@ end $$;
 -- ---------- what the partner cannot do ----------
 
 do $$
-declare blocked boolean;
+declare blocked boolean; before_rows bigint; after_rows bigint;
 begin
   begin
     insert into public.transactions (account_id, category_id, occurred_on, payee, amount_minor)
@@ -188,12 +188,20 @@ begin
 
   -- No DELETE policy exists anywhere: deletion is `set deleted_at`, so a row
   -- can never vanish without leaving a tombstone for the other device.
+  --
+  -- Asserted by counting rows, not by expecting an error. Signed-in users DO
+  -- hold the DELETE privilege — Supabase grants it — so the statement succeeds
+  -- and quietly affects nothing, because RLS with no DELETE policy matches no
+  -- rows. "Did an exception fire?" would have been testing the grant; what
+  -- matters is whether the rows are still there.
+  select count(*) into before_rows from public.transactions;
   begin
     delete from public.transactions;
-    blocked := false;
-  exception when others then blocked := true;
+  exception when others then null; -- also fine: some setups deny the privilege
   end;
-  perform pg_temp.check('nobody can hard-delete a transaction', blocked, '');
+  select count(*) into after_rows from public.transactions;
+  perform pg_temp.check('nobody can hard-delete a transaction',
+    after_rows = before_rows and before_rows > 0, format('%s -> %s', before_rows, after_rows));
 end $$;
 
 -- ---------- a stranger in another household ----------
