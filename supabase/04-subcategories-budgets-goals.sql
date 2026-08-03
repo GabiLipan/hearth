@@ -191,6 +191,13 @@ create index if not exists goals_pull on public.goals (household_id, updated_at,
 
 alter table public.goals enable row level security;
 
+-- Dropped first, like the category policies above, so this file can be re-run
+-- when you are not sure whether it was applied. `create policy` has no
+-- `if not exists`, and a half-applied migration is worse than a repeated one.
+drop policy if exists goals_select on public.goals;
+drop policy if exists goals_insert on public.goals;
+drop policy if exists goals_update on public.goals;
+
 create policy goals_select on public.goals
   for select to authenticated
   using (
@@ -215,6 +222,9 @@ create policy goals_update on public.goals
     household_id = (select public.my_household())
     and (owner_id is null or owner_id = (select auth.uid()))
   );
+
+drop trigger if exists goals_touch on public.goals;
+drop trigger if exists goals_stamp on public.goals;
 
 create trigger goals_touch before insert or update on public.goals
   for each row execute function public.touch_updated_at();
@@ -439,7 +449,17 @@ end $$;
 -- 6. Grants and realtime
 -- ============================================================
 
-alter publication supabase_realtime add table public.goals;
+-- Adding a table that is already published is an error, not a no-op, so this is
+-- guarded too — otherwise re-running the file stops here.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'goals'
+  ) then
+    alter publication supabase_realtime add table public.goals;
+  end if;
+end $$;
 
 do $$
 declare f text;
