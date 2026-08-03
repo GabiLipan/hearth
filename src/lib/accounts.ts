@@ -1,5 +1,7 @@
 import { update } from './data'
-import type { Account, AccountVisibility, Transaction } from './db'
+import { rpc } from './api'
+import { fullPull } from './pull'
+import { db, type Account, type AccountVisibility, type Transaction } from './db'
 
 export const VISIBILITY_LABEL: Record<AccountVisibility, string> = {
   shared: 'Shared with household',
@@ -68,4 +70,40 @@ export async function setAccountVisibility(account: Account, visibility: Account
     // A non-shared account needs an owner: it is who it is private *to*.
     ownerId: account.ownerId ?? myUserId,
   })
+}
+
+/** How many transactions this device knows about on an account — what the confirmation says. */
+export const transactionsOn = (accountId: string) =>
+  db.transactions.where('accountId').equals(accountId).count()
+
+/**
+ * Delete one account, and everything recorded on it.
+ *
+ * Server-side rather than through the outbox, for two reasons.
+ *
+ * An account and its transactions have to go in one operation. Tombstoning the
+ * account alone is the worst of both: `account_balances()` stops returning it,
+ * but every total on the client sums transactions with no reference to an
+ * account, so the money would keep counting against budgets and reports from an
+ * account that is no longer on screen to explain it.
+ *
+ * And the server is the only place that can refuse. `delete_account()` re-checks
+ * that the account is shared or the caller's own — the sheet offering the button
+ * is not what protects anything, since anyone can call the API directly.
+ *
+ * The cost is that it needs a connection. That is the right trade for a rare,
+ * deliberate, irreversible action; the alternative is queueing a destructive
+ * write whose permission check happens minutes later with nobody watching.
+ *
+ * @returns how many transactions went with it.
+ */
+export async function deleteAccount(accountId: string, withTransactions: boolean): Promise<number> {
+  const removed = await rpc<number>('delete_account', {
+    p_account_id: accountId,
+    p_with_transactions: withTransactions,
+  })
+  // The wipe touched several tables at once, and re-seeded a starter account if
+  // that was the last one. Re-reading is simpler than replaying it locally.
+  await fullPull()
+  return removed
 }

@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType } from 'react'
 import { Sparkles, SlidersHorizontal, Check, ChevronUp, ChevronDown, EyeOff, Plus } from 'lucide-react'
 import { getSetting, setSetting } from '../lib/db'
 import { useAccounts, useAllTransactions, useBills, useBudgets, useCategories, useRemoteBalances } from '../lib/cache'
-import { seedDemoData } from '../lib/demo'
+import { defaultDemoAccount, seedDemoData } from '../lib/demo'
 import { useSyncState } from '../hooks/useSync'
 import { Button, Empty, cx } from '../components/ui'
 import {
@@ -106,10 +106,18 @@ export default function Dashboard() {
         hint="Your shared home for budgets, bills and spending. Add your first transaction with the + button, import a bank statement from the Activity tab — or explore with demo data first."
         action={
           <Button
-            disabled={seeding}
+            disabled={seeding || !defaultDemoAccount(accounts, userId)}
             onClick={async () => {
+              const target = defaultDemoAccount(accounts, userId)
+              if (!target) return
               setSeeding(true)
-              await seedDemoData()
+              try {
+                await seedDemoData(target.id)
+              } finally {
+                // Without this the button stays on "Loading…" forever when
+                // seeding fails, with nothing to say what went wrong.
+                setSeeding(false)
+              }
             }}
           >
             <Sparkles size={16} /> {seeding ? 'Loading…' : 'Load demo data'}

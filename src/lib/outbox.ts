@@ -372,6 +372,27 @@ export async function discardDeadLetter(id: string) {
   onChange?.()
 }
 
+/**
+ * Clear the whole list at once.
+ *
+ * One bad operation usually dead-letters a whole batch — a demo-data load that
+ * built eight malformed budgets produces eight identical entries — and
+ * "Try again" is useless for every one of them, because a retry re-sends the
+ * SAME stored payload. If that payload is what the server objected to, the entry
+ * can never succeed and dismissing it one at a time is the only way out.
+ */
+export async function discardAllDeadLetters() {
+  const all = await db.deadLetters.toArray()
+  if (!all.length) return
+  const keys = new Set(all.map((d) => rowKey(d.table, d.rowId)))
+  await db.deadLetters.clear()
+  const blocked = await db.outbox
+    .filter((e) => e.status === 'blocked' && (keys.has(e.rowKey) || e.refs.some((r) => keys.has(r))))
+    .toArray()
+  await db.outbox.bulkDelete(blocked.map((e) => e.seq!))
+  onChange?.()
+}
+
 async function unblockFor(key: string) {
   const blocked = await db.outbox.filter((e) => e.status === 'blocked' && (e.rowKey === key || e.refs.includes(key))).toArray()
   for (const e of blocked) await db.outbox.update(e.seq!, { status: 'pending', lastError: undefined })

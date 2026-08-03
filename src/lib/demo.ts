@@ -1,6 +1,20 @@
 import { format, subMonths, addDays, startOfMonth } from 'date-fns'
-import { db, type Transaction, type Bill, type Budget } from './db'
+import { db, type Account, type Transaction, type Bill, type Budget } from './db'
 import { createMany } from './data'
+import { canUseAccount } from './accounts'
+
+/**
+ * Where demo data goes when the user has not been asked.
+ *
+ * Used by the Dashboard's empty state, where the point is one tap to see the app
+ * with data in it. Prefers a SHARED account: demo data is for looking around, and
+ * a joint account is the least surprising place for it to turn up. Settings asks
+ * outright instead — see `DemoDataForm`.
+ */
+export function defaultDemoAccount(accounts: Account[], userId?: string): Account | undefined {
+  const usable = accounts.filter((a) => canUseAccount(a, userId))
+  return usable.find((a) => a.visibility === 'shared') ?? usable[0]
+}
 
 /** Deterministic pseudo-random so demo data is stable between runs. */
 function mulberry32(seed: number) {
@@ -17,14 +31,24 @@ type NewTransaction = Omit<Transaction, 'id' | 'updatedAt'>
 type NewBill = Omit<Bill, 'id' | 'updatedAt'>
 type NewBudget = Omit<Budget, 'id' | 'updatedAt'>
 
-export async function seedDemoData() {
+/**
+ * Fill an account with six months of plausible history.
+ *
+ * The account is a REQUIRED argument, not a guess. This used to take
+ * `db.accounts.toArray()[0]`, which is not "the main account" but whichever row
+ * Dexie returned first — it iterates by primary key, and the keys are random
+ * uuids. In a household with a private account that meant six months of fake
+ * spending landing in someone's personal account with no way to choose or
+ * predict it.
+ */
+export async function seedDemoData(accountId: string) {
   // The household's categories and starter account are seeded server-side by
   // create_household(), so demo data attaches to whatever is already there
   // rather than inventing its own.
   const cats = await db.categories.toArray()
   const byName = (n: string) => cats.find((c) => c.name === n)?.id
-  const account = (await db.accounts.toArray())[0]?.id
-  if (!account) throw new Error('No account to attach demo data to')
+  const account = (await db.accounts.get(accountId))?.id
+  if (!account) throw new Error('That account no longer exists')
   const rand = mulberry32(42)
   const today = new Date()
   const now = new Date().toISOString()
@@ -134,8 +158,17 @@ export async function seedDemoData() {
     ['Health', 8000],
     ['Fun & leisure', 10000],
   ]
-  const budgets: NewBudget[] = budgetDefs
-    .map(([name, amountMinor]) => ({ categoryId: byName(name), amountMinor }))
-    .filter((b): b is NewBudget => !!b.categoryId)
+  // `month` is not optional. A budget has been a fact about a particular month
+  // since migration 04, and `upsert_budget` takes it as an argument — omitting it
+  // made the outbox call a four-argument overload that no longer exists, so every
+  // demo budget dead-lettered with "could not find the function ... in the schema
+  // cache". Note the old code hid this behind `.filter((b): b is NewBudget => …)`:
+  // a type predicate is an unchecked assertion, so it told the compiler the row
+  // was complete rather than letting it notice the missing field.
+  const thisMonth = format(startOfMonth(today), 'yyyy-MM-dd')
+  const budgets: NewBudget[] = budgetDefs.flatMap(([name, amountMinor]) => {
+    const categoryId = byName(name)
+    return categoryId ? [{ categoryId, amountMinor, month: thisMonth }] : []
+  })
   await createMany('budgets', budgets)
 }

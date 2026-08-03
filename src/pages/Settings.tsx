@@ -2,10 +2,18 @@ import { useMemo, useRef, useState } from 'react'
 import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, Check, AlertTriangle } from 'lucide-react'
 import { db, type Category, type Account, type AccountVisibility } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
-import { balanceOf, setAccountVisibility, VISIBILITY_LABEL, VISIBILITY_HINT } from '../lib/accounts'
+import {
+  balanceOf,
+  canUseAccount,
+  deleteAccount as removeAccount,
+  setAccountVisibility,
+  transactionsOn,
+  VISIBILITY_LABEL,
+  VISIBILITY_HINT,
+} from '../lib/accounts'
 import { useAccounts, useAllTransactions, useCategories, useDeadLetters, useRemoteBalances, useRules } from '../lib/cache'
 import { grouped, styleOf, topLevel } from '../lib/categories'
-import { discardDeadLetter, retryDeadLetter } from '../lib/outbox'
+import { discardAllDeadLetters, discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
 import { SLOTS, SLOT_NAMES, slotVar, nextFreeSlot } from '../lib/palette'
@@ -148,12 +156,29 @@ function UnsavedChanges() {
   if (deadLetters.length === 0) return null
   return (
     <section>
-      <SectionTitle>Couldn\u2019t be saved</SectionTitle>
+      {/* A literal apostrophe: `\u2019` is an escape in a JS string but plain text in JSX. */}
+      <SectionTitle
+        action={
+          <button
+            onClick={() => {
+              if (confirm(`Discard ${deadLetters.length} change${deadLetters.length === 1 ? '' : 's'} that could not be saved?`)) {
+                void discardAllDeadLetters()
+              }
+            }}
+            className="text-sm font-medium text-accent"
+          >
+            Discard all
+          </button>
+        }
+      >
+        Couldn’t be saved
+      </SectionTitle>
       <Card className="space-y-3 p-4 md:p-3">
         <p className="flex items-start gap-2 text-sm text-ink-2">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
           These changes were rejected by the server. Usually it means the thing they referred to was deleted on another
-          device.
+          device. “Try again” re-sends the same change, so when the server objected to the change itself, discarding is
+          the only way out.
         </p>
         <ul className="space-y-2">
           {deadLetters.map((d) => (
@@ -182,7 +207,7 @@ export default function SettingsPage() {
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const rules = useRules()
   const [editingCat, setEditingCat] = useState<Category | 'new' | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [demoOpen, setDemoOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   return (
@@ -325,15 +350,7 @@ export default function SettingsPage() {
               }
             }}
           />
-          <Button
-            variant="subtle"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              await seedDemoData()
-              setBusy(false)
-            }}
-          >
+          <Button variant="subtle" onClick={() => setDemoOpen(true)}>
             <Sparkles size={15} /> Load demo data
           </Button>
           <Button
@@ -341,9 +358,9 @@ export default function SettingsPage() {
             onClick={async () => {
               if (
                 confirm(
-                  'Delete all transactions, budgets, bills and accounts? If you sync with a partner, this deletes them for both of you. Export a backup first if you want to keep a copy.',
+                  'Delete the shared accounts, transactions, budgets, bills and categories — for both of you — along with anything private to you? Your partner keeps their own private accounts and personal budgets. Export a backup first if you want a copy.',
                 ) &&
-                confirm('Really delete everything? This cannot be undone.')
+                confirm('Really erase everything of yours? This cannot be undone.')
               ) {
                 await clearAllData()
               }
@@ -366,6 +383,8 @@ export default function SettingsPage() {
         open={editingCat !== null}
         onClose={() => setEditingCat(null)}
       />
+
+      <DemoDataForm open={demoOpen} onClose={() => setDemoOpen(false)} />
     </div>
   )
 }
@@ -395,12 +414,18 @@ function AccountsSection() {
         <ul className="divide-y divide-hairline">
           {accounts.map((a) => {
             const vis = a.visibility
-            const mine = !a.ownerId || a.ownerId === userId
+            // Who may open this to edit or delete it. `canUseAccount` is the same
+            // predicate as the `accounts_update` policy in 02-rls.sql, which is
+            // the point of reusing it: a SHARED account is editable by either
+            // person — that is what makes a joint account joint — so gating on
+            // "did I create it?" locked the other person out of a row the server
+            // would happily have let them change, and out of deleting it at all.
+            const editable = canUseAccount(a, userId)
             return (
               <li key={a.id}>
                 <button
-                  onClick={() => (mine ? setEditing(a) : undefined)}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2 ${mine ? 'hover:bg-surface-2/50' : 'cursor-default'}`}
+                  onClick={() => (editable ? setEditing(a) : undefined)}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2 ${editable ? 'hover:bg-surface-2/50' : 'cursor-default'}`}
                 >
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-1.5 font-medium">
@@ -410,7 +435,9 @@ function AccountsSection() {
                     </p>
                     <p className="text-sm text-ink-3">
                       {a.kind}
-                      {!mine ? " · partner's" : vis !== 'shared' ? ` · ${VISIBILITY_LABEL[vis].toLowerCase()}` : ''}
+                      {/* Only a non-shared account of theirs is "partner's". A shared
+                          one belongs to you both, so labelling it theirs was wrong. */}
+                      {!editable ? " · partner's" : vis !== 'shared' ? ` · ${VISIBILITY_LABEL[vis].toLowerCase()}` : ''}
                     </p>
                   </div>
                   <span className={`font-semibold tabular ${balance(a) < 0 ? 'text-critical-text' : ''}`}>
@@ -432,6 +459,79 @@ function AccountsSection() {
   )
 }
 
+/**
+ * Where should six months of fake spending go?
+ *
+ * Asking is the whole point. This used to pick `db.accounts.toArray()[0]` —
+ * whichever row Dexie happened to return first, which is primary-key order over
+ * random uuids. In a household with a private account that meant demo data
+ * landing in someone's personal account, unpredictably and with no way to say
+ * otherwise. Only accounts you can actually record against are offered, matching
+ * every other account picker in the app.
+ */
+function DemoDataForm({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { userId } = useSyncState()
+  const allAccounts = useAccounts()
+  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
+  // Default to a shared account rather than a private one: demo data is for
+  // having a look around, and the joint account is the least surprising place
+  // for it to appear.
+  const preferred = accounts.find((a) => a.visibility === 'shared') ?? accounts[0]
+  const [accountId, setAccountId] = useState<string | undefined>(preferred?.id)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+
+  const chosen = accountId ?? preferred?.id
+
+  async function load() {
+    if (!chosen) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      await seedDemoData(chosen)
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Demo data could not be loaded.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Load demo data"
+      footer={
+        <Button size="lg" className="flex-1" disabled={!chosen || busy} onClick={load}>
+          {busy ? 'Loading…' : 'Load demo data'}
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-ink-2">
+          Adds six months of example transactions, bills and budgets so you can see how Hearth looks with data in it.
+          It is added to the account you pick, and syncs to your household like anything else.
+        </p>
+        <Field label="Add it to" hint="Only accounts you can record against are listed.">
+          <Select value={chosen ?? ''} onChange={(e) => setAccountId(e.target.value)}>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {a.visibility !== 'shared' ? ` · ${VISIBILITY_LABEL[a.visibility].toLowerCase()}` : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {accounts.length === 0 && (
+          <p className="text-sm text-critical-text">You need an account before demo data has somewhere to go.</p>
+        )}
+        {error && <p className="text-sm text-critical-text">{error}</p>}
+      </div>
+    </Sheet>
+  )
+}
+
 function AccountForm({ account, open, onClose }: { account?: Account; open: boolean; onClose: () => void }) {
   const { currency } = useApp()
   const { userId } = useSyncState()
@@ -441,6 +541,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
   const [opening, setOpening] = useState(
     account?.openingBalanceMinor ? String(account.openingBalanceMinor / 100) : '',
   )
+  const [deleting, setDeleting] = useState(false)
   const canSave = name.trim().length > 0
 
   const visOptions: AccountVisibility[] = ['shared', 'balance', 'private']
@@ -467,16 +568,30 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
     onClose()
   }
 
+  /**
+   * Deleting one account, rather than the all-or-nothing "erase everything".
+   *
+   * The count comes from this device's cache, so it is what to WARN with, never
+   * what to act on: the server counts again and refuses if it disagrees, which is
+   * the case where a partner has recorded something this device has not pulled yet.
+   */
   async function deleteAccount() {
     if (!account?.id) return
-    const used = await db.transactions.where('accountId').equals(account.id).count()
-    if (used > 0) {
-      alert(`"${account.name}" has ${used} transactions, so it can't be deleted.`)
-      return
-    }
-    if (confirm(`Delete account "${account.name}"?`)) {
-      await removeRow('accounts', account.id)
+    const used = await transactionsOn(account.id)
+    const warning =
+      used > 0
+        ? `Delete "${account.name}" and the ${used} transaction${used === 1 ? '' : 's'} on it? They disappear from your reports and budgets too. This cannot be undone.`
+        : `Delete account "${account.name}"? This cannot be undone.`
+    if (!confirm(warning)) return
+
+    setDeleting(true)
+    try {
+      await removeAccount(account.id, used > 0)
       onClose()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'That account could not be deleted.')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -488,11 +603,11 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
       footer={
         <div className="flex gap-2">
           {account?.id && (
-            <Button variant="danger" size="lg" onClick={deleteAccount}>
-              Delete
+            <Button variant="danger" size="lg" disabled={deleting} onClick={deleteAccount}>
+              {deleting ? 'Deleting…' : 'Delete'}
             </Button>
           )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+          <Button size="lg" className="flex-1" disabled={!canSave || deleting} onClick={save}>
             Save
           </Button>
         </div>

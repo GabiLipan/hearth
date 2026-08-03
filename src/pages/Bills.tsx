@@ -5,6 +5,7 @@ import { create, update, remove as removeRow } from '../lib/data'
 import { useAccounts, useBills, useCategories, useCategoryMap } from '../lib/cache'
 import { canUseAccount } from '../lib/accounts'
 import { syncNow } from '../lib/session'
+import { useSyncState } from '../hooks/useSync'
 import { daysUntil, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from '../lib/dates'
 import { postBill, skipBill, detectBillSuggestions, type BillSuggestion } from '../lib/bills'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -269,9 +270,13 @@ export default function Bills() {
 
 function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose: () => void }) {
   const { currency } = useApp()
+  const { userId } = useSyncState()
   const categories = useCategories()
   const allAccounts = useAccounts()
-  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a)), [allAccounts])
+  // `userId` is not optional here. Every account gets an `owner_id` stamped on
+  // insert, so omitting it made this "shared accounts only" — silently hiding
+  // your own private and balance-only accounts from the bill's account picker.
+  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
   const expenseCats = categories.filter((c) => c.kind === 'expense')
   const [name, setName] = useState(bill?.name ?? '')
   const [payee, setPayee] = useState(bill?.payee ?? '')

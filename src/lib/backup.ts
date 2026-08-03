@@ -1,4 +1,4 @@
-import { db, SYNCED_TABLES, type SyncedTable } from './db'
+import { db, SYNCED_TABLES } from './db'
 import { createMany } from './data'
 import { rpc } from './api'
 import { fullPull } from './pull'
@@ -46,22 +46,50 @@ export async function importJSON(text: string) {
   const parsed = JSON.parse(text)
   if (parsed?.app !== 'hearth' || !parsed.data) throw new Error('Not a Hearth backup file')
 
-  // Parents before children, so a transaction is never queued ahead of the
-  // account it belongs to.
-  const order: SyncedTable[] = ['categories', 'accounts', 'bills', 'transactions', 'budgets', 'rules']
-  for (const name of order) {
+  // SYNCED_TABLES, not a second hand-written list. The list here used to omit
+  // `goals` while `exportJSON` wrote them from SYNCED_TABLES, so a backup
+  // round-trip silently dropped every goal. Deriving both from one source is
+  // what stops the two drifting apart again — and SYNCED_TABLES is already
+  // ordered parents-before-children, so a transaction is never queued ahead of
+  // the account it belongs to.
+  for (const name of SYNCED_TABLES) {
     const rows = parsed.data[name]
     if (!Array.isArray(rows) || !rows.length) continue
-    await createMany(name, rows)
+    await createMany(name, name === 'budgets' ? rows.map(withMonth) : rows)
   }
 }
 
 /**
- * Delete everything in the household.
+ * A budget from a backup taken before migration 04 has no `month`.
+ *
+ * Left alone it reaches the outbox without one, which makes `upsert_budget`
+ * resolve to a four-argument overload that no longer exists — so the restore
+ * appears to work and then produces a pile of "could not find the function"
+ * dead letters. Defaulting to the current month is a guess, but it is the same
+ * guess migration 04 made when it backfilled the column, and a budget in the
+ * wrong month is far easier to notice and fix than a rejected write.
+ */
+function withMonth(row: unknown): Record<string, unknown> {
+  const b = row as Record<string, unknown>
+  if (typeof b.month === 'string' && b.month) return b
+  const now = new Date()
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  return { ...b, month }
+}
+
+/**
+ * Delete everything this person is entitled to delete.
+ *
+ * "Everything" is the shared household data — which both people own jointly, so
+ * either may erase it — plus whatever is private to the caller. It is NOT the
+ * partner's private accounts, their transactions, or their personal categories,
+ * budgets and goals. `wipe_household()` used to take those too: it is
+ * `security definer`, which switches RLS off, and it filtered on nothing but the
+ * household id. See supabase/05-ownership-and-deletes.sql.
  *
  * Done server-side so it is one atomic operation that the other device learns
- * about through ordinary tombstones. The RPC re-seeds the starter categories
- * and account afterwards, because a transaction cannot be recorded without an
+ * about through ordinary tombstones. The RPC re-seeds the starter categories and
+ * account afterwards, because a transaction cannot be recorded without an
  * account and a wipe that removed the last one would brick the add form.
  */
 export async function clearAllData() {
