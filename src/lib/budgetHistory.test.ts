@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Budget } from './db'
-import { budgetSeries, cumulativeDrift, fillBudgets, typicalRange } from './budgetHistory'
+import { budgetSeries, fillBudgets, typicalRange } from './budgetHistory'
 
 /**
  * The regression this file exists for.
@@ -58,28 +58,6 @@ describe('fillBudgets', () => {
 
   it('reports itself unusable when there is neither a budget nor any spending', () => {
     expect(fillBudgets(MONTHS.map(() => null), MONTHS.map(() => 0)).usable).toBe(false)
-  })
-})
-
-describe('cumulativeDrift', () => {
-  it('judges each month against its own budget', () => {
-    // £340 against a £300 budget is over; £410 against £450 is under. Judged
-    // against August's £450 alone, the first month would have looked fine.
-    const drift = cumulativeDrift([34000, 41000], [30000, 45000])
-    expect(drift).toEqual([4000, 0])
-  })
-
-  it('runs as a total, so an overspend clawed back returns to zero', () => {
-    const drift = cumulativeDrift([20000, 10000], [10000, 20000])
-    expect(drift).toEqual([10000, 0])
-  })
-
-  it('ends at the half-year balance', () => {
-    const spend = [34000, 28000, 31500, 41000, 45500, 39500]
-    const budgets = [30000, 30000, 30000, 45000, 45000, 45000]
-    const drift = cumulativeDrift(spend, budgets)
-    const total = spend.reduce((s, v) => s + v, 0) - budgets.reduce((s, v) => s + v, 0)
-    expect(drift[drift.length - 1]).toBe(total)
   })
 })
 

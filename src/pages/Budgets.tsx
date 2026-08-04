@@ -14,7 +14,7 @@ import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { Card, CategoryDot, Progress, Button, Empty, Segmented, Toolbar, MonthStepper, cx } from '../components/ui'
 import { BudgetBullet } from '../components/BudgetBullet'
-import { Drift } from '../components/Drift'
+import { BudgetBars } from '../components/BudgetBars'
 
 /**
  * Budgets are set in place.
@@ -35,6 +35,8 @@ interface Row {
   budget?: Budget
   spent: number
   history: number[]
+  /** The six finished months `history` covers, oldest first. */
+  months: string[]
   /** The budget in force for each of those months, gaps filled. */
   budgetHistory: FilledBudgets
   /** The range this category normally spends in, for the bullet's context band. */
@@ -65,7 +67,11 @@ export default function Budgets() {
   )
   const budgetByCategory = useMemo(() => new Map(scoped.map((b) => [b.categoryId, b])), [scoped])
 
-  const months = useMemo(() => monthsEndingAt(month, HISTORY_MONTHS), [month])
+  // Six *finished* months, ending the month before the one on screen. The month
+  // you are looking at is already in the row twice — the bullet and the spent
+  // and left columns — and on the 4th of the month it is 90% "under budget",
+  // which in a chart of percentages is a lie with a bar attached.
+  const months = useMemo(() => monthsEndingAt(shiftMonth(month, -1), HISTORY_MONTHS), [month])
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
   // Personal budgets track only what you recorded yourself, so the history they
@@ -94,19 +100,18 @@ export default function Budgets() {
     // Budgets live on top-level categories; subcategory spending rolls up.
     const expense = topLevel(categories).filter((c) => c.kind === 'expense')
     return expense.map((category) => {
+      // Every month here has finished, so all six count towards what is
+      // typical — no part-way month to exclude.
       const series = history.get(category.id) ?? months.map(() => 0)
-      // Every month except the one being edited: a part-way month is not
-      // evidence of anything, and would drag both the suggestion and the
-      // "normally spends" band down with it.
-      const settled = series.slice(0, -1)
       return {
         category,
         budget: budgetByCategory.get(category.id),
         spent: spentThisMonth.get(category.id) ?? 0,
         history: series,
+        months,
         budgetHistory: fillBudgets(budgetSeries(allBudgets, category.id, months, owned), series),
-        typical: typicalRange(settled),
-        suggestion: typicalSpend(settled),
+        typical: typicalRange(series),
+        suggestion: typicalSpend(series),
       }
     })
   }, [categories, history, months, budgetByCategory, spentThisMonth, allBudgets, owned])
@@ -219,7 +224,7 @@ export default function Budgets() {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <BudgetRow key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} isCurrent={isCurrent} onCommit={setAmount} />
+                  <BudgetRow key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} onCommit={setAmount} />
                 ))}
               </tbody>
             </table>
@@ -228,7 +233,7 @@ export default function Budgets() {
           {/* Phone: the same edit-in-place, as cards. */}
           <div className="space-y-2 md:hidden">
             {[...budgeted, ...unbudgeted].map((row) => (
-              <BudgetCard key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} isCurrent={isCurrent} onCommit={setAmount} />
+              <BudgetCard key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} onCommit={setAmount} />
             ))}
           </div>
         </>
@@ -239,6 +244,19 @@ export default function Budgets() {
 
 type MoneyFn = (minor: number, opts?: { sign?: boolean; compact?: boolean; hideDecimals?: boolean }) => string
 type CommitFn = (row: Row, minor: number | null) => void | Promise<void>
+
+/** Hover text for each bar — the figures the chart deliberately leaves out. */
+function barLabels(row: Row, money: MoneyFn): string[] {
+  return row.months.map((m, i) => {
+    const spent = row.history[i]
+    const budget = row.budgetHistory.amounts[i]
+    const when = monthLabel(m, 'short')
+    if (!row.budgetHistory.usable || budget <= 0) return `${when} · ${money(spent)}`
+    const pct = Math.round(((spent - budget) / budget) * 100)
+    const basis = row.budgetHistory.inferred[i] ? ' (assumed)' : ''
+    return `${when} · ${money(spent)} of ${money(budget)}${basis} — ${Math.abs(pct)}% ${pct > 0 ? 'over' : 'under'}`
+  })
+}
 
 /**
  * The amount field.
@@ -306,13 +324,12 @@ function SuggestionButton({ minor, money, onAccept }: { minor: number; money: Mo
 }
 
 function BudgetRow({
-  row, catMap, symbol, money, isCurrent, onCommit,
+  row, catMap, symbol, money, onCommit,
 }: {
   row: Row
   catMap: Map<string, Category>
   symbol: string
   money: MoneyFn
-  isCurrent: boolean
   onCommit: CommitFn
 }) {
   const budget = row.budget?.amountMinor
@@ -328,11 +345,11 @@ function BudgetRow({
         </span>
       </td>
       <td className="px-3">
-        <Drift
+        <BudgetBars
           values={row.history}
           budgets={row.budgetHistory.amounts}
           inferred={row.budgetHistory.inferred}
-          provisionalLast={isCurrent}
+          labels={barLabels(row, money)}
         />
       </td>
       <td className="px-3 py-1.5 text-right">
@@ -368,13 +385,12 @@ function BudgetRow({
 }
 
 function BudgetCard({
-  row, catMap, symbol, money, isCurrent, onCommit,
+  row, catMap, symbol, money, onCommit,
 }: {
   row: Row
   catMap: Map<string, Category>
   symbol: string
   money: MoneyFn
-  isCurrent: boolean
   onCommit: CommitFn
 }) {
   const budget = row.budget?.amountMinor
@@ -440,13 +456,13 @@ function BudgetCard({
             <p className="text-sm text-ink-3 tabular">
               {money(row.spent)} of {money(budget, { hideDecimals: true })}
             </p>
-            <Drift
+            <BudgetBars
               values={row.history}
               budgets={row.budgetHistory.amounts}
               inferred={row.budgetHistory.inferred}
-              provisionalLast={isCurrent}
-              width={72}
-              height={18}
+              labels={barLabels(row, money)}
+              width={96}
+              height={22}
             />
           </div>
         </>

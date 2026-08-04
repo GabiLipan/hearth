@@ -50,12 +50,14 @@ export function BudgetBullet({
     >
       {typical && (
         <div
-          className="absolute inset-y-0 rounded-sm bg-ink-3/25"
+          className="absolute inset-y-0 rounded-sm bg-ink-3/40"
           style={{ left: pct(typical[0]), width: pct(Math.max(0, typical[1] - typical[0])) }}
         />
       )}
+      {/* Thin, so the band behind it stays readable: spending usually lands near
+          the top of the typical range, and a fat bar simply covers it. */}
       <div
-        className="absolute inset-y-[22%] left-0 rounded-full transition-[width] duration-500"
+        className="absolute inset-y-[32%] left-0 rounded-full transition-[width] duration-500"
         style={{ width: pct(spent), background: over ? 'var(--critical)' : color ?? 'var(--accent)' }}
       />
       {pace != null && pace < 1 && (

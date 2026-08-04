@@ -62,17 +62,6 @@ export function fillBudgets(series: (number | null)[], spend: number[]): FilledB
 }
 
 /**
- * Running total of overspend minus underspend, starting from zero.
- *
- * Returns one point per month; each uses that month's own budget, which is what
- * makes the zero line an honest reference rather than a snapshot of today.
- */
-export function cumulativeDrift(spend: number[], budgets: number[]): number[] {
-  let running = 0
-  return spend.map((v, i) => (running += v - (budgets[i] ?? 0)))
-}
-
-/**
  * The range a category normally spends in, for the bullet's context band.
  *
  * Months with no spending at all are dropped rather than dragging the floor to
