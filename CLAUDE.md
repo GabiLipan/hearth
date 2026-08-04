@@ -150,6 +150,13 @@ that silently hid your own private accounts).
 - **Writes fail late and quietly.** Everything goes through the outbox, so a bad
   row surfaces minutes later as a dead letter in Settings, not as an error on the
   form. Validate at the boundary (`insertToDb` throws on non-writable columns).
+- **A budget is per month, so "the budget" is never a single number.** `useBudgets()`
+  returns every month; `useBudgetsForMonth()` returns one. Handing the whole lot to a
+  view that assumes one month renders each category once per month it was ever
+  budgeted (the home widget did this, and double-counted the totals). Anything
+  comparing history against budget must read the budget in force for *that* month —
+  `lib/budgetHistory.ts` does this, and fills months with none from the median of
+  the months that have one.
 
 ## Known gaps (not yet fixed)
 

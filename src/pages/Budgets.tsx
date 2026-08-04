@@ -1,18 +1,20 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Target, Copy, Check } from 'lucide-react'
 import type { Budget, Category } from '../lib/db'
 import { create, update, remove } from '../lib/data'
 import { rpc } from '../lib/api'
 import { syncNow } from '../lib/session'
-import { useAllTransactions, useBudgetsForMonth, useCategories } from '../lib/cache'
+import { useAllTransactions, useBudgets, useCategories } from '../lib/cache'
 import { budgetCategoryId, styleOf, topLevel } from '../lib/categories'
 import { monthlySpendByCategory, monthsEndingAt, typicalSpend, isTransfer } from '../lib/stats'
+import { budgetSeries, fillBudgets, typicalRange, type FilledBudgets } from '../lib/budgetHistory'
 import { thisMonthKey, monthLabel, monthKey, shiftMonth } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { Card, CategoryDot, Progress, Button, Empty, Segmented, Toolbar, MonthStepper, cx } from '../components/ui'
-import { Sparkline } from '../components/Sparkline'
+import { BudgetBullet } from '../components/BudgetBullet'
+import { Drift } from '../components/Drift'
 
 /**
  * Budgets are set in place.
@@ -33,6 +35,10 @@ interface Row {
   budget?: Budget
   spent: number
   history: number[]
+  /** The budget in force for each of those months, gaps filled. */
+  budgetHistory: FilledBudgets
+  /** The range this category normally spends in, for the bullet's context band. */
+  typical?: [number, number]
   suggestion?: number
 }
 
@@ -44,15 +50,18 @@ export default function Budgets() {
   const [copying, setCopying] = useState(false)
 
   const categories = useCategories()
-  const budgets = useBudgetsForMonth(month)
+  // Every month, not just this one: the history column judges each month against
+  // the budget that was actually in force for it.
+  const allBudgets = useBudgets()
   const txns = useAllTransactions() ?? []
 
   const mine = scope === 'mine' && !!userId
   const isCurrent = month === thisMonthKey()
 
+  const owned = useCallback((b: Budget) => (mine ? b.ownerId === userId : !b.ownerId), [mine, userId])
   const scoped = useMemo(
-    () => budgets.filter((b) => (mine ? b.ownerId === userId : !b.ownerId)),
-    [budgets, mine, userId],
+    () => allBudgets.filter((b) => owned(b) && b.month === `${month}-01`),
+    [allBudgets, owned, month],
   )
   const budgetByCategory = useMemo(() => new Map(scoped.map((b) => [b.categoryId, b])), [scoped])
 
@@ -86,17 +95,21 @@ export default function Budgets() {
     const expense = topLevel(categories).filter((c) => c.kind === 'expense')
     return expense.map((category) => {
       const series = history.get(category.id) ?? months.map(() => 0)
+      // Every month except the one being edited: a part-way month is not
+      // evidence of anything, and would drag both the suggestion and the
+      // "normally spends" band down with it.
+      const settled = series.slice(0, -1)
       return {
         category,
         budget: budgetByCategory.get(category.id),
         spent: spentThisMonth.get(category.id) ?? 0,
         history: series,
-        // Suggest from every month except the one being edited, so a part-way
-        // month does not drag its own suggestion down.
-        suggestion: typicalSpend(series.slice(0, -1)),
+        budgetHistory: fillBudgets(budgetSeries(allBudgets, category.id, months, owned), series),
+        typical: typicalRange(settled),
+        suggestion: typicalSpend(settled),
       }
     })
-  }, [categories, history, months, budgetByCategory, spentThisMonth])
+  }, [categories, history, months, budgetByCategory, spentThisMonth, allBudgets, owned])
 
   const budgeted = rows.filter((r) => r.budget)
   const unbudgeted = rows.filter((r) => !r.budget)
@@ -206,7 +219,7 @@ export default function Budgets() {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <BudgetRow key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} onCommit={setAmount} />
+                  <BudgetRow key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} isCurrent={isCurrent} onCommit={setAmount} />
                 ))}
               </tbody>
             </table>
@@ -215,7 +228,7 @@ export default function Budgets() {
           {/* Phone: the same edit-in-place, as cards. */}
           <div className="space-y-2 md:hidden">
             {[...budgeted, ...unbudgeted].map((row) => (
-              <BudgetCard key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} onCommit={setAmount} />
+              <BudgetCard key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} isCurrent={isCurrent} onCommit={setAmount} />
             ))}
           </div>
         </>
@@ -293,17 +306,17 @@ function SuggestionButton({ minor, money, onAccept }: { minor: number; money: Mo
 }
 
 function BudgetRow({
-  row, catMap, symbol, money, onCommit,
+  row, catMap, symbol, money, isCurrent, onCommit,
 }: {
   row: Row
   catMap: Map<string, Category>
   symbol: string
   money: MoneyFn
+  isCurrent: boolean
   onCommit: CommitFn
 }) {
   const budget = row.budget?.amountMinor
   const left = budget != null ? budget - row.spent : undefined
-  const frac = budget ? row.spent / budget : 0
   const style = styleOf(row.category, catMap)
 
   return (
@@ -315,7 +328,12 @@ function BudgetRow({
         </span>
       </td>
       <td className="px-3">
-        <Sparkline values={row.history} budget={budget} />
+        <Drift
+          values={row.history}
+          budgets={row.budgetHistory.amounts}
+          inferred={row.budgetHistory.inferred}
+          provisionalLast={isCurrent}
+        />
       </td>
       <td className="px-3 py-1.5 text-right">
         <div className="flex items-center justify-end gap-2">
@@ -335,24 +353,32 @@ function BudgetRow({
         {left != null ? money(left) : '—'}
       </td>
       <td className="py-1.5 pr-3">
-        {budget != null && <Progress fraction={frac} tone={frac > 1 ? 'over' : frac > 0.85 ? 'warn' : 'ok'} />}
+        {budget != null && (
+          <BudgetBullet
+            spent={row.spent}
+            budget={budget}
+            typical={row.typical}
+            color={`var(--series-${style.slot})`}
+            label={`${money(row.spent)} spent of a ${money(budget)} budget`}
+          />
+        )}
       </td>
     </tr>
   )
 }
 
 function BudgetCard({
-  row, catMap, symbol, money, onCommit,
+  row, catMap, symbol, money, isCurrent, onCommit,
 }: {
   row: Row
   catMap: Map<string, Category>
   symbol: string
   money: MoneyFn
+  isCurrent: boolean
   onCommit: CommitFn
 }) {
   const budget = row.budget?.amountMinor
   const left = budget != null ? budget - row.spent : undefined
-  const frac = budget ? row.spent / budget : 0
   const style = styleOf(row.category, catMap)
 
   // ±10% of the current amount, rounded to the nearest pound: a nudge that
@@ -402,13 +428,26 @@ function BudgetCard({
       {budget != null && (
         <>
           <div className="mt-2.5">
-            <Progress fraction={frac} tone={frac > 1 ? 'over' : frac > 0.85 ? 'warn' : 'ok'} />
+            <BudgetBullet
+              spent={row.spent}
+              budget={budget}
+              typical={row.typical}
+              color={`var(--series-${style.slot})`}
+              label={`${money(row.spent)} spent of a ${money(budget)} budget`}
+            />
           </div>
           <div className="mt-1.5 flex items-center justify-between">
             <p className="text-sm text-ink-3 tabular">
               {money(row.spent)} of {money(budget, { hideDecimals: true })}
             </p>
-            <Sparkline values={row.history} budget={budget} width={72} height={18} />
+            <Drift
+              values={row.history}
+              budgets={row.budgetHistory.amounts}
+              inferred={row.budgetHistory.inferred}
+              provisionalLast={isCurrent}
+              width={72}
+              height={18}
+            />
           </div>
         </>
       )}

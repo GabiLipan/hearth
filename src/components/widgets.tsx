@@ -3,17 +3,20 @@ import { Link } from 'react-router-dom'
 import { ArrowRight, Lock, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account } from '../lib/db'
-import { thisMonthKey, monthLabel, monthKey, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
-import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
+import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
+import { spendByCategory, monthlySeries, monthTotals, monthlySpendByCategory, monthsEndingAt } from '../lib/stats'
+import { typicalRange } from '../lib/budgetHistory'
 import { balanceOf } from '../lib/accounts'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Progress, cx } from './ui'
+import { BudgetBullet } from './BudgetBullet'
 import { CategoryIcon } from './CategoryIcon'
 import { CategoryDonut, SpendBars } from './charts'
 
 export interface HomeData {
   txns: Transaction[]
   categories: Category[]
+  /** This month's budgets only — see Dashboard. Widgets must not assume history. */
   budgets: Budget[]
   bills: Bill[]
   accounts: Account[]
@@ -107,22 +110,27 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
   const now = new Date()
   const paceFrac = now.getDate() / getDaysInMonth(now)
-  const spent = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const t of data.txns) {
-      if (t.amountMinor >= 0 || !t.categoryId || monthKey(t.date) !== month()) continue
-      m.set(t.categoryId, (m.get(t.categoryId) ?? 0) - t.amountMinor)
-    }
-    return m
-  }, [data.txns])
+  // Six months, so the bullet can say what "normal" looks like for a category.
+  // This also aligns the widget with the Budgets page, which rolls subcategory
+  // spending up to the parent and excludes transfers — the hand-rolled loop
+  // that used to live here did neither, so the two pages disagreed.
+  const months = useMemo(() => monthsEndingAt(month(), 6), [])
+  const history = useMemo(
+    () => monthlySpendByCategory(data.txns, data.categories, months),
+    [data.txns, data.categories, months],
+  )
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   const rows = data.budgets
     .filter((b) => !b.ownerId && catMap.has(b.categoryId)) // the household's budgets
-    .map((b) => ({
-      cat: catMap.get(b.categoryId)!,
-      budget: b.amountMinor,
-      spent: spent.get(b.categoryId) ?? 0,
-    }))
+    .map((b) => {
+      const series = history.get(b.categoryId) ?? months.map(() => 0)
+      return {
+        cat: catMap.get(b.categoryId)!,
+        budget: b.amountMinor,
+        spent: series[series.length - 1],
+        typical: typicalRange(series.slice(0, -1)),
+      }
+    })
     .sort((a, b) => b.spent / b.budget - a.spent / a.budget)
   if (rows.length === 0) {
     return (
@@ -148,28 +156,23 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
       {/* This widget spans the full page width, so on a wide screen the rows
           split into columns — a bar 1,000px long is harder to read, not easier. */}
       <ul className="grid gap-2.5 md:gap-x-6 md:gap-y-1.5 lg:grid-cols-2 min-[1800px]:grid-cols-3">
-        {rows.map(({ cat, budget, spent: catSpent }) => {
-          const frac = catSpent / budget
-          const over = frac > 1
-          const barColor = over ? 'var(--critical)' : frac > 0.85 ? 'var(--warning)' : 'var(--accent)'
+        {rows.map(({ cat, budget, spent: catSpent, typical }) => {
+          const over = catSpent > budget
           return (
             <li key={cat.id} className="flex items-center gap-2.5 md:gap-2">
               <span className="grid w-5 shrink-0 place-items-center" style={{ color: `var(--series-${cat.slot})` }} aria-hidden>
                 <CategoryIcon icon={cat.icon} size={15} />
               </span>
               <span className="w-24 truncate text-sm text-ink-2 sm:w-32">{cat.name}</span>
-              <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-surface-2 md:h-1.5">
-                <span
-                  className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500"
-                  style={{ width: `${Math.min(100, frac * 100)}%`, background: barColor }}
-                />
-                {/* today's pace marker: fill left of this line = on track */}
-                <span
-                  className="absolute inset-y-0 w-px bg-ink-3/70"
-                  style={{ left: `${paceFrac * 100}%` }}
-                  aria-hidden
-                />
-              </span>
+              <BudgetBullet
+                className="flex-1"
+                spent={catSpent}
+                budget={budget}
+                typical={typical}
+                pace={paceFrac}
+                color={`var(--series-${cat.slot})`}
+                label={`${cat.name}: ${money(catSpent)} spent of a ${money(budget)} budget`}
+              />
               <span className={cx('w-16 shrink-0 text-right text-xs font-medium tabular', over ? 'text-critical-text' : 'text-ink-2')}>
                 {over ? `+${money(catSpent - budget, { compact: true })}` : money(budget - catSpent, { compact: true })}
               </span>
@@ -178,7 +181,7 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
         })}
       </ul>
       <p className="mt-3 text-xs text-ink-3 md:mt-2">
-        Bar = spent · line = where today sits in the month · right column = left (or over)
+        Bar = spent · dark tick = budget · pale block = what this category normally costs · right column = left (or over)
       </p>
     </Card>
   )

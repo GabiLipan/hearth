@@ -1,7 +1,8 @@
 import { useEffect, useState, type ComponentType } from 'react'
 import { Sparkles, SlidersHorizontal, Check, ChevronUp, ChevronDown, EyeOff, Plus } from 'lucide-react'
 import { getSetting, setSetting } from '../lib/db'
-import { useAccounts, useAllTransactions, useBills, useBudgets, useCategories, useRemoteBalances } from '../lib/cache'
+import { useAccounts, useAllTransactions, useBills, useBudgetsForMonth, useCategories, useRemoteBalances } from '../lib/cache'
+import { thisMonthKey } from '../lib/dates'
 import { defaultDemoAccount, seedDemoData } from '../lib/demo'
 import { useSyncState } from '../hooks/useSync'
 import { Button, Empty, cx } from '../components/ui'
@@ -60,7 +61,9 @@ export default function Dashboard() {
   const { userId } = useSyncState()
   const txns = useAllTransactions()
   const categories = useCategories()
-  const budgets = useBudgets()
+  // This month's only. Budgets are per-month rows, so handing the widgets every
+  // month would show each category once per month it was ever budgeted.
+  const budgets = useBudgetsForMonth(thisMonthKey())
   const bills = useBills()
   const accounts = useAccounts()
   const remoteBalances = useRemoteBalances()
