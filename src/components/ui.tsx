@@ -23,9 +23,19 @@ export function Card({ children, className, onClick }: { children: ReactNode; cl
   )
 }
 
+/**
+ * The heading above a settings block.
+ *
+ * It carries no top margin: the space above a section belongs to the section,
+ * not to its title. This used to be `mt-6 first:mt-0`, written when the titles
+ * were siblings in one long column — once each was wrapped in its own
+ * `<section>` for the column layout, every title became a `:first-child` and
+ * the reset silently cancelled the margin on all of them, leaving each heading
+ * jammed against the card above it. The gap now lives on the section.
+ */
 export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="mb-2 mt-6 flex items-baseline justify-between px-1 first:mt-0 md:mb-1.5 md:mt-5">
+    <div className="mb-2 flex items-baseline justify-between px-1 md:mb-1.5">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-3 md:text-xs">{children}</h2>
       {action}
     </div>
@@ -360,11 +370,15 @@ export const table = {
    *
    * It needs its own background: a sticky cell is painted over by the cells
    * sliding beneath it otherwise. `--surface` is the Card it sits in, so the
-   * pinned column looks continuous with the card rather than like a panel —
-   * and it repeats the row's hover tint, which its own background would
-   * otherwise be painted over the top of.
+   * pinned column looks continuous with the card rather than like a panel.
+   *
+   * Both backgrounds must be **opaque**. It repeats the row's hover tint, and
+   * the first version used `surface-2/50` to match the row exactly — 50% alpha,
+   * through which the scrolled-under columns were plainly visible the moment
+   * you hovered a row. `--row-hover` is that same tint resolved to a solid
+   * colour.
    */
-  pinned: 'sticky left-0 z-10 bg-surface group-hover:bg-surface-2/50',
+  pinned: 'sticky left-0 z-10 bg-surface group-hover:bg-row-hover',
 }
 
 /**

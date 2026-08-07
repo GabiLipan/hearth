@@ -148,7 +148,14 @@ export default function Dashboard() {
           return (
             <div
               key={item.id}
-              className={cx('relative min-w-0 mb-3 break-inside-avoid md:mb-2.5', def.wide && 'md:[column-span:all]')}
+              className={cx(
+                'relative min-w-0 mb-3 break-inside-avoid md:mb-2.5',
+                // Safari ignores break-inside in multicol and will split a
+                // widget across a column boundary. Inline-block is atomic, so
+                // it cannot. A column-spanning element has to stay block-level,
+                // which is fine — a full-width widget has no boundary to cross.
+                def.wide ? 'md:[column-span:all]' : 'md:inline-block md:w-full md:align-top',
+              )}
             >
               {editing && (
                 <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">

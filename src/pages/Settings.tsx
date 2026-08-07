@@ -213,7 +213,18 @@ export default function SettingsPage() {
   return (
     // Settings are independent blocks, so on a wide screen they flow into
     // columns rather than one long ribbon down the left edge.
-    <div className="max-w-2xl xl:max-w-none xl:columns-2 xl:gap-6 2xl:columns-3 [&>section]:break-inside-avoid">
+    //
+    // `break-inside: avoid` alone is not enough: Safari ignores it in a
+    // multi-column layout and will happily cut a card in half at a column
+    // boundary, leaving its bottom border stranded at the top of the next
+    // column. Inline-block children are atomic, which every engine honours.
+    // (JSX strips whitespace-only lines between elements, so full-width
+    // inline-blocks stack with no stray gaps between them.)
+    //
+    // The `mb` is the gap between sections. It used to come from a top margin
+    // on SectionTitle, which stopped working the day each section was wrapped
+    // in its own element — see SectionTitle.
+    <div className="max-w-2xl xl:max-w-none xl:columns-2 xl:gap-6 2xl:columns-3 [&>section]:mb-6 md:[&>section]:mb-5 [&>section]:break-inside-avoid xl:[&>section]:inline-block xl:[&>section]:w-full xl:[&>section]:align-top">
       <section>
         <SectionTitle>Household</SectionTitle>
         <HouseholdCard />
