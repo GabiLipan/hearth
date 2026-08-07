@@ -62,7 +62,7 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
 
 /** Columns to request when pulling. Explicit, so adding a server column does not silently change payload size. */
 const READABLE: Record<SyncedTable, readonly string[]> = {
-  household_members: ['id', 'userId', 'displayName', 'role', 'joinedAt', 'updatedAt', 'deletedAt'],
+  household_members: ['id', 'userId', 'displayName', 'avatarUrl', 'role', 'joinedAt', 'updatedAt', 'deletedAt'],
   categories: [...WRITABLE.categories, 'updatedAt', 'deletedAt'],
   account_grants: [...WRITABLE.account_grants, 'grantedBy', 'updatedAt', 'deletedAt'],
   accounts: [...WRITABLE.accounts, 'createdBy', 'updatedAt', 'deletedAt'],

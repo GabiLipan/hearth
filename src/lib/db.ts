@@ -186,6 +186,8 @@ export interface HouseholdMember {
   id: string
   userId: string
   displayName?: string
+  /** Optional, and a downscaled data URL rather than a link — see 08-profiles.sql. */
+  avatarUrl?: string
   role: MemberRole
   joinedAt: string
   updatedAt: string

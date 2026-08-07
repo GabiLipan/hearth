@@ -73,6 +73,7 @@ export function useIsAdmin(): boolean {
  */
 export function useMyLevels(): Map<string, GrantLevel> {
   const { userId } = useSyncState()
+  const accounts = useAccounts()
   const grants = useLiveQuery(
     () =>
       userId
@@ -81,7 +82,25 @@ export function useMyLevels(): Map<string, GrantLevel> {
     [userId],
     [] as AccountGrant[],
   )
-  return useMemo(() => new Map((grants ?? []).map((g) => [g.accountId, g.level as GrantLevel])), [grants])
+  return useMemo(() => {
+    const levels = new Map((grants ?? []).map((g) => [g.accountId, g.level as GrantLevel]))
+    // An account you just created, whose owner grant has not come back yet.
+    //
+    // The grant is written by an AFTER INSERT trigger on the server, so between
+    // queueing the account and the next pull there is a window where you hold
+    // the row and no grant — and without this you would briefly be unable to
+    // edit or delete an account you had only just made. This mirrors the second
+    // disjunct of `accounts_select`, which admits exactly the same case: a row
+    // you created that nobody holds a grant on.
+    //
+    // It cannot mask a real revocation. Losing a grant bumps the visibility
+    // epoch, which drops this cache entirely, so an account still sitting here
+    // with no grant is one whose grant has yet to arrive.
+    for (const a of accounts) {
+      if (!levels.has(a.id) && !!userId && a.createdBy === userId) levels.set(a.id, 'owner')
+    }
+    return levels
+  }, [grants, accounts, userId])
 }
 
 /** Everyone's access to one account. Only populated for accounts you manage. */

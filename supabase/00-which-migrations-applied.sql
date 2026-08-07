@@ -57,4 +57,14 @@ select '07-permissions.sql',
        to_regclass('public.account_grants') is not null
    and to_regclass('public.household_members') is not null
    and to_regprocedure('public.my_account_ids(public.access_level)') is not null,
-       'account_grants + household_members tables and my_account_ids() exist';
+       'account_grants + household_members tables and my_account_ids() exist'
+
+union all
+-- Until this reads true, nobody can set their own name or picture and every
+-- permissions screen says "Someone".
+select '08-profiles.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'household_members'
+                  and column_name = 'avatar_url')
+   and to_regprocedure('public.set_profile(text,text)') is not null,
+       'household_members.avatar_url and set_profile() exist';

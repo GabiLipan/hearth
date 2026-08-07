@@ -40,6 +40,7 @@ import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, cx } from '../components/ui'
 import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
+import { PersonDot, nameOf } from '../components/PersonDot'
 
 /**
  * The household card. Signing in and choosing a household happen in Onboarding
@@ -437,30 +438,36 @@ function MembersCard() {
   const { userId } = useSyncState()
   const members = useMembers()
   const isAdmin = useIsAdmin()
-  const [open, setOpen] = useState<HouseholdMember | null>(null)
+  // The open member is held as an ID and looked up live, never copied into
+  // state. Changing a role bumps the visibility epoch, which drops the whole
+  // cache and re-pulls; a captured object would survive that as a stale render
+  // showing the value you had just changed away from.
+  const [openId, setOpenId] = useState<string | null>(null)
+  const open = members.find((m) => m.userId === openId)
 
-  if (members.length === 0) {
-    return (
-      <Card className="p-4 md:p-3">
-        <p className="text-sm text-ink-3">
-          Your household list has not synced yet. It will appear once you are back online.
-        </p>
-      </Card>
-    )
-  }
+  const me = members.find((m) => m.userId === userId)
 
   return (
     <>
+      {me && <YouCard me={me} />}
+      {members.length === 0 ? (
+        <Card className="p-4 md:p-3">
+          <p className="text-sm text-ink-3">
+            Your household list has not synced yet. It will appear once you are back online.
+          </p>
+        </Card>
+      ) : (
       <Card>
         <ul className="divide-y divide-hairline">
           {members.map((m) => (
             <li key={m.userId}>
               <button
-                onClick={() => setOpen(m)}
+                onClick={() => setOpenId(m.userId)}
                 className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 md:px-3 desktop:py-2"
               >
+                <PersonDot member={m} size={32} />
                 <span className="min-w-0 flex-1 truncate font-medium">
-                  {m.displayName ?? 'Someone'}
+                  {nameOf(m)}
                   {m.userId === userId && <span className="ml-1.5 text-sm font-normal text-ink-3">you</span>}
                 </span>
                 {m.role === 'admin' && <Chip tone="accent">Admin</Chip>}
@@ -470,23 +477,146 @@ function MembersCard() {
           ))}
         </ul>
       </Card>
+      )}
       {members.length === 1 && (
         <p className="mt-2 px-1 text-xs text-ink-3">
           Share your invite code above to bring somebody in. Nothing of yours becomes visible to them until you
           share an account with them.
         </p>
       )}
+      {/* Kept mounted across a cache rebuild: the sheet reads whichever row is
+          current, so a role change updates it in place instead of closing and
+          flashing back with the old value. */}
       {open && (
         <MemberSheet
           key={open.userId}
           member={open}
           isAdmin={isAdmin}
           isMe={open.userId === userId}
-          onClose={() => setOpen(null)}
+          onClose={() => setOpenId(null)}
         />
       )}
     </>
   )
+}
+
+
+/**
+ * Your own name and picture.
+ *
+ * Both are optional in the sense that Hearth works without them, but a
+ * household where everybody is "Someone" makes every permissions screen
+ * useless, so the name is always set to *something* — the server backfills it
+ * from your email address, and this is where you change it to what you would
+ * rather be called.
+ *
+ * The picture is downscaled here, in the browser, and stored on the row rather
+ * than in a bucket. At the size it is ever displayed that is a few kilobytes,
+ * which is cheaper than the infrastructure and its extra failure mode.
+ */
+function YouCard({ me }: { me: HouseholdMember }) {
+  const [name, setName] = useState(nameOf(me))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  async function save(patch: { name?: string; avatar?: string }) {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await rpc('set_profile', { p_name: patch.name ?? null, p_avatar: patch.avatar ?? null })
+      await syncNow()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That could not be saved')
+    }
+    setBusy(false)
+  }
+
+  async function pickPhoto(file: File) {
+    try {
+      const dataUrl = await downscaleImage(file, 96)
+      await save({ avatar: dataUrl })
+    } catch {
+      setError('That image could not be read')
+    }
+  }
+
+  return (
+    <Card className="mb-3 space-y-3 p-4 md:mb-2.5 md:p-3">
+      <div className="flex items-center gap-3">
+        <PersonDot member={me} size={48} />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-ink-3">This is how you appear to everyone else</p>
+          <TextInput
+            className="mt-1"
+            value={name}
+            disabled={busy}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => {
+              const trimmed = name.trim()
+              if (!trimmed) {
+                setName(nameOf(me))
+                return
+              }
+              if (trimmed !== nameOf(me)) void save({ name: trimmed })
+            }}
+            placeholder="Your name"
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void pickPhoto(file)
+            e.target.value = ''
+          }}
+        />
+        <Button size="sm" variant="subtle" disabled={busy} onClick={() => fileRef.current?.click()}>
+          <Upload size={14} /> {me.avatarUrl ? 'Change photo' : 'Add a photo'}
+        </Button>
+        {me.avatarUrl && (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void save({ avatar: '' })}>
+            Remove photo
+          </Button>
+        )}
+      </div>
+      {error && <p className="text-sm text-critical-text">{error}</p>}
+    </Card>
+  )
+}
+
+/**
+ * Square-crop and shrink an image to `size` px, as a JPEG data URL.
+ *
+ * Done here rather than server-side because the alternative is uploading a
+ * 4MB phone photo to store 4KB of it.
+ */
+async function downscaleImage(file: File, size: number): Promise<string> {
+  const bitmap = await createImageBitmap(file)
+  const side = Math.min(bitmap.width, bitmap.height)
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('No canvas')
+  ctx.drawImage(
+    bitmap,
+    (bitmap.width - side) / 2,
+    (bitmap.height - side) / 2,
+    side,
+    side,
+    0,
+    0,
+    size,
+    size,
+  )
+  bitmap.close()
+  return canvas.toDataURL('image/jpeg', 0.82)
 }
 
 interface DeparturePreviewRow {
@@ -522,10 +652,10 @@ function MemberSheet({
     setBusy(false)
   }
 
-  const name = member.displayName ?? 'They'
+  const name = nameOf(member)
 
   return (
-    <Sheet open onClose={onClose} title={member.displayName ?? 'Household member'}>
+    <Sheet open onClose={onClose} title={nameOf(member)}>
       <div className="space-y-4">
         {isAdmin && !isMe && (
           <Field
@@ -749,8 +879,9 @@ function AccountAccessSheet({ account, open, onClose }: { account: Account; open
             return (
               <li key={m.userId} className="py-2.5">
                 <div className="flex items-center gap-3">
+                  <PersonDot member={m} size={28} />
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {m.displayName ?? 'Someone'}
+                    {nameOf(m)}
                     {m.userId === userId && <span className="ml-1.5 text-xs font-normal text-ink-3">you</span>}
                   </span>
                   {mayShare ? (
