@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `06`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `08`, then `local/98-grants.sql`, then `exec`
 a test file and read the final result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -48,6 +48,7 @@ read-only detector that reports which are present — run it when unsure.
 | `05-ownership-and-deletes.sql` | scoped wipe, `delete_account`, owner pinning |
 | `06-category-palette.sql` | widens `categories.slot` to 12 |
 | `07-permissions.sql` | `household_members`, `account_grants`, per-level RLS, the departure cascade |
+| `08-profiles.sql` | display names backfilled and editable, optional avatars, role change stops bumping the epoch |
 
 All are re-runnable. `05` refuses to install if `04` is missing — necessary,
 because **plpgsql bodies are only syntax-checked at creation time**, so a
@@ -201,6 +202,11 @@ the single place a level comes from.
   is unreliable there too. Both the home page and Settings shipped with this.
   `Columns` in `ui.tsx` lays out flex columns and balances them from measured
   heights instead — there is no fragmentation context, so nothing can split.
+- **`Select` carries `w-full`, so a width passed to it does nothing.** Tailwind
+  emits `.w-full` after `.w-40`, so the base class wins however the attribute is
+  ordered — the control fills its flex row and squeezes a `flex-1 min-w-0
+  truncate` sibling to zero width. This is how the sharing list came to show a
+  photo and a level with no name between them. Put the width on a wrapper.
 - **A sticky table column must be opaque.** `table.pinned` paints `--surface`,
   and its hover state is `--row-hover` rather than `surface-2/50`, because at
   50% alpha the columns scrolling underneath are readable straight through it.

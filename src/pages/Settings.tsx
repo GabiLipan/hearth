@@ -885,17 +885,23 @@ function AccountAccessSheet({ account, open, onClose }: { account: Account; open
                     {m.userId === userId && <span className="ml-1.5 text-xs font-normal text-ink-3">you</span>}
                   </span>
                   {mayShare ? (
-                    <Select
-                      className="w-40"
-                      value={level}
-                      onChange={(e) => void change(m.userId, e.target.value as GrantLevel)}
-                    >
-                      {LEVELS.map((l) => (
-                        <option key={l} value={l}>
-                          {LEVEL_LABEL[l]}
-                        </option>
-                      ))}
-                    </Select>
+                    /* The width goes on a wrapper, not on the Select. Select
+                       carries `w-full`, and Tailwind emits `.w-full` after
+                       `.w-40`, so it wins however the classes are ordered in
+                       the attribute — the control filled the row and squeezed
+                       the name beside it to nothing. */
+                    <span className="w-36 shrink-0 sm:w-44">
+                      <Select
+                        value={level}
+                        onChange={(e) => void change(m.userId, e.target.value as GrantLevel)}
+                      >
+                        {LEVELS.map((l) => (
+                          <option key={l} value={l}>
+                            {LEVEL_LABEL[l]}
+                          </option>
+                        ))}
+                      </Select>
+                    </span>
                   ) : (
                     <Chip>{LEVEL_LABEL[level]}</Chip>
                   )}
