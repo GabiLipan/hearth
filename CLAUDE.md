@@ -150,6 +150,15 @@ that silently hid your own private accounts).
 - **Writes fail late and quietly.** Everything goes through the outbox, so a bad
   row surfaces minutes later as a dead letter in Settings, not as an error on the
   form. Validate at the boundary (`insertToDb` throws on non-writable columns).
+- **Do not use CSS `columns` for cards.** Safari ignores `break-inside: avoid`
+  in a multi-column layout and cuts a card in half at the column boundary,
+  stranding its bottom border at the top of the next column; `column-span: all`
+  is unreliable there too. Both the home page and Settings shipped with this.
+  `Columns` in `ui.tsx` lays out flex columns and balances them from measured
+  heights instead — there is no fragmentation context, so nothing can split.
+- **A sticky table column must be opaque.** `table.pinned` paints `--surface`,
+  and its hover state is `--row-hover` rather than `surface-2/50`, because at
+  50% alpha the columns scrolling underneath are readable straight through it.
 - **A budget is per month, so "the budget" is never a single number.** `useBudgets()`
   returns every month; `useBudgetsForMonth()` returns one. Handing the whole lot to a
   view that assumes one month renders each category once per month it was ever

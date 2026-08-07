@@ -21,7 +21,7 @@ import { seedDemoData } from '../lib/demo'
 import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
-import { Card, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, cx } from '../components/ui'
+import { Card, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, cx } from '../components/ui'
 import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
 
 /**
@@ -151,6 +151,9 @@ function HouseholdCard() {
  * the user has put the phone down \u2014 a change that could not be saved must not
  * disappear quietly.
  */
+/** One column on a phone or laptop, two at xl, three on a wide monitor. */
+const COLUMN_STEPS: [number, number][] = [[1280, 2], [1536, 3]]
+
 function UnsavedChanges() {
   const deadLetters = useDeadLetters()
   if (deadLetters.length === 0) return null
@@ -208,23 +211,20 @@ export default function SettingsPage() {
   const rules = useRules()
   const [editingCat, setEditingCat] = useState<Category | 'new' | null>(null)
   const [demoOpen, setDemoOpen] = useState(false)
+  const columnCount = useColumnCount(COLUMN_STEPS)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Settings are independent blocks, so on a wide screen they flow into columns
+  // rather than one long ribbon down the left edge. `Columns` rather than CSS
+  // `columns`, because Safari fragments cards across a column boundary there
+  // whatever `break-inside` says.
+  //
+  // The gap between sections lives here too. It used to come from a top margin
+  // on SectionTitle, which stopped working the day each section was wrapped in
+  // its own element — see SectionTitle.
   return (
-    // Settings are independent blocks, so on a wide screen they flow into
-    // columns rather than one long ribbon down the left edge.
-    //
-    // `break-inside: avoid` alone is not enough: Safari ignores it in a
-    // multi-column layout and will happily cut a card in half at a column
-    // boundary, leaving its bottom border stranded at the top of the next
-    // column. Inline-block children are atomic, which every engine honours.
-    // (JSX strips whitespace-only lines between elements, so full-width
-    // inline-blocks stack with no stray gaps between them.)
-    //
-    // The `mb` is the gap between sections. It used to come from a top margin
-    // on SectionTitle, which stopped working the day each section was wrapped
-    // in its own element — see SectionTitle.
-    <div className="max-w-2xl xl:max-w-none xl:columns-2 xl:gap-6 2xl:columns-3 [&>section]:mb-6 md:[&>section]:mb-5 [&>section]:break-inside-avoid xl:[&>section]:inline-block xl:[&>section]:w-full xl:[&>section]:align-top">
+    <>
+    <Columns count={columnCount} gap="gap-6 md:gap-5" className="max-w-2xl xl:max-w-none">
       <section>
         <SectionTitle>Household</SectionTitle>
         <HouseholdCard />
@@ -387,7 +387,9 @@ export default function SettingsPage() {
         experience.
       </p>
       </section>
+      </Columns>
 
+      {/* Modals live outside the columns — they are not blocks on the page. */}
       <CategoryForm
         key={editingCat === 'new' ? 'new' : (editingCat?.id ?? 'closed')}
         category={editingCat === 'new' ? undefined : (editingCat ?? undefined)}
@@ -396,7 +398,7 @@ export default function SettingsPage() {
       />
 
       <DemoDataForm open={demoOpen} onClose={() => setDemoOpen(false)} />
-    </div>
+    </>
   )
 }
 

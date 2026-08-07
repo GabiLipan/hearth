@@ -1,10 +1,137 @@
-import { useEffect, useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type SelectHTMLAttributes } from 'react'
+import {
+  Children,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type SelectHTMLAttributes,
+} from 'react'
 import { X, ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react'
 import type { Category } from '../lib/db'
 import { CategoryIcon } from './CategoryIcon'
 
 export function cx(...parts: (string | false | undefined | null)[]) {
   return parts.filter(Boolean).join(' ')
+}
+
+/* ---------- Column layout ---------- */
+/**
+ * How many columns fit, from a list of `[minWidth, columns]` steps.
+ *
+ * The column count has to be known in JS rather than left to CSS, because the
+ * distribution of items into columns happens in JS — see `Columns`.
+ */
+export function useColumnCount(steps: [number, number][], base = 1) {
+  const read = () => {
+    let n = base
+    for (const [min, count] of steps) {
+      if (window.matchMedia(`(min-width: ${min}px)`).matches) n = count
+    }
+    return n
+  }
+  const [count, setCount] = useState(read)
+  const key = steps.map(([m, c]) => `${m}:${c}`).join(',')
+  useEffect(() => {
+    const queries = steps.map(([min]) => window.matchMedia(`(min-width: ${min}px)`))
+    const update = () => setCount(read())
+    queries.forEach((q) => q.addEventListener('change', update))
+    update()
+    return () => queries.forEach((q) => q.removeEventListener('change', update))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return count
+}
+
+/**
+ * Lay children out in balanced columns, shortest column first.
+ *
+ * This replaced CSS `columns`, which was the right tool and worked everywhere
+ * except where it mattered: Safari ignores `break-inside: avoid` in a
+ * multi-column layout and cuts cards in half at a column boundary, stranding
+ * the bottom border of one card at the top of the next column. `column-span`
+ * is unreliable there too. Flex columns cannot fragment a child in any engine,
+ * because there is no fragmentation context to begin with.
+ *
+ * The cost is that balancing is ours to do. Children are measured after layout
+ * and each is assigned to whichever column is currently shortest, which is what
+ * the browser was doing for us before.
+ */
+export function Columns({
+  count,
+  gap,
+  children,
+  className,
+}: {
+  count: number
+  /** Tailwind gap classes, applied both between columns and within them. */
+  gap: string
+  children: ReactNode
+  className?: string
+}) {
+  const items = Children.toArray(children)
+  const [heights, setHeights] = useState<number[]>([])
+  const nodes = useRef<(HTMLDivElement | null)[]>([])
+
+  useLayoutEffect(() => {
+    const measure = () =>
+      setHeights((prev) => {
+        // A ref can be momentarily null while React moves a node between
+        // columns; keeping the last known height stops that reading as zero
+        // and reshuffling everything.
+        const next = nodes.current.map((el, i) => el?.offsetHeight ?? prev[i] ?? 0)
+        return next.length === prev.length && next.every((h, i) => h === prev[i]) ? prev : next
+      })
+    const observer = new ResizeObserver(measure)
+    nodes.current.forEach((el) => el && observer.observe(el))
+    measure()
+    return () => observer.disconnect()
+  }, [items.length])
+
+  const columns = useMemo(() => {
+    const buckets: number[][] = Array.from({ length: count }, () => [])
+    // Fill the columns *in order*, the way CSS columns did — an item goes to
+    // the column its own midpoint lands in, so reading down column one and on
+    // to column two follows the order the items were arranged in. Assigning
+    // each item to whichever column is currently shortest balances marginally
+    // better and scrambles that order, which on a dashboard someone has
+    // arranged by hand is the worse trade.
+    let total = 0
+    for (let i = 0; i < items.length; i++) total += heights[i] ?? 1
+    const target = total / count
+    let filled = 0
+    items.forEach((_, i) => {
+      const height = heights[i] ?? 1
+      const col = target > 0 ? Math.min(count - 1, Math.floor((filled + height / 2) / target)) : i % count
+      buckets[col].push(i)
+      filled += height
+    })
+    return buckets
+  }, [items.length, count, heights])
+
+  return (
+    <div className={cx('flex items-start', gap, className)}>
+      {columns.map((indices, col) => (
+        <div key={col} className={cx('flex min-w-0 flex-1 flex-col', gap)}>
+          {indices.map((i) => (
+            <div
+              key={i}
+              ref={(el) => {
+                nodes.current[i] = el
+              }}
+              // A child that renders nothing must not still occupy a gap.
+              className="empty:hidden"
+            >
+              {items[i]}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 /* ---------- Card ---------- */

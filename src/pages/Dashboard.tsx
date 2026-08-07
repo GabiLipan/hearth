@@ -5,7 +5,7 @@ import { useAccounts, useAllTransactions, useBills, useBudgetsForMonth, useCateg
 import { thisMonthKey } from '../lib/dates'
 import { defaultDemoAccount, seedDemoData } from '../lib/demo'
 import { useSyncState } from '../hooks/useSync'
-import { Button, Empty, cx } from '../components/ui'
+import { Button, Columns, Empty, useColumnCount, cx } from '../components/ui'
 import {
   HeroWidget,
   BudgetGlanceWidget,
@@ -42,6 +42,9 @@ interface LayoutItem {
 
 const DEFAULT_LAYOUT: LayoutItem[] = WIDGETS.map((w) => ({ id: w.id, on: true }))
 
+/** Two columns on a laptop, three on a wide monitor, four on a very wide one. */
+const COLUMN_STEPS: [number, number][] = [[768, 2], [1536, 3], [2200, 4]]
+
 /** Merge a stored layout with the widget catalogue (new widgets append, on). */
 function normaliseLayout(stored: LayoutItem[] | null): LayoutItem[] {
   const known = new Set(WIDGETS.map((w) => w.id))
@@ -70,6 +73,7 @@ export default function Dashboard() {
   const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT)
   const [editing, setEditing] = useState(false)
   const [seeding, setSeeding] = useState(false)
+  const columnCount = useColumnCount(COLUMN_STEPS)
 
   useEffect(() => {
     void getSetting('homeLayout').then((raw) => {
@@ -135,47 +139,61 @@ export default function Dashboard() {
   const hidden = layout.filter((l) => !l.on)
   const defOf = (id: string) => WIDGETS.find((w) => w.id === id)!
 
+  /** Consecutive narrow widgets share a set of columns; a wide one stands alone. */
+  const bands: { wide: boolean; items: LayoutItem[] }[] = []
+  for (const item of visible) {
+    const wide = !!defOf(item.id).wide
+    const last = bands[bands.length - 1]
+    if (!wide && last && !last.wide) last.items.push(item)
+    else bands.push({ wide, items: [item] })
+  }
+
+  const renderWidget = (item: LayoutItem) => {
+    const def = defOf(item.id)
+    const Widget = def.component
+    return (
+      <div key={item.id} className="relative min-w-0">
+        {editing && (
+          <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">
+            <button onClick={() => move(item.id, -1)} aria-label={`Move ${def.label} up`} className="grid size-7 place-items-center rounded-full hover:bg-surface-2">
+              <ChevronUp size={14} />
+            </button>
+            <button onClick={() => move(item.id, 1)} aria-label={`Move ${def.label} down`} className="grid size-7 place-items-center rounded-full hover:bg-surface-2">
+              <ChevronDown size={14} />
+            </button>
+            <button onClick={() => toggle(item.id)} aria-label={`Hide ${def.label}`} className="grid size-7 place-items-center rounded-full text-ink-3 hover:bg-surface-2">
+              <EyeOff size={14} />
+            </button>
+          </div>
+        )}
+        <div className={cx(editing && 'rounded-2xl ring-2 ring-dashed ring-accent/40')}>
+          <Widget data={data} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div>
       {/* Masonry columns on desktop: cards pack vertically instead of aligning
           to the tallest card in a grid row, so there's no dead space between
           cards of unequal height. The column count follows the viewport — two
-          on a laptop, three or four on a wide monitor. Wide widgets span all. */}
-      <div className="md:columns-2 md:gap-2.5 2xl:columns-3 min-[2200px]:columns-4">
-        {visible.map((item) => {
-          const def = defOf(item.id)
-          const Widget = def.component
-          return (
-            <div
-              key={item.id}
-              className={cx(
-                'relative min-w-0 mb-3 break-inside-avoid md:mb-2.5',
-                // Safari ignores break-inside in multicol and will split a
-                // widget across a column boundary. Inline-block is atomic, so
-                // it cannot. A column-spanning element has to stay block-level,
-                // which is fine — a full-width widget has no boundary to cross.
-                def.wide ? 'md:[column-span:all]' : 'md:inline-block md:w-full md:align-top',
-              )}
-            >
-              {editing && (
-                <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">
-                  <button onClick={() => move(item.id, -1)} aria-label={`Move ${def.label} up`} className="grid size-7 place-items-center rounded-full hover:bg-surface-2">
-                    <ChevronUp size={14} />
-                  </button>
-                  <button onClick={() => move(item.id, 1)} aria-label={`Move ${def.label} down`} className="grid size-7 place-items-center rounded-full hover:bg-surface-2">
-                    <ChevronDown size={14} />
-                  </button>
-                  <button onClick={() => toggle(item.id)} aria-label={`Hide ${def.label}`} className="grid size-7 place-items-center rounded-full text-ink-3 hover:bg-surface-2">
-                    <EyeOff size={14} />
-                  </button>
-                </div>
-              )}
-              <div className={cx(editing && 'rounded-2xl ring-2 ring-dashed ring-accent/40')}>
-                <Widget data={data} />
-              </div>
-            </div>
-          )
-        })}
+          on a laptop, three or four on a wide monitor.
+
+          A wide widget is full width, which splits the run into bands: the
+          narrow widgets before it get their own set of columns, and so do the
+          ones after. That is what `column-span: all` used to do, before CSS
+          columns had to go — see `Columns`. */}
+      <div className="flex flex-col gap-3 md:gap-2.5">
+        {bands.map((band, i) =>
+          band.wide ? (
+            <div key={band.items[0].id}>{renderWidget(band.items[0])}</div>
+          ) : (
+            <Columns key={`band-${i}`} count={columnCount} gap="gap-3 md:gap-2.5">
+              {band.items.map(renderWidget)}
+            </Columns>
+          ),
+        )}
       </div>
 
       {editing && hidden.length > 0 && (
