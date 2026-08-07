@@ -196,6 +196,24 @@ the single place a level comes from.
   see itself — and PostgREST asks for the row back on every insert, so account
   creation failed outright. `accounts_select` carries a second disjunct for
   exactly that case; do not "simplify" it away.
+- **A locally created row has none of the server's stamped columns**, and
+  nothing writes them back — `insertRows` sends `ignoreDuplicates: true` with no
+  `.select()`, so the only thing that fills in `created_by`, `created_at` and
+  the real `updated_at` is the next pull, up to a minute later. That matters
+  because `useMyLevels` bridges the gap between creating an account and its
+  owner grant arriving by reading `created_by`: when `AccountForm` did not stamp
+  it locally the bridge never fired, and a new account was one nobody could
+  edit, share or delete until a background pull happened to land. Callers stamp
+  `createdBy` themselves (`stripLocal` keeps it out of the payload, so the
+  server still writes its own). The same emptiness makes a fresh account's
+  cached grant list `[]`, so anything counting or listing grants has to floor
+  itself at "you" rather than report nobody.
+- **The sharing list is only knowable at `manage` and above.**
+  `account_grants_select` gives you your own grant on anything and other
+  people's only where you could change them anyway, so below `manage`
+  `useGrantsFor`/`useGrantsByAccount` return just your own row. Rendered as
+  "who can see this" that reads as "only you" on an account three people have
+  open. Gate on `canManageAccount` before treating the array as a sharing list.
 - **Do not use CSS `columns` for cards.** Safari ignores `break-inside: avoid`
   in a multi-column layout and cuts a card in half at the column boundary,
   stranding its bottom border at the top of the next column; `column-span: all`

@@ -103,6 +103,29 @@ export function useMyLevels(): Map<string, GrantLevel> {
   }, [grants, accounts, userId])
 }
 
+/**
+ * Every grant this device holds, grouped by account.
+ *
+ * The bulk form of `useGrantsFor`, because a list cannot call a hook once per
+ * row. It carries the same caveat, and it matters more here: `account_grants_select`
+ * shows you other people's grants only on accounts you MANAGE, so below that
+ * level the array you get back is your own grant and nothing else — it is not a
+ * short sharing list, it is an unanswerable question. Callers must gate on
+ * `canManageAccount` before reading it as "who can see this".
+ */
+export function useGrantsByAccount(): Map<string, AccountGrant[]> {
+  const grants = useLiveQuery(() => db.account_grants.toArray(), [], [] as AccountGrant[])
+  return useMemo(() => {
+    const byAccount = new Map<string, AccountGrant[]>()
+    for (const g of grants ?? []) {
+      const list = byAccount.get(g.accountId)
+      if (list) list.push(g)
+      else byAccount.set(g.accountId, [g])
+    }
+    return byAccount
+  }, [grants])
+}
+
 /** Everyone's access to one account. Only populated for accounts you manage. */
 export function useGrantsFor(accountId?: string): AccountGrant[] {
   return (

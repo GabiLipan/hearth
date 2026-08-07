@@ -1,12 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, Check, AlertTriangle, ChevronRight } from 'lucide-react'
-import { db, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, Check, AlertTriangle, ChevronRight, type LucideIcon } from 'lucide-react'
+import { db, type AccountGrant, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
   balanceOf,
   canAddTransactions,
   canAdministerAccount,
   canManageAccount,
+  canSeeAccount,
   canSeeTransactionsAt,
   deleteAccount as removeAccount,
   levelOn,
@@ -21,8 +22,10 @@ import {
   useAllTransactions,
   useCategories,
   useDeadLetters,
+  useGrantsByAccount,
   useGrantsFor,
   useIsAdmin,
+  useMemberMap,
   useMembers,
   useMyLevels,
   useRemoteBalances,
@@ -777,12 +780,86 @@ function DepartureGroup({ title, hint, rows }: { title: string; hint: string; ro
   )
 }
 
+/**
+ * A level, as one glyph.
+ *
+ * This is the whole icon vocabulary for access in this file — the balance-only
+ * marker beside an account name reads out of the same table — so an eye with a
+ * line through it means "no line items" wherever it appears, and never anything
+ * else. A glyph rather than a colour because six levels is more hues than
+ * anyone can hold, and colour alone carries nothing to a reader who cannot
+ * separate them.
+ */
+const LEVEL_ICON: Record<GrantLevel, LucideIcon> = {
+  owner: Crown,
+  manage: Pencil,
+  contribute: Plus,
+  view: Eye,
+  balance: EyeOff,
+  none: Lock,
+}
+
+/**
+ * Who can see an account, small enough to sit in a list row.
+ *
+ * A face on its own answers "who" and leaves "at what level" to be guessed, so
+ * each one carries its level as a badge.
+ *
+ * The caller must have checked `canManageAccount` first. `account_grants_select`
+ * hands over other people's grants on accounts you manage and nowhere else, so
+ * rendered any lower this would confidently show "only you" on an account three
+ * people are reading.
+ */
+function AccessFaces({ grants, meId }: { grants: AccountGrant[]; meId?: string }) {
+  const memberMap = useMemberMap()
+
+  // Strongest access first, and yourself first among equals — the owner is the
+  // useful thing to find, and your own face is the one you scan for.
+  const ordered = useMemo(
+    () =>
+      [...grants].sort(
+        (a, b) =>
+          LEVELS.indexOf(a.level as GrantLevel) - LEVELS.indexOf(b.level as GrantLevel) ||
+          Number(b.userId === meId) - Number(a.userId === meId) ||
+          nameOf(memberMap.get(a.userId)).localeCompare(nameOf(memberMap.get(b.userId))),
+      ),
+    [grants, meId, memberMap],
+  )
+
+  const describe = (g: AccountGrant) =>
+    `${g.userId === meId ? 'You' : nameOf(memberMap.get(g.userId))} — ${LEVEL_LABEL[g.level as GrantLevel]}`
+
+  if (!ordered.length) return null
+
+  return (
+    <span
+      className="flex shrink-0 items-center gap-1.5"
+      role="img"
+      aria-label={`Shared with ${ordered.map(describe).join(', ')}`}
+    >
+      {ordered.map((g) => {
+        const Icon = LEVEL_ICON[g.level as GrantLevel]
+        return (
+          <span key={g.id} className="relative" title={describe(g)}>
+            <PersonDot member={memberMap.get(g.userId)} size={26} />
+            <span className="absolute -bottom-px -right-px grid size-3.5 place-items-center rounded-full bg-surface text-ink-2 ring-1 ring-hairline">
+              <Icon size={9} strokeWidth={2.5} />
+            </span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
 function AccountsSection() {
   const { money } = useApp()
+  const { userId } = useSyncState()
   const accounts = useAccounts()
   const txns = useAllTransactions() ?? []
   const remoteBalances = useRemoteBalances()
   const levels = useMyLevels()
+  const grantsByAccount = useGrantsByAccount()
   const [editing, setEditing] = useState<Account | 'new' | null>(null)
   /**
    * Bumped every time the form is opened, and used as its key.
@@ -818,6 +895,11 @@ function AccountsSection() {
             // accounts_update policy. Below that there is nothing to edit, so
             // the row is a read-only line rather than a dead button.
             const editable = canManageAccount(level)
+            // The same bar governs whether the sharing list is knowable at all;
+            // see useGrantsByAccount. Below it, the row's own level chip is the
+            // only honest thing to say about access.
+            const grants = editable ? (grantsByAccount.get(a.id) ?? []) : []
+            const shared = grants.some((g) => g.userId !== userId)
             return (
               <li key={a.id}>
                 <button
@@ -829,16 +911,28 @@ function AccountsSection() {
                 >
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-1.5 font-medium">
-                      {a.name}
-                      {/* The eye means the total is all you get: no line items,
-                          so no Activity, no reports, no budget contribution. */}
-                      {!canSeeTransactionsAt(level) && <Eye size={13} className="text-ink-3" />}
+                      <span className="truncate">{a.name}</span>
+                      {/* A struck-through eye means the total is all you get: no
+                          line items, so no Activity, no reports, no budget
+                          contribution. Same glyph as the `balance` badge. */}
+                      {!canSeeTransactionsAt(level) && <EyeOff size={13} className="shrink-0 text-ink-3" />}
                     </p>
                     <p className="flex items-center gap-1.5 text-sm text-ink-3">
                       {a.kind}
                       {level !== 'owner' && <Chip>{LEVEL_LABEL[level]}</Chip>}
                     </p>
                   </div>
+                  {editable &&
+                    (shared ? (
+                      <AccessFaces grants={grants} meId={userId} />
+                    ) : (
+                      /* Nobody else has a grant. Said out loud, because a row
+                         with no faces on it is otherwise indistinguishable from
+                         one whose faces have not loaded. */
+                      <span className="shrink-0 text-ink-3" title="Only you" role="img" aria-label="Only you">
+                        <Lock size={13} />
+                      </span>
+                    ))}
                   <span className={cx('font-semibold tabular', balanceOf(a, txns, remoteBalances, level) < 0 && 'text-critical-text')}>
                     {money(balanceOf(a, txns, remoteBalances, level))}
                   </span>
@@ -877,8 +971,16 @@ function AccountAccessSheet({ account, open, onClose }: { account: Account; open
   const mayShare = canAdministerAccount(levelOn(account.id, levels))
   const [error, setError] = useState<{ userId: string; message: string } | null>(null)
 
+  /**
+   * Deny by default, with one exception: your OWN row falls back to
+   * `useMyLevels`, which is also what every permission decision in the app
+   * reads. On a just-created account the owner grant has not arrived yet, and
+   * without this the person who made it is listed as having no access to it.
+   * Everybody else stays at `none` — a missing grant genuinely is no access.
+   */
   const levelFor = (uid: string): GrantLevel =>
-    (grants.find((g) => g.userId === uid)?.level as GrantLevel | undefined) ?? 'none'
+    (grants.find((g) => g.userId === uid)?.level as GrantLevel | undefined) ??
+    (uid === userId ? levelOn(account.id, levels) : 'none')
 
   const owners = grants.filter((g) => g.level === 'owner')
 
@@ -1041,6 +1143,7 @@ function DemoDataForm({ open, onClose }: { open: boolean; onClose: () => void })
 
 function AccountForm({ account, open, onClose }: { account?: Account; open: boolean; onClose: () => void }) {
   const { currency } = useApp()
+  const { userId } = useSyncState()
   const [name, setName] = useState(account?.name ?? '')
   const [kind, setKind] = useState<Account['kind']>(account?.kind ?? 'current')
   const [sharing, setSharing] = useState(false)
@@ -1050,11 +1153,17 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
   const [deleting, setDeleting] = useState(false)
   const levels = useMyLevels()
   const grants = useGrantsFor(account?.id)
-  const canDelete = !!account && canAdministerAccount(levelOn(account.id, levels))
+  const myLevel = account ? levelOn(account.id, levels) : 'none'
+  const canDelete = canAdministerAccount(myLevel)
   const canSave = name.trim().length > 0
 
   // Everyone with any access, so the row can say "3 people" without opening it.
-  const sharedWith = grants.length
+  //
+  // Floored at yourself. An account you have only just made has no cached grant
+  // — the server writes the owner one on an AFTER INSERT trigger — and "0
+  // people" is a worse lie than "Only you", who is in fact exactly who can see
+  // it at that moment.
+  const sharedWith = Math.max(grants.length, canSeeAccount(myLevel) ? 1 : 0)
 
   async function save() {
     if (!canSave) return
@@ -1065,11 +1174,21 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
       // Nothing about sharing is decided here. Creating an account makes you
       // its owner (a server trigger writes the grant), and who else can see it
       // is a separate, deliberate step.
+      //
+      // `createdBy` is stamped locally as well, and it is load-bearing rather
+      // than cosmetic. The owner grant is written server-side by an AFTER
+      // INSERT trigger, so between this call and the next pull there is no
+      // grant on this device — and `useMyLevels` bridges that window by reading
+      // exactly this field. Without it a newly created account is one you
+      // cannot edit, share or delete until a background pull happens to land.
+      // `stripLocal` drops it from the queued payload, so the server still
+      // stamps its own via `stamp_ownership`; this only fills the gap.
       await create('accounts', {
         name: name.trim(),
         kind,
         openingBalanceMinor: openingMinor,
         sortOrder: 0,
+        createdBy: userId,
       })
     }
     onClose()
