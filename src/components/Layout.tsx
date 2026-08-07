@@ -219,10 +219,10 @@ const TAB_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
 /**
  * How far the pill is drawn outside the tab it belongs to.
  *
- * The room around the icon and its label is drawn, not laid out. Padding the
- * tabs enough for the pill to breathe would space the idle icons out by the
- * same amount, and they read as adrift when it does — so the tabs stay tight
- * and the pill is simply painted a few pixels larger than its tab.
+ * The room around the icon and its label is drawn, not laid out: the tabs are
+ * spread across the bar, so padding them enough for the pill to breathe would
+ * push the whole row wider rather than fatten the pill. Painting it a few
+ * pixels larger than its tab costs the layout nothing.
  */
 const PILL_BLEED = 5
 
@@ -348,7 +348,7 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
         "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-32 after:bg-surface/90 after:content-['']",
       )}
     >
-      <div ref={wrapRef} className="relative flex items-center justify-center gap-0.5 px-2 py-1.5 min-[360px]:gap-1">
+      <div ref={wrapRef} className="relative flex items-center justify-between px-2 py-1.5">
         <span
           ref={pillRef}
           aria-hidden
@@ -364,7 +364,11 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
               aria-current={active ? 'page' : undefined}
               aria-label={label}
               className={cx(
-                'relative z-10 flex items-center rounded-full px-2 py-2.5 text-[11px] font-medium transition-colors',
+                'relative z-10 flex items-center rounded-full px-2 py-2.5 font-medium transition-colors',
+                // Six tabs and the longest label spread edge to edge leave a
+                // 320px phone about ten pixels of slack. A point smaller there
+                // keeps the label off its own clip edge.
+                'text-[12px] min-[360px]:text-[13px]',
                 active ? 'text-accent' : 'text-ink-3',
               )}
             >
