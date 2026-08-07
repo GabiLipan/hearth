@@ -10,6 +10,12 @@
 -- Everything runs in one transaction and rolls back, so it is safe to re-run.
 --
 -- Reading the output: every row must have `ok = true`.
+--
+-- Rewritten for migration 07. Access is no longer an enum on the account; it is
+-- a grant per person per account, and no grant means no access at all. The
+-- three tiers these tests used to exercise now read: an account somebody owns
+-- with you (shared), one they hold at `balance`, and one they were never
+-- granted at all (private).
 
 begin;
 
@@ -45,9 +51,9 @@ begin
   insert into auth.users (id, email) values (gabi, 'gabi@test.local');
   insert into auth.users (id, email) values (partner, 'partner@test.local');
   insert into auth.users (id, email) values (stranger, 'stranger@test.local');
-  perform set_config('test.gabi', gabi::text, true);
-  perform set_config('test.partner', partner::text, true);
-  perform set_config('test.stranger', stranger::text, true);
+  perform set_config('test.gabi', gabi::text, false);
+  perform set_config('test.partner', partner::text, false);
+  perform set_config('test.stranger', stranger::text, false);
 end $$;
 
 set role authenticated;
@@ -69,13 +75,13 @@ begin
   select id into groceries from public.categories where name = 'Groceries';
   perform set_config('test.groceries', groceries::text, false);
 
-  select id into shared_acct from public.accounts where name = 'Joint account';
-
-  insert into public.accounts (name, kind, visibility)
-  values ('Balance pot', 'savings', 'balance') returning id into balance_acct;
-
-  insert into public.accounts (name, kind, visibility)
-  values ('Secret stash', 'cash', 'private') returning id into private_acct;
+  -- Every account is created deliberately: since 07 nothing is seeded for you.
+  insert into public.accounts (name, kind) values ('Joint account', 'current')
+    returning id into shared_acct;
+  insert into public.accounts (name, kind) values ('Balance pot', 'savings')
+    returning id into balance_acct;
+  insert into public.accounts (name, kind) values ('Secret stash', 'cash')
+    returning id into private_acct;
 
   perform set_config('test.shared_acct', shared_acct::text, false);
   perform set_config('test.balance_acct', balance_acct::text, false);
@@ -92,17 +98,21 @@ begin
   perform public.upsert_budget(null, groceries, true,  9900, current_date);
 end $$;
 
--- Seeding sanity: defaults came from the server, exactly once.
+-- Seeding sanity: the categories came from the server, exactly once — and no
+-- account came with them, which is the point of the change in 07.
 do $$
 begin
   perform pg_temp.check('seeds 11 categories',
     (select count(*) from public.categories) = 11,
     (select count(*)::text from public.categories));
-  perform pg_temp.check('seeds 1 starter account, plus the 2 just created',
+  perform pg_temp.check('seeds NO account; the 3 here were all created on purpose',
     (select count(*) from public.accounts) = 3, '');
+  perform pg_temp.check('creating an account makes you its owner',
+    (select count(*) from public.account_grants
+      where user_id = current_setting('test.gabi')::uuid and level = 'owner' and deleted_at is null) = 3, '');
 end $$;
 
--- ---------- the partner joins ----------
+-- ---------- the partner joins, and is granted two of the three ----------
 
 select pg_temp.act_as(current_setting('test.partner')::uuid);
 
@@ -114,24 +124,37 @@ begin
     h.id = current_setting('test.household')::uuid, '');
 end $$;
 
+select pg_temp.act_as(current_setting('test.gabi')::uuid);
+
+do $$
+declare partner uuid := current_setting('test.partner')::uuid;
+begin
+  perform public.upsert_account_grant(null, current_setting('test.shared_acct')::uuid,  partner, 'owner');
+  perform public.upsert_account_grant(null, current_setting('test.balance_acct')::uuid, partner, 'balance');
+  -- 'Secret stash' is deliberately never granted: deny by default is the whole
+  -- privacy model now, rather than a `visibility` column saying so.
+end $$;
+
 -- ---------- what the partner can see ----------
+
+select pg_temp.act_as(current_setting('test.partner')::uuid);
 
 do $$
 declare n bigint; bal bigint;
 begin
-  -- A private account is invisible; a balance-only one is not.
+  -- An account nobody granted them is invisible; a balance-only one is not.
   select count(*) into n from public.accounts;
-  perform pg_temp.check('partner sees 2 of 3 accounts (private one hidden)', n = 2, n::text);
+  perform pg_temp.check('partner sees 2 of 3 accounts (the ungranted one is hidden)', n = 2, n::text);
 
-  perform pg_temp.check('partner cannot see the private account at all',
+  perform pg_temp.check('partner cannot see the ungranted account at all',
     not exists (select 1 from public.accounts where id = current_setting('test.private_acct')::uuid), '');
 
-  -- THE core privacy assertion: transactions on a balance-only or private
-  -- account must not be readable, only the shared one's.
+  -- THE core privacy assertion: transactions on a balance-only or ungranted
+  -- account must not be readable, only the fully shared one's.
   select count(*) into n from public.transactions;
   perform pg_temp.check('partner sees only the 1 shared transaction', n = 1, n::text);
 
-  perform pg_temp.check('partner cannot read the private account transaction',
+  perform pg_temp.check('partner cannot read the ungranted account''s transaction',
     not exists (select 1 from public.transactions where amount_minor = -4000), '');
 
   perform pg_temp.check('partner cannot read the balance-only transaction',
@@ -145,21 +168,27 @@ begin
   perform pg_temp.check('partner gets the CORRECT balance-only total (-2000, not 0)',
     bal = -2000, coalesce(bal::text, 'null'));
 
-  perform pg_temp.check('partner gets no balance for the private account',
+  perform pg_temp.check('partner gets no balance for the ungranted account',
     not exists (select 1 from public.account_balances()
                  where account_id = current_setting('test.private_acct')::uuid), '');
 
-  -- Personal budgets are private to their owner.
+  -- Personal budgets are private to their owner. Untouched by 07: budgets are
+  -- still owner-scoped within the household.
   select count(*) into n from public.budgets;
   perform pg_temp.check('partner sees the household budget but not the personal one', n = 1, n::text);
   perform pg_temp.check('partner cannot see a 99.00 personal budget',
     not exists (select 1 from public.budgets where amount_minor = 9900), '');
+
+  -- They see their own grants, and the ones on accounts they could re-share.
+  select count(*) into n from public.account_grants;
+  perform pg_temp.check('partner sees their own grants plus everyone''s on what they own',
+    n = 3, n::text);
 end $$;
 
 -- ---------- what the partner cannot do ----------
 
 do $$
-declare blocked boolean; before_rows bigint; after_rows bigint;
+declare blocked boolean; before_rows bigint; after_rows bigint; name_now text;
 begin
   begin
     insert into public.transactions (account_id, category_id, occurred_on, payee, amount_minor)
@@ -168,15 +197,23 @@ begin
     blocked := false;
   exception when others then blocked := true;
   end;
-  perform pg_temp.check('partner cannot write onto a private account', blocked, '');
+  perform pg_temp.check('partner cannot write onto an account they were not granted', blocked, '');
 
   begin
-    update public.accounts set visibility = 'shared'
-     where id = current_setting('test.balance_acct')::uuid;
-    blocked := not found;
+    insert into public.transactions (account_id, category_id, occurred_on, payee, amount_minor)
+    values (current_setting('test.balance_acct')::uuid, current_setting('test.groceries')::uuid,
+            current_date, 'Sneaky', -100);
+    blocked := false;
   exception when others then blocked := true;
   end;
-  perform pg_temp.check('partner cannot re-tier an account they do not own', blocked, '');
+  perform pg_temp.check('partner cannot write onto a balance-only account', blocked, '');
+
+  -- Renaming needs 'manage'; balance is three tiers below it. A blocked UPDATE
+  -- matches no rows rather than raising, so this checks `not found`.
+  update public.accounts set name = 'Renamed by partner'
+   where id = current_setting('test.balance_acct')::uuid;
+  blocked := not found;
+  perform pg_temp.check('partner cannot rename an account they only watch', blocked, '');
 
   begin
     insert into public.budgets (category_id, owner_id, amount_minor)
@@ -185,6 +222,15 @@ begin
   exception when others then blocked := true;
   end;
   perform pg_temp.check('partner cannot set a budget in someone else''s name', blocked, '');
+
+  -- Sharing is the owner's to decide: 'balance' cannot re-share what it can see.
+  begin
+    perform public.upsert_account_grant(null, current_setting('test.balance_acct')::uuid,
+                                        current_setting('test.stranger')::uuid, 'view');
+    blocked := false;
+  exception when others then blocked := true;
+  end;
+  perform pg_temp.check('partner cannot hand out access to an account they do not own', blocked, '');
 
   -- No DELETE policy exists anywhere: deletion is `set deleted_at`, so a row
   -- can never vanish without leaving a tombstone for the other device.
@@ -215,54 +261,54 @@ begin
   select count(*) into n from public.transactions;
   perform pg_temp.check('stranger sees none of our transactions', n = 0, n::text);
   select count(*) into n from public.accounts;
-  perform pg_temp.check('stranger sees only their own starter account', n = 1, n::text);
+  perform pg_temp.check('stranger starts with no accounts at all', n = 0, n::text);
   select count(*) into n from public.categories;
   perform pg_temp.check('stranger gets their own 11 seeded categories', n = 11, n::text);
+  select count(*) into n from public.household_members;
+  perform pg_temp.check('stranger sees only their own household''s members', n = 1, n::text);
 end $$;
 
--- ---------- visibility changes bump the epoch ----------
--- This is what tells a partner's device to drop its cache and re-pull. Without
--- it, a row that becomes invisible stays cached forever: an invisible row emits
--- no realtime event and no tombstone, so nothing else can announce the change.
+-- ---------- changes to who-can-see-what bump the epoch ----------
+-- This is what tells another device to drop its cache and re-pull. Without it, a
+-- row that becomes invisible stays cached forever: an invisible row emits no
+-- realtime event and no tombstone, so nothing else can announce the change.
 
 select pg_temp.act_as(current_setting('test.gabi')::uuid);
 
 do $$
-declare before_epoch integer; after_epoch integer;
+declare before_epoch integer; after_epoch integer; partner uuid := current_setting('test.partner')::uuid;
 begin
   select visibility_epoch into before_epoch from public.households
    where id = current_setting('test.household')::uuid;
 
-  update public.accounts set visibility = 'private'
-   where id = current_setting('test.shared_acct')::uuid;
+  perform public.upsert_account_grant(null, current_setting('test.private_acct')::uuid, partner, 'view');
 
   select visibility_epoch into after_epoch from public.households
    where id = current_setting('test.household')::uuid;
-  perform pg_temp.check('making an account private bumps the epoch',
+  perform pg_temp.check('granting access bumps the epoch',
     after_epoch > before_epoch, format('%s -> %s', before_epoch, after_epoch));
 
-  -- Back to shared: rows become visible again with an OLD updated_at, so a
-  -- delta pull would never fetch them. The epoch must bump in this direction too.
+  -- Revoking hides rows that are already cached, with no tombstone to announce
+  -- it, so it must bump in this direction too.
   before_epoch := after_epoch;
-  update public.accounts set visibility = 'shared'
-   where id = current_setting('test.shared_acct')::uuid;
+  perform public.upsert_account_grant(null, current_setting('test.private_acct')::uuid, partner, 'none');
   select visibility_epoch into after_epoch from public.households
    where id = current_setting('test.household')::uuid;
-  perform pg_temp.check('making an account shared again also bumps the epoch',
+  perform pg_temp.check('revoking access also bumps the epoch',
     after_epoch > before_epoch, format('%s -> %s', before_epoch, after_epoch));
 
-  -- Moving a transaction onto a restricted account hides it from the partner
-  -- with no tombstone, so that must bump too.
+  -- Moving a transaction onto an account with a different set of readers hides
+  -- it from somebody with no tombstone, so that bumps too.
   before_epoch := after_epoch;
   update public.transactions set account_id = current_setting('test.private_acct')::uuid
    where amount_minor = -1000;
   select visibility_epoch into after_epoch from public.households
    where id = current_setting('test.household')::uuid;
-  perform pg_temp.check('moving a transaction to a private account bumps the epoch',
+  perform pg_temp.check('moving a transaction to a less-shared account bumps the epoch',
     after_epoch > before_epoch, format('%s -> %s', before_epoch, after_epoch));
 end $$;
 
--- ---------- balance-only accounts signal their partner ----------
+-- ---------- balance-only accounts signal the people watching them ----------
 
 do $$
 declare touched_at timestamptz; later timestamptz;
@@ -275,8 +321,9 @@ begin
           current_date, 'Later', -500);
   select updated_at into later from public.accounts
    where id = current_setting('test.balance_acct')::uuid;
-  -- The partner never receives a realtime event for a transaction they cannot
-  -- see, so touching the account row is their only cue to re-read the balance.
+  -- Somebody holding it at 'balance' never receives a realtime event for a
+  -- transaction they cannot see, so touching the account row is their only cue
+  -- to re-read the balance.
   perform pg_temp.check('a balance-only account is touched when its transactions change',
     later > touched_at, '');
 end $$;

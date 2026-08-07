@@ -40,15 +40,32 @@ begin
   h := public.create_household('Model test');
   perform set_config('test.join_code', h.join_code, false);
 
-  select id into shared_acct from public.accounts where name = 'Joint account';
-  insert into public.accounts (name, kind, visibility)
-  values ('My cash', 'cash', 'private') returning id into private_acct;
+  -- Since 07 no account is seeded, so both are created here. 'Joint account' is
+  -- made genuinely joint further down, once the partner has somebody to be.
+  insert into public.accounts (name, kind) values ('Joint account', 'current')
+    returning id into shared_acct;
+  insert into public.accounts (name, kind) values ('My cash', 'cash')
+    returning id into private_acct;
 
   select id into home from public.categories where name = 'Home & utilities';
 
   perform set_config('test.shared_acct', shared_acct::text, false);
   perform set_config('test.private_acct', private_acct::text, false);
   perform set_config('test.home', home::text, false);
+end $$;
+
+-- The partner joins up front, because "shared" and "private" are now facts
+-- about who holds a grant rather than a column — an account is only private in
+-- the sense that matters if there is somebody it is being kept from.
+select pg_temp.act_as(current_setting('test.partner')::uuid);
+do $$ begin perform public.join_household(current_setting('test.join_code')); end $$;
+
+select pg_temp.act_as(current_setting('test.gabi')::uuid);
+do $$
+begin
+  perform public.upsert_account_grant(null, current_setting('test.shared_acct')::uuid,
+                                      current_setting('test.partner')::uuid, 'owner');
+  -- 'My cash' is granted to nobody else, which is what makes it private now.
 end $$;
 
 -- ---------- subcategories ----------
@@ -101,19 +118,19 @@ begin
   returning id into personal;
   perform set_config('test.personal_cat', personal::text, false);
 
-  -- Allowed: my own private account.
+  -- Allowed: an account nobody else shares.
   insert into public.transactions (account_id, category_id, occurred_on, payee, amount_minor)
   values (current_setting('test.private_acct')::uuid, personal, current_date, 'Clinic', -6000);
-  perform pg_temp.check('a personal category works on your own private account', true);
+  perform pg_temp.check('a personal category works on an account nobody else shares', true);
 
-  -- Refused: the joint account. "Non-shared accounts only" is enforced by the
-  -- database, not the form — the form is not what protects anything.
+  -- Refused: the joint account. "Only where nobody else can see it" is enforced
+  -- by the database, not the form — the form is not what protects anything.
   begin
     insert into public.transactions (account_id, category_id, occurred_on, payee, amount_minor)
     values (current_setting('test.shared_acct')::uuid, personal, current_date, 'Clinic', -6000);
-    perform pg_temp.check('a personal category is refused on a shared account', false, 'it was allowed');
+    perform pg_temp.check('a personal category is refused on an account somebody else holds', false, 'it was allowed');
   exception when others then
-    perform pg_temp.check('a personal category is refused on a shared account', true);
+    perform pg_temp.check('a personal category is refused on an account somebody else holds', true);
   end;
 end $$;
 
@@ -231,8 +248,6 @@ select pg_temp.act_as(current_setting('test.partner')::uuid);
 do $$
 declare n bigint;
 begin
-  perform public.join_household(current_setting('test.join_code'));
-
   perform pg_temp.check('the partner cannot see a personal category',
     not exists (select 1 from public.categories where name = 'Therapy'), '');
 
@@ -244,8 +259,8 @@ begin
   perform pg_temp.check('the partner cannot see a personal goal',
     not exists (select 1 from public.goals where name = 'New bike'), '');
 
-  -- The transfer's incoming leg landed in a private account, so only one half
-  -- of it should be visible.
+  -- The transfer's incoming leg landed in an account they hold no grant on, so
+  -- only one half of it should be visible.
   select count(*) into n from public.transactions where transfer_id is not null;
   perform pg_temp.check('the partner sees only the leg on an account they can read', n = 1, n::text);
 

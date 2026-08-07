@@ -1,13 +1,17 @@
 -- Hearth — tests for ownership boundaries on destructive operations
 --
--- Companion to 99-rls-tests.sql and 99b-model-tests.sql, covering migration 05.
--- Same shape: runs in a transaction, rolls back, every row of the output must
--- read ok = true.
+-- Companion to 99-rls-tests.sql and 99b-model-tests.sql, covering migration 05
+-- as rewritten by 07. Same shape: runs in a transaction, rolls back, every row
+-- of the output must read ok = true.
 --
 -- These matter more than most. The functions under test are `security definer`,
 -- so RLS is switched off inside them and nothing but the predicates written in
--- their bodies stands between one person and the other's private accounts. A
--- mistake here does not raise an error — it silently deletes somebody's money.
+-- their bodies stands between one person and another's accounts. A mistake here
+-- does not raise an error — it silently deletes somebody's money.
+--
+-- Since 07, "may I destroy this?" is a grant at `owner`, not a visibility
+-- column, and nothing is ever seeded for you: a wipe leaves you with no
+-- accounts at all rather than a fresh joint one.
 
 begin;
 
@@ -30,8 +34,8 @@ end $$;
 --
 -- `security definer` is the load-bearing word: it runs as the role that created
 -- this function, which is not subject to the policies. Counting these rows as a
--- signed-in user would assert that the POLICY hides the partner's account, which
--- is 99-rls-tests.sql's job and is true either way — it would pass just as
+-- signed-in user would assert that the POLICY hides the other person's account,
+-- which is 99-rls-tests.sql's job and is true either way — it would pass just as
 -- happily if wipe_household() had deleted the row outright.
 create function pg_temp.live(tbl text, pred text)
 returns bigint language plpgsql security definer as $$
@@ -62,15 +66,19 @@ begin
   perform set_config('test.join_code', h.join_code, false);
   perform set_config('test.household', h.id::text, false);
 
-  select id into joint from public.accounts where name = 'Joint account';
   select id into groceries from public.categories where name = 'Groceries';
   select id into home from public.categories where name = 'Home & utilities';
-  perform set_config('test.joint', joint::text, false);
   perform set_config('test.groceries', groceries::text, false);
   perform set_config('test.home', home::text, false);
 
-  insert into public.accounts (name, kind, visibility)
-  values ('Gabi cash', 'cash', 'private') returning id into g_private;
+  -- Nothing is seeded since 07, so the joint account is created here and made
+  -- joint below, once there is somebody to share it with.
+  insert into public.accounts (name, kind) values ('Joint account', 'current')
+    returning id into joint;
+  perform set_config('test.joint', joint::text, false);
+
+  insert into public.accounts (name, kind) values ('Gabi cash', 'cash')
+    returning id into g_private;
   perform set_config('test.g_private', g_private::text, false);
 
   insert into public.transactions (account_id, category_id, occurred_on, payee, amount_minor)
@@ -93,12 +101,16 @@ declare p_private uuid; p_balance uuid; p_sub uuid;
 begin
   perform public.join_household(current_setting('test.join_code'));
 
-  insert into public.accounts (name, kind, visibility)
-  values ('Partner stash', 'cash', 'private') returning id into p_private;
-  insert into public.accounts (name, kind, visibility)
-  values ('Partner ISA', 'savings', 'balance') returning id into p_balance;
+  insert into public.accounts (name, kind) values ('Partner stash', 'cash')
+    returning id into p_private;
+  insert into public.accounts (name, kind) values ('Partner ISA', 'savings')
+    returning id into p_balance;
   perform set_config('test.p_private', p_private::text, false);
   perform set_config('test.p_balance', p_balance::text, false);
+
+  -- Gabi may watch the ISA's total but never its line items. 'Partner stash' is
+  -- granted to nobody else at all.
+  perform public.upsert_account_grant(null, p_balance, current_setting('test.gabi')::uuid, 'balance');
 
   insert into public.transactions (account_id, occurred_on, payee, amount_minor)
   values (p_private,  current_date, 'Present for Gabi', -12000),
@@ -117,9 +129,16 @@ begin
   values ('Partner guitar', 120000, current_setting('test.partner')::uuid);
 end $$;
 
--- ---------- Gabi erases everything ----------
-
+-- The joint account is made genuinely joint: both own it, either may erase it.
 select pg_temp.act_as(current_setting('test.gabi')::uuid);
+
+do $$
+begin
+  perform public.upsert_account_grant(null, current_setting('test.joint')::uuid,
+                                      current_setting('test.partner')::uuid, 'owner');
+end $$;
+
+-- ---------- Gabi erases everything ----------
 
 do $$
 begin
@@ -131,43 +150,52 @@ end $$;
 do $$
 declare n bigint;
 begin
-  perform pg_temp.check('a wipe leaves the partner''s private account alone',
+  perform pg_temp.check('a wipe leaves the account nobody granted the caller alone',
     pg_temp.live('accounts', format('id = %L', current_setting('test.p_private'))) = 1);
 
-  perform pg_temp.check('a wipe leaves the partner''s balance-only account alone',
+  -- Seeing an account is not owning it: 'balance' is four tiers below the level
+  -- a wipe acts on, which is exactly why the function carries its own predicate
+  -- rather than trusting that a caller who can see a row may destroy it.
+  perform pg_temp.check('a wipe leaves an account the caller merely watches alone',
     pg_temp.live('accounts', format('id = %L', current_setting('test.p_balance'))) = 1);
 
   n := pg_temp.live('transactions',
     format('account_id in (%L, %L)', current_setting('test.p_private'), current_setting('test.p_balance')));
   perform pg_temp.check('a wipe leaves the transactions on them alone', n = 2, n::text);
 
-  perform pg_temp.check('a wipe leaves the partner''s personal budget alone',
+  perform pg_temp.check('a wipe leaves the other person''s personal budget alone',
     pg_temp.live('budgets', format('owner_id = %L', current_setting('test.partner'))) = 1);
 
-  perform pg_temp.check('a wipe leaves the partner''s personal goal alone',
+  perform pg_temp.check('a wipe leaves the other person''s personal goal alone',
     pg_temp.live('goals', format('owner_id = %L', current_setting('test.partner'))) = 1);
 
-  perform pg_temp.check('a wipe leaves the partner''s personal category alone',
+  perform pg_temp.check('a wipe leaves the other person''s personal category alone',
     pg_temp.live('categories', format('id = %L', current_setting('test.p_sub'))) = 1);
 
   -- ...and it is still usable: orphaned under a tombstoned parent it would
   -- disappear from every picker on their device, which is the same loss by a
   -- slower route.
-  perform pg_temp.check('the partner''s personal subcategory is promoted, not orphaned',
+  perform pg_temp.check('their personal subcategory is promoted, not orphaned',
     pg_temp.live('categories',
       format('id = %L and parent_id is null and icon is not null and slot is not null',
              current_setting('test.p_sub'))) = 1);
+
+  -- The grants themselves outlive the wipe on purpose: accounts_select needs
+  -- one, so revoking here would leave the other device holding the account with
+  -- no readable tombstone to evict it by.
+  perform pg_temp.check('a wipe does not revoke anybody''s grants',
+    pg_temp.live('account_grants', format('account_id = %L', current_setting('test.joint'))) = 2);
 end $$;
 
--- The half that must still happen: shared data and the caller's own data go.
+-- The half that must still happen: jointly owned data and the caller's own go.
 
 do $$
 declare n bigint;
 begin
-  perform pg_temp.check('a wipe removes the caller''s own private account',
+  perform pg_temp.check('a wipe removes the account only the caller held',
     pg_temp.live('accounts', format('id = %L', current_setting('test.g_private'))) = 0);
 
-  perform pg_temp.check('a wipe removes the shared account',
+  perform pg_temp.check('a wipe removes the jointly owned account',
     pg_temp.live('accounts', format('id = %L', current_setting('test.joint'))) = 0);
 
   n := pg_temp.live('transactions',
@@ -184,7 +212,8 @@ begin
     pg_temp.live('goals', format('owner_id = %L', current_setting('test.gabi'))) = 0);
 end $$;
 
--- Re-seeding must leave the household usable without doubling up.
+-- Re-seeding must leave the household usable without doubling up — and must not
+-- invent an account, which is the change 07 made.
 
 do $$
 declare n bigint;
@@ -192,15 +221,15 @@ begin
   n := pg_temp.live('categories', 'owner_id is null');
   perform pg_temp.check('a wipe re-seeds exactly one set of starter categories', n = 11, n::text);
 
-  n := pg_temp.live('accounts', 'visibility = ''shared''');
-  perform pg_temp.check('a wipe leaves exactly one usable shared account', n = 1, n::text);
+  n := pg_temp.live('accounts', format('household_id = %L', current_setting('test.household')));
+  perform pg_temp.check('a wipe creates NO replacement account', n = 2, n::text);
 
   -- Erasing twice in a row is a thing people do. It must not produce 22.
   perform public.wipe_household();
   n := pg_temp.live('categories', 'owner_id is null');
   perform pg_temp.check('erasing twice does not duplicate the starter categories', n = 11, n::text);
-  n := pg_temp.live('accounts', 'visibility = ''shared''');
-  perform pg_temp.check('erasing twice does not duplicate the starter account', n = 1, n::text);
+  n := pg_temp.live('accounts', format('household_id = %L', current_setting('test.household')));
+  perform pg_temp.check('erasing twice still creates no account', n = 2, n::text);
 end $$;
 
 -- ---------- deleting one account ----------
@@ -208,8 +237,7 @@ end $$;
 do $$
 declare acct uuid; removed integer; n bigint; refused boolean;
 begin
-  insert into public.accounts (name, kind, visibility) values ('Spending', 'current', 'shared')
-  returning id into acct;
+  insert into public.accounts (name, kind) values ('Spending', 'current') returning id into acct;
   insert into public.transactions (account_id, occurred_on, payee, amount_minor)
   values (acct, current_date, 'Coffee', -320), (acct, current_date, 'Lunch', -900);
 
@@ -234,6 +262,11 @@ begin
   -- report on the client, which sums transactions with no reference to an account.
   n := pg_temp.live('transactions', format('account_id = %L', acct));
   perform pg_temp.check('its transactions went with it', n = 0, n::text);
+
+  -- The tombstone must stay readable by everyone who held a grant, or their
+  -- cache keeps the account forever with nothing left to replicate.
+  perform pg_temp.check('deleting leaves the grants behind so the tombstone can be read',
+    (select count(*) from public.account_grants where account_id = acct and deleted_at is null) = 1);
 end $$;
 
 -- A goal pointing at a deleted account survives, minus the account.
@@ -241,8 +274,7 @@ end $$;
 do $$
 declare acct uuid; goal uuid;
 begin
-  insert into public.accounts (name, kind, visibility) values ('Holiday pot', 'savings', 'shared')
-  returning id into acct;
+  insert into public.accounts (name, kind) values ('Holiday pot', 'savings') returning id into acct;
   insert into public.goals (name, target_minor, account_id) values ('Japan', 300000, acct)
   returning id into goal;
 
@@ -253,15 +285,11 @@ end $$;
 
 -- ---------- what one person cannot delete ----------
 
-select pg_temp.act_as(current_setting('test.partner')::uuid);
-
 do $$
 declare blocked boolean; other_private uuid;
 begin
-  -- Gabi makes a fresh private account for the partner to try to reach.
   perform pg_temp.act_as(current_setting('test.gabi')::uuid);
-  insert into public.accounts (name, kind, visibility) values ('Gabi secret', 'cash', 'private')
-  returning id into other_private;
+  insert into public.accounts (name, kind) values ('Gabi secret', 'cash') returning id into other_private;
   perform set_config('test.other_private', other_private::text, false);
 
   perform pg_temp.act_as(current_setting('test.partner')::uuid);
@@ -270,7 +298,7 @@ begin
     blocked := false;
   exception when others then blocked := true;
   end;
-  perform pg_temp.check('you cannot delete an account that is private to the other person', blocked);
+  perform pg_temp.check('you cannot delete an account you were never granted', blocked);
   perform pg_temp.check('and it is still there',
     pg_temp.live('accounts', format('id = %L', current_setting('test.other_private'))) = 1);
 end $$;
@@ -279,15 +307,15 @@ do $$
 declare blocked boolean; balance_acct uuid;
 begin
   perform pg_temp.act_as(current_setting('test.gabi')::uuid);
-  insert into public.accounts (name, kind, visibility) values ('Gabi ISA', 'savings', 'balance')
-  returning id into balance_acct;
+  insert into public.accounts (name, kind) values ('Gabi ISA', 'savings') returning id into balance_acct;
   perform set_config('test.other_balance', balance_acct::text, false);
+  perform public.upsert_account_grant(null, balance_acct, current_setting('test.partner')::uuid, 'balance');
 
   perform pg_temp.act_as(current_setting('test.partner')::uuid);
-  -- A balance-only account IS visible to the partner, which is exactly why the
-  -- delete has to carry its own check rather than trusting that a caller who can
-  -- see a row may destroy it.
-  perform pg_temp.check('the partner can see the balance-only account',
+  -- A balance-only account IS visible, which is exactly why the delete has to
+  -- carry its own check rather than trusting that a caller who can see a row may
+  -- destroy it.
+  perform pg_temp.check('somebody at balance level can see the account',
     exists (select 1 from public.accounts where id = current_setting('test.other_balance')::uuid));
 
   begin
@@ -301,78 +329,96 @@ begin
 end $$;
 
 -- ---------- an account cannot be taken from its owner ----------
+--
+-- Rewritten for 07. `owner_id` and `visibility` are inert columns now, so the
+-- old version of this test — send `owner_id = me, visibility = 'private'` and
+-- check nothing moved — would pass for the wrong reason: nothing moves whatever
+-- anybody sends. What it was really asserting is that you cannot promote
+-- yourself on somebody else's account, and that is a grant question.
 
 do $$
-declare shared_acct uuid; owner_after uuid; vis public.account_visibility; failed boolean;
+declare shared_acct uuid; refused boolean;
 begin
   perform pg_temp.act_as(current_setting('test.gabi')::uuid);
-  insert into public.accounts (name, kind, visibility) values ('Gabi joint', 'current', 'shared')
-  returning id into shared_acct;
+  insert into public.accounts (name, kind) values ('Gabi joint', 'current') returning id into shared_acct;
   perform set_config('test.gabi_shared', shared_acct::text, false);
+  -- 'manage' is the highest tier that still cannot re-share.
+  perform public.upsert_account_grant(null, shared_acct, current_setting('test.partner')::uuid, 'manage');
 
   perform pg_temp.act_as(current_setting('test.partner')::uuid);
 
-  -- A shared account is editable by either person — that is what makes it joint.
-  -- Claiming it is not: `owner_id = me, visibility = 'private'` would take the
-  -- account and every transaction on it away from the person who created it,
-  -- and RLS would then refuse to hand it back.
   begin
-    update public.accounts
-       set owner_id = current_setting('test.partner')::uuid, visibility = 'private'
-     where id = current_setting('test.gabi_shared')::uuid;
-    failed := false;
-  exception when others then failed := true;
+    perform public.upsert_account_grant(null, current_setting('test.gabi_shared')::uuid,
+                                        current_setting('test.partner')::uuid, 'owner');
+    refused := false;
+  exception when others then refused := true;
   end;
+  perform pg_temp.check('a manager cannot promote themselves to owner', refused);
+  perform pg_temp.check('and their level is unchanged',
+    (select level::text from public.account_grants
+      where account_id = current_setting('test.gabi_shared')::uuid
+        and user_id = current_setting('test.partner')::uuid and deleted_at is null) = 'manage');
 
-  select owner_id, visibility into owner_after, vis
-    from public.accounts where id = current_setting('test.gabi_shared')::uuid;
+  begin
+    perform public.upsert_account_grant(null, current_setting('test.gabi_shared')::uuid,
+                                        current_setting('test.gabi')::uuid, 'none');
+    refused := false;
+  exception when others then refused := true;
+  end;
+  perform pg_temp.check('nor revoke the owner who granted them', refused);
+  perform pg_temp.check('who still owns it',
+    (select level::text from public.account_grants
+      where account_id = current_setting('test.gabi_shared')::uuid
+        and user_id = current_setting('test.gabi')::uuid and deleted_at is null) = 'owner');
 
-  perform pg_temp.check('a shared account keeps its owner',
-    owner_after = current_setting('test.gabi')::uuid, coalesce(owner_after::text, 'null'));
-  perform pg_temp.check('and cannot be made private by the other person',
-    vis = 'shared', vis::text);
-
-  -- The ordinary edits a joint account is meant to allow still work.
+  -- The ordinary edits 'manage' is meant to allow still work.
   update public.accounts set name = 'Household current'
    where id = current_setting('test.gabi_shared')::uuid;
-  perform pg_temp.check('renaming a shared account still works',
+  perform pg_temp.check('renaming an account you manage still works',
     exists (select 1 from public.accounts
              where id = current_setting('test.gabi_shared')::uuid and name = 'Household current'));
 end $$;
 
--- A shared account is joint, so the person who did NOT create it may delete it.
--- The Settings list used to gate on "did I create this?", which locked one
--- person out of deleting the household's own joint account entirely.
+-- A jointly owned account is joint, so the person who did NOT create it may
+-- delete it. The Settings list used to gate on "did I create this?", which
+-- locked one person out of deleting the household's own joint account entirely.
 
 do $$
 declare acct uuid; removed integer;
 begin
   perform pg_temp.act_as(current_setting('test.gabi')::uuid);
-  insert into public.accounts (name, kind, visibility) values ('Gabi made this', 'current', 'shared')
-  returning id into acct;
+  insert into public.accounts (name, kind) values ('Gabi made this', 'current') returning id into acct;
   insert into public.transactions (account_id, occurred_on, payee, amount_minor)
   values (acct, current_date, 'Shop', -500);
+  perform public.upsert_account_grant(null, acct, current_setting('test.partner')::uuid, 'owner');
 
   perform pg_temp.act_as(current_setting('test.partner')::uuid);
   removed := public.delete_account(acct, true);
-  perform pg_temp.check('the other person can delete a shared account they did not create',
+  perform pg_temp.check('a co-owner can delete an account they did not create',
     removed = 1, removed::text);
   perform pg_temp.check('and it is really gone',
     pg_temp.live('accounts', format('id = %L', acct)) = 0);
 end $$;
 
--- The owner handing their own shared account over is still allowed.
+-- Handing an account over is now an explicit operation rather than a column
+-- write, so that it never passes through the zero-owner state the grant RPC
+-- refuses.
 
 do $$
-declare owner_after uuid;
+declare levels text;
 begin
   perform pg_temp.act_as(current_setting('test.gabi')::uuid);
-  update public.accounts set owner_id = current_setting('test.partner')::uuid
-   where id = current_setting('test.gabi_shared')::uuid;
-  select owner_id into owner_after from public.accounts
-   where id = current_setting('test.gabi_shared')::uuid;
-  perform pg_temp.check('an owner can hand their shared account over',
-    owner_after = current_setting('test.partner')::uuid, coalesce(owner_after::text, 'null'));
+  perform public.transfer_account_ownership(current_setting('test.gabi_shared')::uuid,
+                                            current_setting('test.partner')::uuid, true);
+
+  perform pg_temp.check('handing over makes the other person an owner',
+    (select level::text from public.account_grants
+      where account_id = current_setting('test.gabi_shared')::uuid
+        and user_id = current_setting('test.partner')::uuid and deleted_at is null) = 'owner');
+  perform pg_temp.check('and steps the previous owner down when asked',
+    (select level::text from public.account_grants
+      where account_id = current_setting('test.gabi_shared')::uuid
+        and user_id = current_setting('test.gabi')::uuid and deleted_at is null) = 'manage');
 end $$;
 
 -- ---------- results ----------

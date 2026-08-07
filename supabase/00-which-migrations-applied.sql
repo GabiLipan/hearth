@@ -47,4 +47,14 @@ select '06-category-palette.sql',
                 where conrelid = 'public.categories'::regclass
                   and conname = 'categories_slot_check'
                   and pg_get_constraintdef(oid) like '%12%'),
-       'categories_slot_check allows slots up to 12';
+       'categories_slot_check allows slots up to 12'
+
+union all
+-- Until this reads true, permissions are still the three-tier visibility model:
+-- the client's member list is empty, nobody can be granted anything, and
+-- accounts still belong to the household rather than to the people on them.
+select '07-permissions.sql',
+       to_regclass('public.account_grants') is not null
+   and to_regclass('public.household_members') is not null
+   and to_regprocedure('public.my_account_ids(public.access_level)') is not null,
+       'account_grants + household_members tables and my_account_ids() exist';
