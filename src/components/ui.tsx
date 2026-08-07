@@ -304,12 +304,24 @@ export function Segmented<T extends string>({
  * screen and the page keeps painting behind it, so a sheet that stops at the
  * visual viewport's edge leaves the page showing through underneath. See the
  * filler in `Sheet`.
+ *
+ * `below` is the opposite and much rarer: the screen carrying on *past* the
+ * bottom of the layout viewport, which is iOS handing a standalone app a
+ * viewport that stops short of the display. Anything anchored to `bottom: 0`
+ * then floats above the bottom of the screen. It is zero in every ordinary
+ * case, including with the keyboard up — a keyboard never makes the visible
+ * area larger than the viewport — so it is only ever a correction.
  */
-function useViewportInset() {
+export function useViewportInset() {
   const measure = () => {
     const vv = typeof window === 'undefined' ? null : window.visualViewport
-    if (!vv) return { height: typeof window === 'undefined' ? 0 : window.innerHeight, top: 0, keyboard: 0 }
-    return { height: vv.height, top: vv.offsetTop, keyboard: Math.max(0, window.innerHeight - vv.height - vv.offsetTop) }
+    if (!vv) return { height: typeof window === 'undefined' ? 0 : window.innerHeight, top: 0, keyboard: 0, below: 0 }
+    return {
+      height: vv.height,
+      top: vv.offsetTop,
+      keyboard: Math.max(0, window.innerHeight - vv.height - vv.offsetTop),
+      below: Math.max(0, vv.height + vv.offsetTop - window.innerHeight),
+    }
   }
   const [inset, setInset] = useState(measure)
   useEffect(() => {

@@ -1,11 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import {
+  useEffect, useLayoutEffect, useRef, useState,
+  type CSSProperties, type MouseEvent, type ReactNode,
+} from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle,
   PanelLeftClose, PanelLeftOpen, Target,
 } from 'lucide-react'
 import { useSyncState } from '../hooks/useSync'
-import { cx, originOf, type Origin } from './ui'
+import { cx, originOf, useViewportInset, type Origin } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 
@@ -55,6 +58,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const { pathname } = useLocation()
   const title = TITLES[pathname] ?? 'Hearth'
+  // Zero unless iOS has anchored `bottom: 0` above the bottom of the screen.
+  const { below } = useViewportInset()
+  const toScreenBottom = below ? { transform: `translateY(${below}px)` } : undefined
 
   // Which way the page travels on arrival. Derived during render rather than in
   // an effect: the animation has to be on the very first frame of the new page,
@@ -194,17 +200,21 @@ export function Layout({ children }: { children: ReactNode }) {
         onClick={openAdd}
         aria-label="Add transaction"
         aria-expanded={addOpen}
+        style={toScreenBottom}
         className={cx(
           'fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-4 z-40 grid size-14 place-items-center',
           'rounded-2xl bg-accent text-accent-ink shadow-lg shadow-accent/30 md:hidden',
-          'transition duration-200 ease-out active:scale-95 motion-reduce:transition-none',
+          // Named properties rather than `transition`: the bottom-of-screen
+          // correction above is a `transform`, and it has to land at once
+          // rather than easing into place.
+          'transition-[scale,opacity] duration-200 ease-out active:scale-95 motion-reduce:transition-none',
           addOpen && 'pointer-events-none scale-50 opacity-0',
         )}
       >
         <Plus size={26} />
       </button>
 
-      <BottomTabs pathname={pathname} />
+      <BottomTabs pathname={pathname} style={toScreenBottom} />
 
       <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} origin={addOrigin} />
     </div>
@@ -214,6 +224,15 @@ export function Layout({ children }: { children: ReactNode }) {
 const TAB_MS = 460
 /** Damped: overshoots by a few per cent and settles, so the pill lands with weight. */
 const TAB_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
+/**
+ * How far the pill is drawn outside the tab it belongs to.
+ *
+ * The room around the icon and its label is drawn, not laid out. Padding the
+ * tabs enough for the pill to breathe would space the idle icons out by the
+ * same amount, and they read as adrift when it does — so the tabs stay tight
+ * and the pill is simply painted a few pixels larger than its tab.
+ */
+const PILL_BLEED = 5
 
 /**
  * The mobile tab bar: icons alone, and the current one opened into a pill with
@@ -222,20 +241,19 @@ const TAB_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
  * The pill is a single element that travels, not a background that blinks on
  * whichever tab you tapped — and the labels are what push the tabs around as
  * they open and close, so where the pill is *going* isn't known until those
- * widths have settled. Hence the order below: put every label at the width it
- * is heading for, read the geometry that produces, and only then start both
- * animations from where things actually were. Measuring first and animating
- * second is the whole reason the pill lands exactly on the tab.
+ * widths have settled. Hence the order in `place`: read where everything
+ * actually is, put the labels at the widths they are heading for, read the
+ * geometry *that* produces, and only then animate between the two. Measuring
+ * first and animating second is the whole reason the pill lands on the tab.
  *
  * The alternative — a CSS transition on the pill, retargeted as the labels grow
  * — restarts on every frame of the label animation, so the pill never gets far
  * enough into its curve to overshoot and just drifts to a halt.
  */
-function BottomTabs({ pathname }: { pathname: string }) {
+function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperties }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const pillRef = useRef<HTMLSpanElement>(null)
-  // Where the pill was left, which is where the next journey starts from.
-  const parked = useRef<{ left: number; width: number } | null>(null)
+  const placed = useRef(false)
 
   const place = (animate: boolean) => {
     const wrap = wrapRef.current
@@ -244,50 +262,63 @@ function BottomTabs({ pathname }: { pathname: string }) {
     const active = wrap.querySelector<HTMLElement>('[data-tab="active"]')
     // Nothing to measure while the bar is display:none on a desktop width.
     if (!active || !active.offsetWidth) return
-
     const labels = [...wrap.querySelectorAll<HTMLElement>('[data-label]')]
-    // Where each label is *now* — a fraction of the way open if you tapped
-    // twice quickly — and where it belongs. The inner span is `w-max`, so its
-    // width is the natural width of the text even while clipped to nothing.
+
+    // 1. Where things are *at this instant*. Tapping a third tab while the
+    //    second is still travelling has to pick the journey up from wherever
+    //    it got to, so every starting value is read from the live geometry
+    //    rather than remembered from the last transition — a remembered target
+    //    is a place the pill may never have reached.
+    const origin = wrap.getBoundingClientRect().left
+    const pillNow = pill.getBoundingClientRect()
+    const from = placed.current ? { left: pillNow.left - origin, width: pillNow.width } : null
     const was = labels.map((el) => el.getBoundingClientRect().width)
+    // The inner span is `w-max`, so its width is the natural width of the text
+    // even while the label around it is clipped to nothing.
     const goes = labels.map((el) =>
       el.dataset.label === 'on' ? (el.firstElementChild as HTMLElement).getBoundingClientRect().width : 0,
     )
 
-    // Settle the resting state first — `auto` rather than the pixels just
-    // measured, so a font arriving late or the text changing still leaves the
-    // label the right size. Everything below is decoration over a layout that
-    // is already correct: the animations carry no `fill`, so whatever happens
-    // to them, this is what the bar goes back to. That matters more than it
-    // sounds, because a finish event is never delivered while the app is in
-    // the background — an animation left holding the final value would strand
-    // the bar mid-transition.
+    // 2. Stop everything still running. Until this happens the animations own
+    //    these properties and the resting widths written below would have no
+    //    effect on the layout — which would make the measurement in step 4 a
+    //    reading of the *old* transition, mid-flight.
+    labels.forEach((el) => el.getAnimations().forEach((a) => a.cancel()))
+    pill.getAnimations().forEach((a) => a.cancel())
+
+    // 3. The resting state — `auto` rather than the pixels just measured, so a
+    //    font arriving late or the text changing still leaves the label the
+    //    right size. Everything after this is decoration over a layout that is
+    //    already correct: the animations carry no `fill`, so however they end,
+    //    this is what the bar goes back to. Which matters more than it sounds,
+    //    because a finish event is never delivered while the app is in the
+    //    background — an animation left holding the final value would strand
+    //    the bar mid-transition.
     labels.forEach((el, i) => {
       el.style.width = goes[i] ? 'auto' : '0px'
     })
+
+    // 4. Now the geometry means something.
     const to = { left: active.offsetLeft, width: active.offsetWidth }
-    const from = parked.current
-    parked.current = to
-    pill.style.left = `${to.left}px`
-    pill.style.width = `${to.width}px`
+    pill.style.left = `${to.left - PILL_BLEED}px`
+    pill.style.width = `${to.width + PILL_BLEED * 2}px`
     pill.style.opacity = '1'
+    placed.current = true
 
     if (!animate || !from || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
     labels.forEach((el, i) => {
       if (Math.abs(was[i] - goes[i]) < 0.5) return
-      el.getAnimations().forEach((a) => a.cancel())
       el.animate([{ width: `${was[i]}px` }, { width: `${goes[i]}px` }], {
         duration: TAB_MS,
         easing: TAB_SPRING,
       })
     })
 
-    pill.getAnimations().forEach((a) => a.cancel())
     pill.animate(
       [
         { left: `${from.left}px`, width: `${from.width}px` },
-        { left: `${to.left}px`, width: `${to.width}px` },
+        { left: `${to.left - PILL_BLEED}px`, width: `${to.width + PILL_BLEED * 2}px` },
       ],
       { duration: TAB_MS, easing: TAB_SPRING },
     )
@@ -312,8 +343,20 @@ function BottomTabs({ pathname }: { pathname: string }) {
   }, [])
 
   return (
-    <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-hairline bg-surface/90 backdrop-blur-md md:hidden">
-      <div ref={wrapRef} className="relative flex items-center justify-between px-2 py-1.5">
+    <nav
+      style={style}
+      className={cx(
+        'pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-hairline bg-surface/90 backdrop-blur-md md:hidden',
+        // iOS does not always hand a standalone app a viewport that reaches the
+        // bottom of the screen, and a bar anchored to a viewport that stops
+        // short leaves a bare strip of page below it. Continuing the bar's own
+        // surface past its bottom edge costs nothing when the viewport is right
+        // — it is off-screen — and turns that strip into more of the bar when
+        // it isn't.
+        "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-32 after:bg-surface/90 after:content-['']",
+      )}
+    >
+      <div ref={wrapRef} className="relative flex items-center justify-center gap-0.5 px-2 py-1.5 min-[360px]:gap-1">
         <span
           ref={pillRef}
           aria-hidden
@@ -337,7 +380,7 @@ function BottomTabs({ pathname }: { pathname: string }) {
               {/* Clipped by the outer span, whose width the effect owns; the
                   inner one keeps the text at its natural width throughout. */}
               <span data-label={active ? 'on' : 'off'} className="overflow-hidden">
-                <span className="block w-max whitespace-nowrap pl-1.5">{label}</span>
+                <span className="block w-max whitespace-nowrap pl-2">{label}</span>
               </span>
             </Link>
           )

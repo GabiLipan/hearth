@@ -210,6 +210,13 @@ the single place a level comes from.
 - **A sticky table column must be opaque.** `table.pinned` paints `--surface`,
   and its hover state is `--row-hover` rather than `surface-2/50`, because at
   50% alpha the columns scrolling underneath are readable straight through it.
+- **Interrupting an animation means reading the DOM, not a remembered target.**
+  `BottomTabs` starts every transition from live geometry, and cancels the
+  running animations *before* measuring where the next one is going: until they
+  are cancelled the animations own those properties, so the resting widths
+  written underneath have no effect on layout and the measurement reads the old
+  transition mid-flight. Tapping a third tab while the second is travelling is
+  the case that catches both.
 - **A finish event is never delivered while the app is in the background.** The
   animation still reaches `finished`, but `onfinish` and `ResizeObserver`
   callbacks wait for the next rendering opportunity. So nothing that has to be
