@@ -5,10 +5,7 @@ import { db, type Transaction } from '../lib/db'
 import { useAccountMap, useCategories, useCategoryMap } from '../lib/cache'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import {
-  Card, CategoryDot, Empty, TextInput, Toolbar, MonthStepper, Button, table, ScrollTable, cx,
-  originOf, type Origin,
-} from '../components/ui'
+import { Card, CategoryDot, Empty, TextInput, Toolbar, MonthStepper, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { TransactionForm } from '../components/TransactionForm'
 import { ImportWizard } from '../components/ImportWizard'
@@ -19,15 +16,7 @@ export default function Activity() {
   const [query, setQuery] = useState('')
   const [catFilter, setCatFilter] = useState<string | null>(null)
   const [editing, setEditing] = useState<Transaction | undefined>()
-  const [editOrigin, setEditOrigin] = useState<Origin | undefined>()
   const [importOpen, setImportOpen] = useState(false)
-
-  // The sheet expands out of the row you tapped, so it is obvious which
-  // transaction is being edited.
-  function edit(e: { currentTarget: Element }, t: Transaction) {
-    setEditOrigin(originOf(e))
-    setEditing(t)
-  }
 
   const categories = useCategories()
   const catMap = useCategoryMap()
@@ -138,7 +127,7 @@ export default function Activity() {
                     {list.map((t) => (
                       <li key={t.id}>
                         <button
-                          onClick={(e) => edit(e, t)}
+                          onClick={() => setEditing(t)}
                           className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 active:bg-surface-2"
                         >
                           <CategoryDot category={t.categoryId ? catMap.get(t.categoryId) : undefined} size={34} />
@@ -180,7 +169,7 @@ export default function Activity() {
                   return (
                     <tr
                       key={t.id}
-                      onClick={(e) => edit(e, t)}
+                      onClick={() => setEditing(t)}
                       className={cx(table.row, 'cursor-pointer transition-colors')}
                     >
                       {/* A search spans every month, so it needs the year; a
@@ -223,12 +212,7 @@ export default function Activity() {
         </>
       )}
 
-      <TransactionForm
-        open={editing !== undefined}
-        onClose={() => setEditing(undefined)}
-        editing={editing}
-        origin={editOrigin}
-      />
+      <TransactionForm open={editing !== undefined} onClose={() => setEditing(undefined)} editing={editing} />
       <ImportWizard open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   )

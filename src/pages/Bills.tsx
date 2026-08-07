@@ -36,6 +36,20 @@ export default function Bills() {
   const bills = useBills()
   const catMap = useCategoryMap()
   const [editing, setEditing] = useState<Bill | 'new' | null>(null)
+  /**
+   * Bumped every time the form is opened, and used as its key.
+   *
+   * The form loads its fields straight from the row it is given, so it has to
+   * be a fresh component each time one is opened — but keying it on the row
+   * meant it also remounted on *close*, which threw the sheet away before it
+   * could animate out. A counter changes when a form opens and never when it
+   * closes, which is exactly the distinction wanted.
+   */
+  const [opened, setOpened] = useState(0)
+  const openForm = (what: Bill | 'new') => {
+    setEditing(what)
+    setOpened((n) => n + 1)
+  }
   const [suggestions, setSuggestions] = useState<BillSuggestion[]>([])
 
   useEffect(() => {
@@ -55,7 +69,7 @@ export default function Bills() {
             {money(Math.round(monthlyTotal))}
           </p>
         </div>
-        <Button className="shrink-0" onClick={() => setEditing('new')}>
+        <Button className="shrink-0" onClick={() => openForm('new')}>
           <Plus size={15} /> New bill
         </Button>
       </Toolbar>
@@ -66,7 +80,7 @@ export default function Bills() {
           title="No recurring bills yet"
           hint="Add rent, utilities and subscriptions — Hearth tracks due dates and can record them automatically."
           action={
-            <Button onClick={() => setEditing('new')}>
+            <Button onClick={() => openForm('new')}>
               <Plus size={16} /> Add your first bill
             </Button>
           }
@@ -78,7 +92,7 @@ export default function Bills() {
             <ul className="divide-y divide-hairline">
               {active.map((b) => (
                 <li key={b.id} className="flex items-center gap-3 px-4 py-3">
-                  <button onClick={() => setEditing(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                  <button onClick={() => openForm(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                     <CategoryDot category={b.categoryId ? catMap.get(b.categoryId) : undefined} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{b.name}</p>
@@ -139,7 +153,7 @@ export default function Bills() {
                   return (
                     <tr key={b.id} className={table.row}>
                       <td className={cx(table.cell, 'pl-3 pr-3', table.pinned)}>
-                        <button onClick={() => setEditing(b)} className="block w-full truncate text-left font-medium hover:text-accent">
+                        <button onClick={() => openForm(b)} className="block w-full truncate text-left font-medium hover:text-accent">
                           {b.name}
                         </button>
                       </td>
@@ -215,7 +229,7 @@ export default function Bills() {
                   variant="subtle"
                   className="shrink-0"
                   onClick={() =>
-                    setEditing({
+                    openForm({
                       name: s.payee,
                       payee: s.payee,
                       amountMinor: s.amountMinor,
@@ -245,7 +259,7 @@ export default function Bills() {
             {paused.map((b) => (
               <button
                 key={b.id}
-                onClick={() => setEditing(b)}
+                onClick={() => openForm(b)}
                 className="flex items-center gap-3 rounded-2xl bg-surface px-4 py-3 text-left opacity-60 ring-1 ring-hairline transition hover:opacity-100 md:gap-2 md:rounded-xl desktop:px-2.5 desktop:py-2"
               >
                 <CategoryDot category={b.categoryId ? catMap.get(b.categoryId) : undefined} size={32} className="md:[--dot:24px]" />
@@ -258,7 +272,7 @@ export default function Bills() {
       )}
 
       <BillForm
-        key={editing === 'new' ? 'new' : (editing?.id ?? editing?.name ?? 'closed')}
+        key={opened}
         bill={editing === 'new' ? undefined : (editing ?? undefined)}
         open={editing !== null}
         onClose={() => setEditing(null)}

@@ -350,6 +350,48 @@ export function originOf(e: { currentTarget: Element }): Origin {
 }
 
 /**
+ * The last control pressed, so a sheet can grow out of whatever opened it
+ * without being told which button that was.
+ *
+ * A sheet nearly always opens because something was pressed, and that something
+ * is where it belongs — but the button and the sheet are usually far apart in
+ * the tree, and handing an origin down from seventeen openers is a great deal
+ * of ceremony for one animation, with a new place to forget it every time a
+ * sheet is added. One capture-phase listener knows the answer for all of them.
+ *
+ * `pointerdown` rather than `click`, because a press that turns into a scroll
+ * never becomes a click — and the press is the moment the user pointed at
+ * something. A sheet that opens for any other reason finds nothing recent here
+ * and slides up instead, which is the right thing: there is nowhere to grow
+ * from.
+ */
+const TAP_GRACE_MS = 800
+let lastTap: (Origin & { at: number }) | null = null
+let listening = false
+
+function watchTaps() {
+  if (listening || typeof window === 'undefined') return
+  listening = true
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      const control = (e.target as Element | null)?.closest?.('button, a, [role="button"], label')
+      const box = control?.getBoundingClientRect()
+      lastTap =
+        box && box.width
+          ? { x: box.left + box.width / 2, y: box.top + box.height / 2, at: performance.now() }
+          : { x: e.clientX, y: e.clientY, at: performance.now() }
+    },
+    true,
+  )
+}
+
+function tapOrigin(): Origin | undefined {
+  if (!lastTap || performance.now() - lastTap.at > TAP_GRACE_MS) return undefined
+  return { x: lastTap.x, y: lastTap.y }
+}
+
+/**
  * Keeps a sheet mounted long enough to animate itself out.
  *
  * `open` going false is the *start* of the close, not the end of it — unmount
@@ -387,12 +429,31 @@ export function Sheet({
   /** Sticky action bar pinned to the bottom of the sheet, always above the keyboard. */
   footer?: ReactNode
   wide?: boolean
-  /** Expand out of (and collapse back into) the control that opened this. */
+  /**
+   * Expand out of (and collapse back into) this point. Optional: without it the
+   * sheet grows from whatever was pressed just before it opened.
+   */
   origin?: Origin
 }) {
   const inset = useViewportInset()
   const phase = useSheetPhase(open)
   const shown = phase !== 'closed'
+  useEffect(watchTaps, [])
+
+  /**
+   * Where this sheet grew from, settled at the moment it opened.
+   *
+   * It has to be remembered rather than asked for again on the way out: by then
+   * the most recent press is the close button, and the sheet would collapse
+   * into its own corner rather than back into whatever opened it.
+   */
+  const grewFrom = useRef<Origin | undefined>(undefined)
+  const wasOpen = useRef(false)
+  if (open !== wasOpen.current) {
+    if (open) grewFrom.current = origin ?? tapOrigin()
+    wasOpen.current = open
+  }
+  const from = grewFrom.current
 
   /**
    * What the sheet looked like when it was last open.
@@ -453,13 +514,13 @@ export function Sheet({
           // sheet's top edge lands underneath the island on a modern iPhone,
           // and the keyboard shrinking the viewport pulls it higher still.
           'pt-[max(calc(env(safe-area-inset-top)+0.75rem),1.5rem)] sm:pt-0',
-          origin && (leaving ? 'animate-origin-out' : 'animate-origin'),
+          from && (leaving ? 'animate-origin-out' : 'animate-origin'),
         )}
         style={{
           top: inset.top,
           height: inset.height || undefined,
           // Relative to this frame's own box, which starts at the viewport inset.
-          transformOrigin: origin ? `${origin.x}px ${origin.y - inset.top}px` : undefined,
+          transformOrigin: from ? `${from.x}px ${from.y - inset.top}px` : undefined,
         }}
       >
         <div
@@ -474,7 +535,7 @@ export function Sheet({
             wide ? 'sm:max-w-2xl lg:max-w-3xl' : 'sm:max-w-md lg:max-w-lg',
             // With an origin the whole frame scales out of the button, so the
             // sheet must not also travel inside it.
-            !origin && (leaving ? 'animate-sheet-out' : 'animate-sheet'),
+            !from && (leaving ? 'animate-sheet-out' : 'animate-sheet'),
             // Nothing in a sheet that has already been dismissed is clickable —
             // what is on screen during the exit is a picture of the old one.
             leaving && 'pointer-events-none',

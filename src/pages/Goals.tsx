@@ -30,6 +30,20 @@ export default function Goals() {
   const goals = useGoals()
   const txns = useAllTransactions() ?? []
   const [editing, setEditing] = useState<Goal | 'new' | null>(null)
+  /**
+   * Bumped every time the form is opened, and used as its key.
+   *
+   * The form loads its fields straight from the row it is given, so it has to
+   * be a fresh component each time one is opened — but keying it on the row
+   * meant it also remounted on *close*, which threw the sheet away before it
+   * could animate out. A counter changes when a form opens and never when it
+   * closes, which is exactly the distinction wanted.
+   */
+  const [opened, setOpened] = useState(0)
+  const openForm = (what: Goal | 'new') => {
+    setEditing(what)
+    setOpened((n) => n + 1)
+  }
   const [funding, setFunding] = useState<Goal | null>(null)
 
   const rows = useMemo(
@@ -43,7 +57,7 @@ export default function Goals() {
         <p className="min-w-0 flex-1 text-sm text-ink-3">
           Money set aside for something specific. Add to a pot by moving money into the account that holds it.
         </p>
-        <Button className="shrink-0" onClick={() => setEditing('new')}>
+        <Button className="shrink-0" onClick={() => openForm('new')}>
           <Plus size={15} /> New goal
         </Button>
       </Toolbar>
@@ -54,7 +68,7 @@ export default function Goals() {
           title="No goals yet"
           hint="A holiday, a new boiler, a rainy-day fund — set a target and watch it fill up."
           action={
-            <Button onClick={() => setEditing('new')}>
+            <Button onClick={() => openForm('new')}>
               <Plus size={16} /> Add your first goal
             </Button>
           }
@@ -73,7 +87,7 @@ export default function Goals() {
                 >
                   <CategoryIcon icon={goal.icon} size={17} />
                 </span>
-                <button onClick={() => setEditing(goal)} className="min-w-0 flex-1 text-left">
+                <button onClick={() => openForm(goal)} className="min-w-0 flex-1 text-left">
                   <p className="flex items-center gap-1.5 truncate font-medium">
                     {goal.name}
                     {goal.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
@@ -112,7 +126,7 @@ export default function Goals() {
       )}
 
       <GoalForm
-        key={editing === 'new' ? 'new' : (editing?.id ?? 'closed')}
+        key={opened}
         goal={editing === 'new' ? undefined : (editing ?? undefined)}
         open={editing !== null}
         onClose={() => setEditing(null)}

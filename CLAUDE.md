@@ -210,6 +210,16 @@ the single place a level comes from.
 - **A sticky table column must be opaque.** `table.pinned` paints `--surface`,
   and its hover state is `--row-hover` rather than `surface-2/50`, because at
   50% alpha the columns scrolling underneath are readable straight through it.
+- **A form keyed on the row it edits also remounts when it closes**, which
+  throws the sheet away before it can animate out. The key is load-bearing —
+  those forms read their fields straight from the prop with
+  `useState(bill?.name ?? '')`, so the remount is the only thing that loads them
+  — so key on a counter bumped when the form *opens* instead. Opening still
+  gets fresh fields; closing no longer remounts.
+- **A sheet grows from the last control pressed**, tracked by one capture-phase
+  `pointerdown` listener in `ui.tsx` rather than an `origin` prop handed down
+  from every opener. Pass `origin` explicitly only to override it. The origin is
+  fixed when the sheet opens, or the exit would collapse into the close button.
 - **Interrupting an animation means reading the DOM, not a remembered target.**
   `BottomTabs` starts every transition from live geometry, and cancels the
   running animations *before* measuring where the next one is going: until they

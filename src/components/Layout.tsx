@@ -1,6 +1,6 @@
 import {
   useEffect, useLayoutEffect, useRef, useState,
-  type CSSProperties, type MouseEvent, type ReactNode,
+  type CSSProperties, type ReactNode,
 } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Target,
 } from 'lucide-react'
 import { useSyncState } from '../hooks/useSync'
-import { cx, originOf, useViewportInset, type Origin } from './ui'
+import { cx, useViewportInset } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 
@@ -54,7 +54,6 @@ const tabIndex = (path: string) => {
 
 export function Layout({ children }: { children: ReactNode }) {
   const [addOpen, setAddOpen] = useState(false)
-  const [addOrigin, setAddOrigin] = useState<Origin | undefined>()
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const { pathname } = useLocation()
   const title = TITLES[pathname] ?? 'Hearth'
@@ -68,13 +67,6 @@ export function Layout({ children }: { children: ReactNode }) {
   const [nav, setNav] = useState({ path: pathname, dir: 0 })
   if (nav.path !== pathname) {
     setNav({ path: pathname, dir: tabIndex(pathname) > tabIndex(nav.path) ? 1 : -1 })
-  }
-
-  // The sheet grows out of whichever control was pressed — the FAB on a phone,
-  // the sidebar button on a desktop.
-  function openAdd(e: MouseEvent<HTMLButtonElement>) {
-    setAddOrigin(originOf(e))
-    setAddOpen(true)
   }
 
   function toggleSidebar() {
@@ -122,7 +114,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
 
         <button
-          onClick={openAdd}
+          onClick={() => setAddOpen(true)}
           title={collapsed ? 'Add transaction' : undefined}
           aria-label="Add transaction"
           className={cx(
@@ -197,7 +189,7 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* Mobile FAB. It withdraws while the sheet is open, so the sheet reads as
           the button itself having opened up rather than as something covering it. */}
       <button
-        onClick={openAdd}
+        onClick={() => setAddOpen(true)}
         aria-label="Add transaction"
         aria-expanded={addOpen}
         style={toScreenBottom}
@@ -216,7 +208,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <BottomTabs pathname={pathname} style={toScreenBottom} />
 
-      <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} origin={addOrigin} />
+      <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
   )
 }

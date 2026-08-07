@@ -228,6 +228,20 @@ export default function SettingsPage() {
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const rules = useRules()
   const [editingCat, setEditingCat] = useState<Category | 'new' | null>(null)
+  /**
+   * Bumped every time the form is opened, and used as its key.
+   *
+   * The form loads its fields straight from the row it is given, so it has to
+   * be a fresh component each time one is opened — but keying it on the row
+   * meant it also remounted on *close*, which threw the sheet away before it
+   * could animate out. A counter changes when a form opens and never when it
+   * closes, which is exactly the distinction wanted.
+   */
+  const [catOpened, setCatOpened] = useState(0)
+  const openCat = (what: Category | 'new') => {
+    setEditingCat(what)
+    setCatOpened((n) => n + 1)
+  }
   const [demoOpen, setDemoOpen] = useState(false)
   const columnCount = useColumnCount(COLUMN_STEPS)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -286,7 +300,7 @@ export default function SettingsPage() {
       <section>
         <SectionTitle
           action={
-            <button onClick={() => setEditingCat('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
+            <button onClick={() => openCat('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
               <Plus size={14} /> Add
             </button>
           }
@@ -298,7 +312,7 @@ export default function SettingsPage() {
             {grouped(categories).map(({ parent, children }) => (
               <li key={parent.id}>
                 <button
-                  onClick={() => setEditingCat(parent)}
+                  onClick={() => openCat(parent)}
                   className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-1.5"
                 >
                   <CategoryDot category={{ ...parent, ...styleOf(parent, catMap) }} size={32} className="md:[--dot:24px]" />
@@ -311,7 +325,7 @@ export default function SettingsPage() {
                     {children.map((child) => (
                       <li key={child.id}>
                         <button
-                          onClick={() => setEditingCat(child)}
+                          onClick={() => openCat(child)}
                           className="flex w-full items-center gap-3 py-2 pl-11 pr-4 text-left hover:bg-surface-2/60 md:gap-2.5 md:pl-10 md:pr-3 desktop:py-1.5"
                         >
                           <CategoryDot category={{ ...child, ...styleOf(child, catMap) }} size={22} />
@@ -414,7 +428,7 @@ export default function SettingsPage() {
 
       {/* Modals live outside the columns — they are not blocks on the page. */}
       <CategoryForm
-        key={editingCat === 'new' ? 'new' : (editingCat?.id ?? 'closed')}
+        key={catOpened}
         category={editingCat === 'new' ? undefined : (editingCat ?? undefined)}
         open={editingCat !== null}
         onClose={() => setEditingCat(null)}
@@ -770,12 +784,26 @@ function AccountsSection() {
   const remoteBalances = useRemoteBalances()
   const levels = useMyLevels()
   const [editing, setEditing] = useState<Account | 'new' | null>(null)
+  /**
+   * Bumped every time the form is opened, and used as its key.
+   *
+   * The form loads its fields straight from the row it is given, so it has to
+   * be a fresh component each time one is opened — but keying it on the row
+   * meant it also remounted on *close*, which threw the sheet away before it
+   * could animate out. A counter changes when a form opens and never when it
+   * closes, which is exactly the distinction wanted.
+   */
+  const [opened, setOpened] = useState(0)
+  const openForm = (what: Account | 'new') => {
+    setEditing(what)
+    setOpened((n) => n + 1)
+  }
 
   return (
     <section>
       <SectionTitle
         action={
-          <button onClick={() => setEditing('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
+          <button onClick={() => openForm('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
             <Plus size={14} /> Add
           </button>
         }
@@ -793,7 +821,7 @@ function AccountsSection() {
             return (
               <li key={a.id}>
                 <button
-                  onClick={() => (editable ? setEditing(a) : undefined)}
+                  onClick={() => (editable ? openForm(a) : undefined)}
                   className={cx(
                     'flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2',
                     editable ? 'hover:bg-surface-2/50' : 'cursor-default',
@@ -821,7 +849,7 @@ function AccountsSection() {
         </ul>
       </Card>
       <AccountForm
-        key={editing === 'new' ? 'new' : (editing?.id ?? 'closed')}
+        key={opened}
         account={editing === 'new' ? undefined : (editing ?? undefined)}
         open={editing !== null}
         onClose={() => setEditing(null)}
