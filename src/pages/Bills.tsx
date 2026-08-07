@@ -9,7 +9,7 @@ import { daysUntil, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from 
 import { postBill, skipBill, detectBillSuggestions, type BillSuggestion } from '../lib/bills'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { useApp } from '../state/AppContext'
-import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, table, ScrollTable, cx } from '../components/ui'
+import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, Toolbar, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 
 /** Secondary bill lists fill the viewport in columns rather than stacking. */
@@ -48,17 +48,17 @@ export default function Bills() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between md:mb-2.5">
-        <div className="md:flex md:items-baseline md:gap-2">
+      <Toolbar className="justify-between">
+        <div className="min-w-0 md:flex md:items-baseline md:gap-2">
           <p className="text-sm text-ink-3 md:order-2">Recurring bills · monthly equivalent</p>
           <p className="text-3xl font-bold tracking-tight tabular md:order-1 md:text-xl">
             {money(Math.round(monthlyTotal))}
           </p>
         </div>
-        <Button onClick={() => setEditing('new')}>
+        <Button className="shrink-0" onClick={() => setEditing('new')}>
           <Plus size={15} /> New bill
         </Button>
-      </div>
+      </Toolbar>
 
       {active.length === 0 && paused.length === 0 ? (
         <Empty

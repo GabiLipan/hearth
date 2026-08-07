@@ -1148,8 +1148,11 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
   const canSave = name.trim().length > 0
 
   // Only a top-level category of the same kind can be a parent, and a category
-  // that already has children of its own cannot become one.
-  const hasChildren = existing.some((c) => c.parentId === category?.id)
+  // that already has children of its own cannot become one. The `category?.id`
+  // guard matters: a new category has no id, and every top-level category has
+  // `parentId === undefined`, so without it this was true for everyone and the
+  // parent picker never appeared on a new category.
+  const hasChildren = !!category?.id && existing.some((c) => c.parentId === category.id)
   const parentOptions = topLevel(existing).filter((c) => c.kind === kind && c.id !== category?.id)
   const parent = parentId ? catMap.get(parentId) : undefined
 
@@ -1324,7 +1327,12 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
         {!category && (
           <Segmented
             value={kind}
-            onChange={setKind}
+            onChange={(next) => {
+              setKind(next)
+              // A parent chosen under the old kind is no longer offered, so
+              // drop it rather than saving a cross-kind parent invisibly.
+              if (parent && parent.kind !== next) setParentId(undefined)
+            }}
             options={[
               { value: 'expense', label: 'Expense' },
               { value: 'income', label: 'Income' },

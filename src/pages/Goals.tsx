@@ -40,10 +40,10 @@ export default function Goals() {
   return (
     <div>
       <Toolbar className="justify-between">
-        <p className="text-sm text-ink-3">
+        <p className="min-w-0 flex-1 text-sm text-ink-3">
           Money set aside for something specific. Add to a pot by moving money into the account that holds it.
         </p>
-        <Button size="sm" onClick={() => setEditing('new')}>
+        <Button className="shrink-0" onClick={() => setEditing('new')}>
           <Plus size={15} /> New goal
         </Button>
       </Toolbar>
@@ -53,6 +53,11 @@ export default function Goals() {
           icon={PiggyBank}
           title="No goals yet"
           hint="A holiday, a new boiler, a rainy-day fund — set a target and watch it fill up."
+          action={
+            <Button onClick={() => setEditing('new')}>
+              <Plus size={16} /> Add your first goal
+            </Button>
+          }
         />
       ) : (
         <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,22rem),1fr))]">
