@@ -1,5 +1,5 @@
-import { useState, type MouseEvent, type ReactNode } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle,
   PanelLeftClose, PanelLeftOpen, Target,
@@ -204,36 +204,146 @@ export function Layout({ children }: { children: ReactNode }) {
         <Plus size={26} />
       </button>
 
-      {/* Mobile bottom tab bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-hairline bg-surface/90 backdrop-blur-md md:hidden">
-        <div className="pb-safe flex">
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              className={({ isActive }) =>
-                cx(
-                  'flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-colors',
-                  isActive ? 'text-accent' : 'text-ink-3',
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  {/* The class arrives with the active state, and adding an
-                      animation class to a live element is what starts it. */}
-                  <Icon size={22} strokeWidth={2} className={isActive ? 'animate-tab' : undefined} />
-                  {label}
-                </>
-              )}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
+      <BottomTabs pathname={pathname} />
 
       <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} origin={addOrigin} />
     </div>
+  )
+}
+
+const TAB_MS = 460
+/** Damped: overshoots by a few per cent and settles, so the pill lands with weight. */
+const TAB_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
+
+/**
+ * The mobile tab bar: icons alone, and the current one opened into a pill with
+ * its name in it.
+ *
+ * The pill is a single element that travels, not a background that blinks on
+ * whichever tab you tapped — and the labels are what push the tabs around as
+ * they open and close, so where the pill is *going* isn't known until those
+ * widths have settled. Hence the order below: put every label at the width it
+ * is heading for, read the geometry that produces, and only then start both
+ * animations from where things actually were. Measuring first and animating
+ * second is the whole reason the pill lands exactly on the tab.
+ *
+ * The alternative — a CSS transition on the pill, retargeted as the labels grow
+ * — restarts on every frame of the label animation, so the pill never gets far
+ * enough into its curve to overshoot and just drifts to a halt.
+ */
+function BottomTabs({ pathname }: { pathname: string }) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const pillRef = useRef<HTMLSpanElement>(null)
+  // Where the pill was left, which is where the next journey starts from.
+  const parked = useRef<{ left: number; width: number } | null>(null)
+
+  const place = (animate: boolean) => {
+    const wrap = wrapRef.current
+    const pill = pillRef.current
+    if (!wrap || !pill) return
+    const active = wrap.querySelector<HTMLElement>('[data-tab="active"]')
+    // Nothing to measure while the bar is display:none on a desktop width.
+    if (!active || !active.offsetWidth) return
+
+    const labels = [...wrap.querySelectorAll<HTMLElement>('[data-label]')]
+    // Where each label is *now* — a fraction of the way open if you tapped
+    // twice quickly — and where it belongs. The inner span is `w-max`, so its
+    // width is the natural width of the text even while clipped to nothing.
+    const was = labels.map((el) => el.getBoundingClientRect().width)
+    const goes = labels.map((el) =>
+      el.dataset.label === 'on' ? (el.firstElementChild as HTMLElement).getBoundingClientRect().width : 0,
+    )
+
+    // Settle the resting state first — `auto` rather than the pixels just
+    // measured, so a font arriving late or the text changing still leaves the
+    // label the right size. Everything below is decoration over a layout that
+    // is already correct: the animations carry no `fill`, so whatever happens
+    // to them, this is what the bar goes back to. That matters more than it
+    // sounds, because a finish event is never delivered while the app is in
+    // the background — an animation left holding the final value would strand
+    // the bar mid-transition.
+    labels.forEach((el, i) => {
+      el.style.width = goes[i] ? 'auto' : '0px'
+    })
+    const to = { left: active.offsetLeft, width: active.offsetWidth }
+    const from = parked.current
+    parked.current = to
+    pill.style.left = `${to.left}px`
+    pill.style.width = `${to.width}px`
+    pill.style.opacity = '1'
+
+    if (!animate || !from || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    labels.forEach((el, i) => {
+      if (Math.abs(was[i] - goes[i]) < 0.5) return
+      el.getAnimations().forEach((a) => a.cancel())
+      el.animate([{ width: `${was[i]}px` }, { width: `${goes[i]}px` }], {
+        duration: TAB_MS,
+        easing: TAB_SPRING,
+      })
+    })
+
+    pill.getAnimations().forEach((a) => a.cancel())
+    pill.animate(
+      [
+        { left: `${from.left}px`, width: `${from.width}px` },
+        { left: `${to.left}px`, width: `${to.width}px` },
+      ],
+      { duration: TAB_MS, easing: TAB_SPRING },
+    )
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => place(true), [pathname])
+
+  // A rotation, or the bar appearing at all when a window narrows past the
+  // breakpoint, moves everything without changing the route.
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const observer = new ResizeObserver(() => {
+      // Re-measuring mid-flight would fight the animation for the same values.
+      if (pillRef.current?.getAnimations().length) return
+      place(false)
+    })
+    observer.observe(wrap)
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-hairline bg-surface/90 backdrop-blur-md md:hidden">
+      <div ref={wrapRef} className="relative flex items-center justify-between px-2 py-1.5">
+        <span
+          ref={pillRef}
+          aria-hidden
+          className="pointer-events-none absolute inset-y-1 rounded-full bg-accent/12 opacity-0"
+        />
+        {NAV.map(({ to, label, icon: Icon }) => {
+          const active = to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`)
+          return (
+            <Link
+              key={to}
+              to={to}
+              data-tab={active ? 'active' : 'idle'}
+              aria-current={active ? 'page' : undefined}
+              aria-label={label}
+              className={cx(
+                'relative z-10 flex items-center rounded-full px-2 py-2.5 text-[11px] font-medium transition-colors',
+                active ? 'text-accent' : 'text-ink-3',
+              )}
+            >
+              <Icon size={22} strokeWidth={2} className={cx('shrink-0', active && 'animate-tab')} />
+              {/* Clipped by the outer span, whose width the effect owns; the
+                  inner one keeps the text at its natural width throughout. */}
+              <span data-label={active ? 'on' : 'off'} className="overflow-hidden">
+                <span className="block w-max whitespace-nowrap pl-1.5">{label}</span>
+              </span>
+            </Link>
+          )
+        })}
+      </div>
+    </nav>
   )
 }
 

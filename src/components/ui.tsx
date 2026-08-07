@@ -344,7 +344,7 @@ export function originOf(e: { currentTarget: Element }): Origin {
  * on the spot and the sheet vanishes mid-gesture. The extra phase must outlast
  * the longest exit animation in `index.css`.
  */
-const EXIT_MS = 220
+const EXIT_MS = 260
 function useSheetPhase(open: boolean) {
   const [phase, setPhase] = useState<'closed' | 'open' | 'closing'>(open ? 'open' : 'closed')
   useEffect(() => {

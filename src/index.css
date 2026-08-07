@@ -179,15 +179,33 @@ body {
 
 /* Grows out of whatever was tapped. The origin point is set inline as
    `transform-origin`, so the sheet expands from the + button the way an app
-   icon expands into its screen — and collapses back into it on the way out. */
+   icon expands into its screen — and collapses back into it on the way out.
+ *
+ * The stops sample a damped spring rather than describing a zoom, and the
+ * class runs them `linear` so the shape here is the whole of the motion: a
+ * single easing between two scales is the "linear zoom" this replaced. X and Y
+ * are separated early on so it leaves the button flattened and fills out as it
+ * travels, which is what reads as elastic rather than mechanical. The overshoot
+ * is kept under 2%: the frame is the whole viewport, so the far corner from the
+ * origin moves ~10px on a peak of 1.016, and much more than that would carry
+ * the sheet's top edge up under the dynamic island on the way past. */
 @keyframes origin-in {
-  from { transform: scale(0.14); opacity: 0; }
-  50% { opacity: 1; }
-  to { transform: scale(1); opacity: 1; }
+  0% { transform: scale(0.17, 0.09); opacity: 0; }
+  10% { transform: scale(0.47, 0.38); opacity: 1; }
+  20% { transform: scale(0.71, 0.66); }
+  30% { transform: scale(0.88, 0.85); }
+  40% { transform: scale(0.988, 0.975); }
+  50% { transform: scale(1.016, 1.018); }
+  62% { transform: scale(1.010, 1.012); }
+  74% { transform: scale(0.996, 0.995); }
+  86% { transform: scale(1.000, 0.999); }
+  100% { transform: scale(1, 1); opacity: 1; }
 }
+/* Leaves the way it came, with a breath of anticipation first. */
 @keyframes origin-out {
-  from { transform: scale(1); opacity: 1; }
-  to { transform: scale(0.14); opacity: 0; }
+  0% { transform: scale(1, 1); opacity: 1; }
+  14% { transform: scale(1.012, 1.014); opacity: 1; }
+  100% { transform: scale(0.17, 0.1); opacity: 0; }
 }
 
 /* Page changes. The horizontal pair follow the tab order, so moving right
@@ -216,8 +234,8 @@ body {
 .animate-sheet-out { animation: sheet-down 0.18s var(--ease-in-soft) forwards; }
 .animate-fade { animation: fade-in 0.18s ease-out; }
 .animate-fade-out { animation: fade-out 0.18s ease-in forwards; }
-.animate-origin { animation: origin-in 0.32s var(--ease-out-soft); }
-.animate-origin-out { animation: origin-out 0.2s var(--ease-in-soft) forwards; }
+.animate-origin { animation: origin-in 0.44s linear; }
+.animate-origin-out { animation: origin-out 0.24s var(--ease-in-soft) forwards; }
 .animate-page { animation: page-in 0.26s var(--ease-out-soft); }
 .animate-page-forward { animation: page-forward 0.26s var(--ease-out-soft); }
 .animate-page-back { animation: page-back 0.26s var(--ease-out-soft); }

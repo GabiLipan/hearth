@@ -210,6 +210,12 @@ the single place a level comes from.
 - **A sticky table column must be opaque.** `table.pinned` paints `--surface`,
   and its hover state is `--row-hover` rather than `surface-2/50`, because at
   50% alpha the columns scrolling underneath are readable straight through it.
+- **A finish event is never delivered while the app is in the background.** The
+  animation still reaches `finished`, but `onfinish` and `ResizeObserver`
+  callbacks wait for the next rendering opportunity. So nothing that has to be
+  *true* may live in one: `BottomTabs` writes the resting layout first and
+  animates over the top of it, with no `fill`, so backgrounding the app
+  mid-transition cannot strand the bar.
 - **Never set `overflow` on `<html>` or `<body>`.** Overflow on the root
   propagates to the viewport, and on iOS that detaches `position: fixed` from
   the visual viewport: the bottom tab bar stopped tracking the screen, sat

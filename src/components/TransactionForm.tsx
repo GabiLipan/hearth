@@ -301,7 +301,11 @@ export function TransactionForm({
             Category
             {suggested && <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent">auto-suggested</span>}
           </span>
-          <div className="space-y-2">
+          {/* Groups flow and wrap rather than taking a line each — a category
+              with no children is a small chip, and a column of them down the
+              left is mostly empty sheet. The wider gap between groups is what
+              keeps a parent and its children reading as one thing. */}
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
             {visibleGroups.map(({ parent, children }) => (
               <div key={parent.id} className="flex flex-wrap items-center gap-1.5">
                 <CategoryChip
