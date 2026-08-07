@@ -147,24 +147,101 @@ body {
   padding-top: env(safe-area-inset-top);
 }
 
-/* Gentle pop-in used by modals/sheets */
+/* ---------- Motion ----------
+ * One decelerating curve for everything that arrives, its mirror for everything
+ * that leaves, and durations short enough that a tab tapped twice never feels
+ * queued behind its own animation.
+ *
+ * Every exit carries `forwards`: without it the last frame snaps back to the
+ * start before React unmounts the node, which reads as a flicker.
+ */
+:root {
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-soft: cubic-bezier(0.4, 0, 0.9, 0.4);
+}
+
 @keyframes sheet-up {
   from { transform: translateY(24px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+@keyframes sheet-down {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(24px); opacity: 0; }
 }
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.animate-sheet {
-  animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.animate-fade {
-  animation: fade-in 0.18s ease-out;
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
+/* Grows out of whatever was tapped. The origin point is set inline as
+   `transform-origin`, so the sheet expands from the + button the way an app
+   icon expands into its screen — and collapses back into it on the way out. */
+@keyframes origin-in {
+  from { transform: scale(0.14); opacity: 0; }
+  50% { opacity: 1; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes origin-out {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.14); opacity: 0; }
+}
+
+/* Page changes. The horizontal pair follow the tab order, so moving right
+   along the bottom bar brings the next page in from the right. */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes page-forward {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes page-back {
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The tab icon that just became active. */
+@keyframes tab-pop {
+  from { transform: scale(0.72); }
+  55% { transform: scale(1.14); }
+  to { transform: scale(1); }
+}
+
+.animate-sheet { animation: sheet-up 0.24s var(--ease-out-soft); }
+.animate-sheet-out { animation: sheet-down 0.18s var(--ease-in-soft) forwards; }
+.animate-fade { animation: fade-in 0.18s ease-out; }
+.animate-fade-out { animation: fade-out 0.18s ease-in forwards; }
+.animate-origin { animation: origin-in 0.32s var(--ease-out-soft); }
+.animate-origin-out { animation: origin-out 0.2s var(--ease-in-soft) forwards; }
+.animate-page { animation: page-in 0.26s var(--ease-out-soft); }
+.animate-page-forward { animation: page-forward 0.26s var(--ease-out-soft); }
+.animate-page-back { animation: page-back 0.26s var(--ease-out-soft); }
+.animate-tab { animation: tab-pop 0.32s var(--ease-out-soft); }
+
+/* A page slides in from off to one side, which would otherwise widen the
+   document for the length of the animation and flash a horizontal scrollbar.
+   `clip` rather than `hidden`: it stops the scroll without making <html> a
+   scroll container, which would break every `position: sticky` header. */
+html {
+  overflow-x: clip;
+}
+
+/* Reduced motion keeps the change of state legible — things still appear and
+   disappear — but nothing travels or scales. */
 @media (prefers-reduced-motion: reduce) {
-  .animate-sheet, .animate-fade {
+  .animate-sheet, .animate-fade, .animate-origin, .animate-page,
+  .animate-page-forward, .animate-page-back {
+    animation: fade-in 0.12s linear;
+  }
+  .animate-sheet-out, .animate-fade-out, .animate-origin-out {
+    animation: fade-out 0.12s linear forwards;
+  }
+  .animate-tab {
     animation: none;
   }
 }

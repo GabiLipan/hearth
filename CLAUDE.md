@@ -210,6 +210,20 @@ the single place a level comes from.
 - **A sticky table column must be opaque.** `table.pinned` paints `--surface`,
   and its hover state is `--row-hover` rather than `surface-2/50`, because at
   50% alpha the columns scrolling underneath are readable straight through it.
+- **iOS keeps painting the page behind the keyboard.** `visualViewport` shrinks
+  but the layout viewport does not, so a sheet sized to the visual viewport ends
+  at the keyboard's top edge with the dimmed page showing through beneath it —
+  and the gap is sometimes taller than the keyboard, so `Sheet` paints a filler
+  from the sheet's bottom edge downwards and overshoots deliberately. For the
+  same reason the sheet's top gap is `env(safe-area-inset-top)` plus a margin
+  rather than a percentage: a percentage of the *shrunken* viewport puts the top
+  edge under the dynamic island.
+- **A `Sheet` outlives `open` by `EXIT_MS`** so it can animate out, and it
+  renders the title, children and footer it had when it was last open. Callers
+  clear the row being edited in the same breath as they close (`onClose={() =>
+  setEditing(null)}`), and without the freeze the sheet would flip to its "new
+  item" form on the way out. A sheet keyed on what it is editing
+  (`key={editing?.id ?? 'closed'}`) remounts instead, and so has no exit at all.
 - **A budget is per month, so "the budget" is never a single number.** `useBudgets()`
   returns every month; `useBudgetsForMonth()` returns one. Handing the whole lot to a
   view that assumes one month renders each category once per month it was ever

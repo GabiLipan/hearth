@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle,
   PanelLeftClose, PanelLeftOpen, Target,
 } from 'lucide-react'
 import { useSyncState } from '../hooks/useSync'
-import { cx } from './ui'
+import { cx, originOf, type Origin } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 
@@ -39,11 +39,37 @@ const TITLES: Record<string, string> = {
 const COLLAPSED_KEY = 'hearth-sidebar-collapsed'
 const readCollapsed = () => localStorage.getItem(COLLAPSED_KEY) === '1'
 
+/**
+ * Where a page sits in the tab order, so a page change can travel the way the
+ * tap did. Settings isn't a tab; it lives off the end, to the right, which is
+ * also where its button sits in the mobile top bar.
+ */
+const tabIndex = (path: string) => {
+  const i = NAV.findIndex((n) => n.to === path)
+  return i === -1 ? NAV.length : i
+}
+
 export function Layout({ children }: { children: ReactNode }) {
   const [addOpen, setAddOpen] = useState(false)
+  const [addOrigin, setAddOrigin] = useState<Origin | undefined>()
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const { pathname } = useLocation()
   const title = TITLES[pathname] ?? 'Hearth'
+
+  // Which way the page travels on arrival. Derived during render rather than in
+  // an effect: the animation has to be on the very first frame of the new page,
+  // and an effect only runs after it has already painted in place.
+  const [nav, setNav] = useState({ path: pathname, dir: 0 })
+  if (nav.path !== pathname) {
+    setNav({ path: pathname, dir: tabIndex(pathname) > tabIndex(nav.path) ? 1 : -1 })
+  }
+
+  // The sheet grows out of whichever control was pressed — the FAB on a phone,
+  // the sidebar button on a desktop.
+  function openAdd(e: MouseEvent<HTMLButtonElement>) {
+    setAddOrigin(originOf(e))
+    setAddOpen(true)
+  }
 
   function toggleSidebar() {
     setCollapsed((was) => {
@@ -90,7 +116,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
 
         <button
-          onClick={() => setAddOpen(true)}
+          onClick={openAdd}
           title={collapsed ? 'Add transaction' : undefined}
           aria-label="Add transaction"
           className={cx(
@@ -146,14 +172,28 @@ export function Layout({ children }: { children: ReactNode }) {
       <main className="w-full min-w-0 flex-1 px-4 pb-32 pt-4 md:px-5 md:pb-8 md:pt-4 xl:px-6">
         {/* Desktop page title. Mobile gets the same title in its top bar. */}
         <h1 className="mb-3 hidden text-xl font-bold tracking-tight md:block">{title}</h1>
-        {children}
+        {/* Keyed on the path so the animation restarts on every page change:
+            re-running one means a new element, not a re-applied class. */}
+        <div
+          key={pathname}
+          className={nav.dir === 0 ? 'animate-page' : nav.dir > 0 ? 'animate-page-forward' : 'animate-page-back'}
+        >
+          {children}
+        </div>
       </main>
 
-      {/* Mobile FAB */}
+      {/* Mobile FAB. It withdraws while the sheet is open, so the sheet reads as
+          the button itself having opened up rather than as something covering it. */}
       <button
-        onClick={() => setAddOpen(true)}
+        onClick={openAdd}
         aria-label="Add transaction"
-        className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-4 z-40 grid size-14 place-items-center rounded-2xl bg-accent text-accent-ink shadow-lg shadow-accent/30 transition active:scale-95 md:hidden"
+        aria-expanded={addOpen}
+        className={cx(
+          'fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-4 z-40 grid size-14 place-items-center',
+          'rounded-2xl bg-accent text-accent-ink shadow-lg shadow-accent/30 md:hidden',
+          'transition duration-200 ease-out active:scale-95 motion-reduce:transition-none',
+          addOpen && 'pointer-events-none scale-50 opacity-0',
+        )}
       >
         <Plus size={26} />
       </button>
@@ -173,14 +213,20 @@ export function Layout({ children }: { children: ReactNode }) {
                 )
               }
             >
-              <Icon size={22} strokeWidth={2} />
-              {label}
+              {({ isActive }) => (
+                <>
+                  {/* The class arrives with the active state, and adding an
+                      animation class to a live element is what starts it. */}
+                  <Icon size={22} strokeWidth={2} className={isActive ? 'animate-tab' : undefined} />
+                  {label}
+                </>
+              )}
             </NavLink>
           ))}
         </div>
       </nav>
 
-      <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} />
+      <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} origin={addOrigin} />
     </div>
   )
 }

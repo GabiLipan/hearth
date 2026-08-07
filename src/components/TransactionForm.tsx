@@ -14,17 +14,20 @@ import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
 import { create, update, remove } from '../lib/data'
 import { useApp } from '../state/AppContext'
-import { Sheet, Field, TextInput, Select, Segmented, Button, cx } from './ui'
+import { Sheet, Field, TextInput, Select, Segmented, Button, cx, type Origin } from './ui'
 import { CategoryIcon } from './CategoryIcon'
 
 export function TransactionForm({
   open,
   onClose,
   editing,
+  origin,
 }: {
   open: boolean
   onClose: () => void
   editing?: Transaction
+  /** Expand out of the control that opened this — the + button, or the row being edited. */
+  origin?: Origin
 }) {
   const { currency, money } = useApp()
   const { userId } = useSyncState()
@@ -194,6 +197,7 @@ export function TransactionForm({
     <Sheet
       open={open}
       onClose={onClose}
+      origin={origin}
       title={editing ? 'Edit transaction' : 'Add transaction'}
       footer={
         !editable ? (

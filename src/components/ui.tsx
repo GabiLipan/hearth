@@ -249,8 +249,30 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void
   className?: string
 }) {
+  const selected = Math.max(0, options.findIndex((o) => o.value === value))
   return (
-    <div className={cx('flex rounded-xl bg-surface-2 p-1 md:rounded-lg md:p-0.5', className)} role="tablist">
+    <div
+      className={cx(
+        'relative flex rounded-xl bg-surface-2 p-1 [--seg-pad:0.25rem] md:rounded-lg md:p-0.5 md:[--seg-pad:0.125rem]',
+        className,
+      )}
+      role="tablist"
+    >
+      {/* The selection slides between options instead of blinking from one to
+          the next. Every option is `flex-1`, so where the thumb belongs is
+          arithmetic — nothing has to be measured, and it is right on the first
+          frame rather than after a layout effect. */}
+      <span
+        aria-hidden
+        className={cx(
+          'absolute inset-y-1 rounded-lg bg-surface shadow-sm ring-1 ring-hairline md:inset-y-0.5 md:rounded-md',
+          'transition-[left] duration-200 ease-out motion-reduce:transition-none',
+        )}
+        style={{
+          width: `calc((100% - var(--seg-pad) * 2) / ${options.length})`,
+          left: `calc(var(--seg-pad) + (100% - var(--seg-pad) * 2) * ${selected} / ${options.length})`,
+        }}
+      />
       {options.map((o) => (
         <button
           key={o.value}
@@ -258,8 +280,8 @@ export function Segmented<T extends string>({
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
           className={cx(
-            'flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:rounded-md md:px-2.5 desktop:py-1',
-            value === o.value ? 'bg-surface text-ink shadow-sm ring-1 ring-hairline' : 'text-ink-3 hover:text-ink-2',
+            'relative flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:rounded-md md:px-2.5 desktop:py-1',
+            value === o.value ? 'text-ink' : 'text-ink-3 hover:text-ink-2',
           )}
         >
           {o.label}
@@ -277,16 +299,23 @@ export function Segmented<T extends string>({
  * keyboard opens, so a bottom-anchored sheet would otherwise slide behind it —
  * hiding its inputs and action button. Sizing the sheet's frame to
  * `visualViewport` keeps everything above the keyboard.
+ *
+ * `keyboard` is what the keyboard covers: the layout viewport is still the full
+ * screen and the page keeps painting behind it, so a sheet that stops at the
+ * visual viewport's edge leaves the page showing through underneath. See the
+ * filler in `Sheet`.
  */
 function useViewportInset() {
-  const [inset, setInset] = useState(() => ({
-    height: typeof window === 'undefined' ? 0 : window.innerHeight,
-    top: 0,
-  }))
+  const measure = () => {
+    const vv = typeof window === 'undefined' ? null : window.visualViewport
+    if (!vv) return { height: typeof window === 'undefined' ? 0 : window.innerHeight, top: 0, keyboard: 0 }
+    return { height: vv.height, top: vv.offsetTop, keyboard: Math.max(0, window.innerHeight - vv.height - vv.offsetTop) }
+  }
+  const [inset, setInset] = useState(measure)
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
-    const update = () => setInset({ height: vv.height, top: vv.offsetTop })
+    const update = () => setInset(measure)
     update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
@@ -294,8 +323,40 @@ function useViewportInset() {
       vv.removeEventListener('resize', update)
       vv.removeEventListener('scroll', update)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   return inset
+}
+
+/** Where a sheet grows from: the centre of the control that opened it, in viewport coordinates. */
+export type Origin = { x: number; y: number }
+
+/** Reads the origin off the event that opened a sheet. */
+export function originOf(e: { currentTarget: Element }): Origin {
+  const r = e.currentTarget.getBoundingClientRect()
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+}
+
+/**
+ * Keeps a sheet mounted long enough to animate itself out.
+ *
+ * `open` going false is the *start* of the close, not the end of it — unmount
+ * on the spot and the sheet vanishes mid-gesture. The extra phase must outlast
+ * the longest exit animation in `index.css`.
+ */
+const EXIT_MS = 220
+function useSheetPhase(open: boolean) {
+  const [phase, setPhase] = useState<'closed' | 'open' | 'closing'>(open ? 'open' : 'closed')
+  useEffect(() => {
+    if (open) {
+      setPhase('open')
+      return
+    }
+    setPhase((was) => (was === 'closed' ? 'closed' : 'closing'))
+    const timer = setTimeout(() => setPhase('closed'), EXIT_MS)
+    return () => clearTimeout(timer)
+  }, [open])
+  return phase
 }
 
 export function Sheet({
@@ -305,6 +366,7 @@ export function Sheet({
   children,
   footer,
   wide,
+  origin,
 }: {
   open: boolean
   onClose: () => void
@@ -313,47 +375,105 @@ export function Sheet({
   /** Sticky action bar pinned to the bottom of the sheet, always above the keyboard. */
   footer?: ReactNode
   wide?: boolean
+  /** Expand out of (and collapse back into) the control that opened this. */
+  origin?: Origin
 }) {
   const inset = useViewportInset()
+  const phase = useSheetPhase(open)
+  const shown = phase !== 'closed'
+
+  /**
+   * What the sheet looked like when it was last open.
+   *
+   * Callers clear the thing being edited in the same breath as they close —
+   * `onClose={() => setEditing(null)}` — so by the time the exit animation
+   * starts the title has become "New account" and the delete button has gone.
+   * A sheet on its way out should look like the sheet that was there; it is
+   * leaving, not changing.
+   */
+  const held = useRef({ title, children, footer })
+  if (open) held.current = { title, children, footer }
+  const view = open ? { title, children, footer } : held.current
 
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     document.addEventListener('keydown', onKey)
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
-    }
+    return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  if (!open) return null
+  // Held for the whole of the exit too — releasing it early lets the page
+  // behind jump back to its scroll position while the sheet is still leaving.
+  useEffect(() => {
+    if (!shown) return
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [shown])
+
+  if (!shown) return null
+  const leaving = phase === 'closing'
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/40 animate-fade" onClick={onClose} />
+      <div
+        className={cx('absolute inset-0 bg-black/40', leaving ? 'animate-fade-out' : 'animate-fade')}
+        onClick={onClose}
+      />
+      {/* The sheet's surface, continued past the bottom of the visual viewport.
+          iOS shrinks that viewport for the keyboard but keeps painting the page
+          behind it, so without this the sheet stops dead at the keyboard's top
+          edge and the dimmed page shows through the strip below it. Overshoots
+          deliberately: the gap is sometimes taller than the keyboard alone, and
+          anything past the screen simply isn't painted. */}
+      {inset.keyboard > 0 && (
+        <div
+          aria-hidden
+          className={cx('absolute inset-x-0 h-[60vh] bg-surface sm:hidden', leaving ? 'animate-fade-out' : 'animate-fade')}
+          style={{ top: inset.top + inset.height }}
+        />
+      )}
       <div
         onClick={onClose}
-        className="absolute inset-x-0 top-0 flex items-end justify-center sm:items-center"
-        style={{ height: inset.height || undefined, transform: inset.top ? `translateY(${inset.top}px)` : undefined }}
+        className={cx(
+          'absolute inset-x-0 flex items-end justify-center sm:items-center',
+          // Clear of the status bar and the dynamic island: without this the
+          // sheet's top edge lands underneath the island on a modern iPhone,
+          // and the keyboard shrinking the viewport pulls it higher still.
+          'pt-[max(calc(env(safe-area-inset-top)+0.75rem),1.5rem)] sm:pt-0',
+          origin && (leaving ? 'animate-origin-out' : 'animate-origin'),
+        )}
+        style={{
+          top: inset.top,
+          height: inset.height || undefined,
+          // Relative to this frame's own box, which starts at the viewport inset.
+          transformOrigin: origin ? `${origin.x}px ${origin.y - inset.top}px` : undefined,
+        }}
       >
         <div
           role="dialog"
-          aria-label={title}
+          aria-label={view.title}
           onClick={(e) => e.stopPropagation()}
           className={cx(
             // Always leave a strip of backdrop above the sheet so tap-to-dismiss
             // has a target, even when the keyboard has shrunk the viewport.
-            'animate-sheet relative flex max-h-[92%] w-full flex-col overflow-hidden bg-surface',
+            'relative flex max-h-full w-full flex-col overflow-hidden bg-surface sm:max-h-[92%]',
             'rounded-t-3xl sm:rounded-3xl sm:shadow-2xl md:rounded-2xl',
             wide ? 'sm:max-w-2xl lg:max-w-3xl' : 'sm:max-w-md lg:max-w-lg',
+            // With an origin the whole frame scales out of the button, so the
+            // sheet must not also travel inside it.
+            !origin && (leaving ? 'animate-sheet-out' : 'animate-sheet'),
+            // Nothing in a sheet that has already been dismissed is clickable —
+            // what is on screen during the exit is a picture of the old one.
+            leaving && 'pointer-events-none',
           )}
         >
           <div className="flex items-center justify-between px-5 pb-2 pt-4 md:px-4 md:pt-3">
-            <h2 className="text-lg font-semibold md:text-base">{title}</h2>
+            <h2 className="text-lg font-semibold md:text-base">{view.title}</h2>
             <button
               onClick={onClose}
               aria-label="Close"
-              className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-2 hover:text-ink"
+              className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-2 transition-colors hover:text-ink active:scale-95"
             >
               <X size={16} />
             </button>
@@ -361,16 +481,16 @@ export function Sheet({
           <div
             className={cx(
               'overflow-y-auto px-5 md:px-4',
-              footer ? 'pb-3' : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]',
+              view.footer ? 'pb-3' : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]',
             )}
           >
-            {children}
+            {view.children}
           </div>
-          {footer && (
+          {view.footer && (
             // Real bottom padding (not just the safe-area inset, which is 0 on
             // desktop) so the action never jams against the sheet's edge.
             <div className="border-t border-hairline bg-surface px-5 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-4 md:pb-3.5">
-              {footer}
+              {view.footer}
             </div>
           )}
         </div>
