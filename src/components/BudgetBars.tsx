@@ -47,6 +47,7 @@ export function BudgetBars({
   budgets,
   inferred,
   labels,
+  fluid = false,
   width = 200,
   height = 32,
   className,
@@ -59,6 +60,13 @@ export function BudgetBars({
   inferred?: boolean[]
   /** Per-bar hover text, e.g. "May · £412 of £450, 8% under". */
   labels?: string[]
+  /**
+   * Fill the space available, up to `width`, instead of always being `width`.
+   * The columns and gaps stretch horizontally; bar heights are untouched,
+   * because the height attribute matches the viewBox and only x is scaled.
+   */
+  fluid?: boolean
+  /** The chart's natural width — a maximum rather than a fixed size when `fluid`. */
   width?: number
   height?: number
   className?: string
@@ -82,9 +90,11 @@ export function BudgetBars({
 
   return (
     <svg
-      width={width}
+      width={fluid ? '100%' : width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio={fluid ? 'none' : undefined}
+      style={fluid ? { maxWidth: width, display: 'block' } : undefined}
       className={className}
       role="img"
       aria-label={

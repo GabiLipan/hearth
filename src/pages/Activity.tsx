@@ -5,7 +5,7 @@ import { db, type Transaction } from '../lib/db'
 import { useAccountMap, useCategories, useCategoryMap } from '../lib/cache'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { Card, CategoryDot, Empty, TextInput, Toolbar, MonthStepper, Button, table, cx } from '../components/ui'
+import { Card, CategoryDot, Empty, TextInput, Toolbar, MonthStepper, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { TransactionForm } from '../components/TransactionForm'
 import { ImportWizard } from '../components/ImportWizard'
@@ -153,10 +153,10 @@ export default function Activity() {
           {/* Desktop: one scannable table. Date becomes a column instead of a
               heading, and the width freed up carries category, account and note. */}
           <Card className="hidden overflow-hidden md:block">
-            <table className="w-full text-sm">
+            <ScrollTable minWidth={840}>
               <thead>
                 <tr className={table.head}>
-                  <th className={cx(table.th, 'w-28 pl-3')}>Date</th>
+                  <th className={cx(table.th, 'w-28 pl-3', table.pinned)}>Date</th>
                   <th className={table.th}>Payee</th>
                   <th className={cx(table.th, 'w-44')}>Category</th>
                   <th className={cx(table.th, 'w-40')}>Account</th>
@@ -174,7 +174,7 @@ export default function Activity() {
                     >
                       {/* A search spans every month, so it needs the year; a
                           month view doesn't, and the weekday is more useful. */}
-                      <td className={cx(table.cell, 'pl-3 whitespace-nowrap text-ink-3 tabular')}>
+                      <td className={cx(table.cell, 'pl-3 whitespace-nowrap text-ink-3 tabular', table.pinned)}>
                         {searching ? fmtFullDate(t.date) : fmtDay(t.date)}
                       </td>
                       {/* Note rides on the same line as the payee — a second
@@ -207,7 +207,7 @@ export default function Activity() {
                   )
                 })}
               </tbody>
-            </table>
+            </ScrollTable>
           </Card>
         </>
       )}

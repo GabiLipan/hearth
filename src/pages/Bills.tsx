@@ -10,7 +10,7 @@ import { daysUntil, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from 
 import { postBill, skipBill, detectBillSuggestions, type BillSuggestion } from '../lib/bills'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { useApp } from '../state/AppContext'
-import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, table, cx } from '../components/ui'
+import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 
 /** Secondary bill lists fill the viewport in columns rather than stacking. */
@@ -121,10 +121,10 @@ export default function Bills() {
           {/* Desktop: the same bills as a table — every attribute gets a column
               instead of being stacked into a two-line row. */}
           <Card className="hidden overflow-hidden md:block">
-            <table className="w-full text-sm">
+            <ScrollTable minWidth={780}>
               <thead>
                 <tr className={table.head}>
-                  <th className={cx(table.th, 'pl-3')}>Bill</th>
+                  <th className={cx(table.th, 'min-w-40 pl-3', table.pinned)}>Bill</th>
                   <th className={cx(table.th, 'w-40')}>Category</th>
                   <th className={cx(table.th, 'w-32')}>Repeats</th>
                   <th className={cx(table.th, 'w-36')}>Next due</th>
@@ -139,7 +139,7 @@ export default function Bills() {
                   const cat = b.categoryId ? catMap.get(b.categoryId) : undefined
                   return (
                     <tr key={b.id} className={table.row}>
-                      <td className={cx(table.cell, 'pl-3 pr-3')}>
+                      <td className={cx(table.cell, 'pl-3 pr-3', table.pinned)}>
                         <button onClick={() => setEditing(b)} className="block w-full truncate text-left font-medium hover:text-accent">
                           {b.name}
                         </button>
@@ -186,7 +186,7 @@ export default function Bills() {
                   )
                 })}
               </tbody>
-            </table>
+            </ScrollTable>
           </Card>
         </>
       )}

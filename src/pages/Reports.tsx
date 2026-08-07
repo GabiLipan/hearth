@@ -4,7 +4,7 @@ import { useAllTransactions, useCategories } from '../lib/cache'
 import { thisMonthKey, monthLabel } from '../lib/dates'
 import { spendByCategory, monthlySeries, monthTotals } from '../lib/stats'
 import { useApp } from '../state/AppContext'
-import { Card, Segmented, Empty, Toolbar, MonthStepper, table, cx } from '../components/ui'
+import { Card, Segmented, Empty, Toolbar, MonthStepper, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { CategoryDonut, SpendBars, IncomeSpendBars, NetLine } from '../components/charts'
 
@@ -62,10 +62,10 @@ export default function Reports() {
         ) : view === 'charts' ? (
           <CategoryDonut slices={slices} centerLabel={{ title: 'spent', value: money(totals.spend, { compact: true }) }} />
         ) : (
-          <table className="w-full text-sm">
+          <ScrollTable minWidth={360}>
             <thead>
               <tr className={table.head}>
-                <th className={table.th}>Category</th>
+                <th className={cx(table.th, table.pinned)}>Category</th>
                 <th className={cx(table.th, 'text-right')}>Spent</th>
                 <th className={cx(table.th, 'text-right')}>Share</th>
               </tr>
@@ -73,7 +73,7 @@ export default function Reports() {
             <tbody>
               {slices.map((s) => (
                 <tr key={s.categoryId} className={table.row}>
-                  <td className={table.cell}>
+                  <td className={cx(table.cell, table.pinned)}>
                     <span className="inline-flex items-center gap-2">
                       <span style={{ color: `var(--series-${s.slot})` }}>
                         <CategoryIcon icon={s.icon} size={15} />
@@ -86,7 +86,7 @@ export default function Reports() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ScrollTable>
         )}
       </Card>
 
@@ -111,36 +111,34 @@ export default function Reports() {
       ) : (
         <Card className="p-5 md:p-4 xl:col-span-2">
           <h3 className="mb-3 font-semibold md:mb-2 md:text-sm">Month by month</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className={table.head}>
-                  <th className={table.th}>Month</th>
-                  <th className={cx(table.th, 'text-right')}>Income</th>
-                  <th className={cx(table.th, 'text-right')}>Spending</th>
-                  <th className={cx(table.th, 'text-right')}>Net</th>
+          <ScrollTable minWidth={480}>
+            <thead>
+              <tr className={table.head}>
+                <th className={cx(table.th, table.pinned)}>Month</th>
+                <th className={cx(table.th, 'text-right')}>Income</th>
+                <th className={cx(table.th, 'text-right')}>Spending</th>
+                <th className={cx(table.th, 'text-right')}>Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...series].reverse().map((p) => (
+                <tr key={p.key} className={table.row}>
+                  <td className={cx(table.cell, table.pinned)}>{p.label}</td>
+                  <td className={cx(table.cell, 'text-right tabular')}>{money(p.income)}</td>
+                  <td className={cx(table.cell, 'text-right tabular')}>{money(p.spend)}</td>
+                  <td
+                    className={cx(
+                      table.cell,
+                      'text-right font-medium tabular',
+                      p.net < 0 ? 'text-critical-text' : 'text-good-text',
+                    )}
+                  >
+                    {money(p.net, { sign: true })}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {[...series].reverse().map((p) => (
-                  <tr key={p.key} className={table.row}>
-                    <td className={table.cell}>{p.label}</td>
-                    <td className={cx(table.cell, 'text-right tabular')}>{money(p.income)}</td>
-                    <td className={cx(table.cell, 'text-right tabular')}>{money(p.spend)}</td>
-                    <td
-                      className={cx(
-                        table.cell,
-                        'text-right font-medium tabular',
-                        p.net < 0 ? 'text-critical-text' : 'text-good-text',
-                      )}
-                    >
-                      {money(p.net, { sign: true })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </ScrollTable>
         </Card>
       )}
       </div>

@@ -353,6 +353,43 @@ export function MonthStepper({
 export const table = {
   head: 'border-b border-hairline text-left text-xs font-medium uppercase tracking-wide text-ink-3',
   th: 'py-1.5 font-medium',
-  row: 'border-b border-hairline last:border-0 hover:bg-surface-2/50',
+  row: 'group border-b border-hairline last:border-0 hover:bg-surface-2/50',
   cell: 'py-2 desktop:py-1.5',
+  /**
+   * Put on the first `th` and `td` of a scrolling table to pin that column.
+   *
+   * It needs its own background: a sticky cell is painted over by the cells
+   * sliding beneath it otherwise. `--surface` is the Card it sits in, so the
+   * pinned column looks continuous with the card rather than like a panel —
+   * and it repeats the row's hover tint, which its own background would
+   * otherwise be painted over the top of.
+   */
+  pinned: 'sticky left-0 z-10 bg-surface group-hover:bg-surface-2/50',
+}
+
+/**
+ * A table that scrolls sideways rather than squashing.
+ *
+ * Below `minWidth` the columns would start crushing their contents — long
+ * payees truncate to nothing, charts shrink past the point of being readable —
+ * so past that the table keeps its width and the container scrolls, with the
+ * first column pinned so you never lose track of which row you are reading.
+ */
+export function ScrollTable({
+  minWidth,
+  className,
+  children,
+}: {
+  /** Width below which the table stops shrinking and starts scrolling. */
+  minWidth: number
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div className="overflow-x-auto overscroll-x-contain">
+      <table className={cx('w-full text-sm', className)} style={{ minWidth }}>
+        {children}
+      </table>
+    </div>
+  )
 }

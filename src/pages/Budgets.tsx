@@ -12,7 +12,7 @@ import { thisMonthKey, monthLabel, monthKey, shiftMonth } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
-import { Card, CategoryDot, Progress, Button, Empty, Segmented, Toolbar, MonthStepper, cx } from '../components/ui'
+import { Card, CategoryDot, Progress, Button, Empty, Segmented, Toolbar, MonthStepper, ScrollTable, table, cx } from '../components/ui'
 import { BudgetBullet } from '../components/BudgetBullet'
 import { BudgetBars } from '../components/BudgetBars'
 
@@ -211,15 +211,17 @@ export default function Budgets() {
 
           {/* Desktop: one dense table you can tab straight down. */}
           <Card className="hidden overflow-hidden md:block">
-            <table className="w-full text-sm">
+            {/* The two chart columns are percentages so they give width back as
+                the window narrows; the rest are the widths their contents need. */}
+            <ScrollTable minWidth={880}>
               <thead>
                 <tr className="border-b border-hairline text-xs uppercase tracking-wide text-ink-3">
-                  <th className="py-2 pl-3 text-left font-medium">Category</th>
-                  <th className="px-3 text-left font-medium">Last {HISTORY_MONTHS} months</th>
-                  <th className="px-3 text-right font-medium">Budget</th>
-                  <th className="px-3 text-right font-medium">Spent</th>
-                  <th className="px-3 text-right font-medium">Left</th>
-                  <th className="w-40 pr-3 text-left font-medium">Progress</th>
+                  <th className={cx('w-[20%] min-w-36 py-2 pl-3 text-left font-medium', table.pinned)}>Category</th>
+                  <th className="w-[24%] px-3 text-left font-medium">Last {HISTORY_MONTHS} months</th>
+                  <th className="w-28 px-3 text-right font-medium">Budget</th>
+                  <th className="w-24 px-3 text-right font-medium">Spent</th>
+                  <th className="w-24 px-3 text-right font-medium">Left</th>
+                  <th className="w-[26%] pr-3 text-left font-medium">Progress</th>
                 </tr>
               </thead>
               <tbody>
@@ -227,7 +229,7 @@ export default function Budgets() {
                   <BudgetRow key={row.category.id} row={row} catMap={catMap} symbol={symbol} money={money} onCommit={setAmount} />
                 ))}
               </tbody>
-            </table>
+            </ScrollTable>
           </Card>
 
           {/* Phone: the same edit-in-place, as cards. */}
@@ -337,8 +339,8 @@ function BudgetRow({
   const style = styleOf(row.category, catMap)
 
   return (
-    <tr className="border-b border-hairline/60 last:border-0">
-      <td className="py-1.5 pl-3">
+    <tr className="group border-b border-hairline/60 last:border-0">
+      <td className={cx('py-1.5 pl-3', table.pinned)}>
         <span className="flex items-center gap-2">
           <CategoryDot category={{ ...row.category, ...style }} size={24} />
           <span className="truncate font-medium">{row.category.name}</span>
@@ -346,6 +348,7 @@ function BudgetRow({
       </td>
       <td className="px-3">
         <BudgetBars
+          fluid
           values={row.history}
           budgets={row.budgetHistory.amounts}
           inferred={row.budgetHistory.inferred}
