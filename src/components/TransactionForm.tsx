@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ScanLine } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
-import { useAccounts, useCategories } from '../lib/cache'
+import { useAccounts, useCategories, useMyLevels, useGrantsFor, useMemberMap } from '../lib/cache'
 import { scanReceipt } from '../lib/receipt'
-import { canUseAccount } from '../lib/accounts'
+import { canAddTransactions, canEditTransaction, levelOn } from '../lib/accounts'
 import { grouped, styleOf, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -30,7 +30,12 @@ export function TransactionForm({
   const { userId } = useSyncState()
   const categories = useCategories()
   const allAccounts = useAccounts()
-  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
+  const levels = useMyLevels()
+  const memberMap = useMemberMap()
+  const accounts = useMemo(
+    () => allAccounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
+    [allAccounts, levels],
+  )
   const payees = useLiveQuery(async () => {
     const txns = await db.transactions.orderBy('date').reverse().limit(400).toArray()
     return [...new Set(txns.map((t) => prettyPayee(t.payee)))].slice(0, 60)
@@ -103,8 +108,18 @@ export function TransactionForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payee, open])
 
-  const account = useMemo(() => accounts.find((a) => a.id === accountId), [accounts, accountId])
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+
+  /**
+   * Whether this row is mine to change.
+   *
+   * At `contribute` you may edit what you added and nothing else, which is the
+   * `transactions_update` policy exactly. The row stays open rather than being
+   * hidden: hiding it would contradict the policy, which does let you READ it,
+   * and a row that cannot be tapped reads as a bug rather than as a rule.
+   */
+  const editable = !editing || canEditTransaction(editing, levelOn(editing.accountId, levels), userId)
+  const author = editing && !editable ? memberMap.get(editing.createdBy ?? '')?.displayName : undefined
 
   /**
    * What can be chosen here: the right kind, and — for a personal category —
@@ -112,9 +127,10 @@ export function TransactionForm({
    * the database enforces. Offering one the server would reject would just be a
    * confusing failure at save time.
    */
+  const accountGrants = useGrantsFor(accountId)
   const visibleGroups = useMemo(
-    () => grouped(usableOn(categories, account, userId).filter((c) => c.kind === kind)),
-    [categories, account, userId, kind],
+    () => grouped(usableOn(categories, accountGrants, userId).filter((c) => c.kind === kind)),
+    [categories, accountGrants, userId, kind],
   )
 
   // If the account changes to one where the chosen category is not allowed,
@@ -180,6 +196,13 @@ export function TransactionForm({
       onClose={onClose}
       title={editing ? 'Edit transaction' : 'Add transaction'}
       footer={
+        !editable ? (
+          <p className="text-sm text-ink-3">
+            {author
+              ? `Added by ${author}. Only ${author}, or someone who manages this account, can change it.`
+              : 'Added by someone who has left the household. Only someone who manages this account can change it.'}
+          </p>
+        ) : (
         <div className="flex gap-2">
           {editing && (
             <Button
@@ -199,9 +222,10 @@ export function TransactionForm({
             {editing ? 'Save changes' : 'Add transaction'}
           </Button>
         </div>
+        )
       }
     >
-      <div className="space-y-4">
+      <fieldset disabled={!editable} className="space-y-4 disabled:opacity-60">
         <Segmented
           value={kind}
           onChange={(k) => {
@@ -323,7 +347,7 @@ export function TransactionForm({
         <Field label="Note (optional)">
           <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" />
         </Field>
-      </div>
+      </fieldset>
     </Sheet>
   )
 }

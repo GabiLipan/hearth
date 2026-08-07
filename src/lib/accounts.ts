@@ -1,29 +1,84 @@
-import { update } from './data'
+import { create, remove, update } from './data'
 import { rpc } from './api'
 import { fullPull } from './pull'
-import { db, type Account, type AccountVisibility, type Transaction } from './db'
+import { db, newId, type Account, type AccessLevel, type AccountGrant, type GrantLevel, type Transaction } from './db'
 
-export const VISIBILITY_LABEL: Record<AccountVisibility, string> = {
-  shared: 'Shared with household',
+/**
+ * The client's mirror of the server's permission model (supabase/07-permissions.sql).
+ *
+ * Every predicate here answers from ONE input: my level on the account. That is
+ * deliberate — the server's `my_account_ids(min_level)` reads a grant and
+ * nothing else, so anything the client consults beyond the level would be a
+ * second, drifting definition of access. Being a household admin confers
+ * nothing here, because it confers nothing there.
+ *
+ * These are advisory. They decide what the UI offers; RLS decides what actually
+ * happens. Where the two disagree the server wins, and the write comes back as
+ * a dead letter.
+ */
+
+/** Rank order must match the declaration order of `public.access_level`. */
+const RANK: Record<GrantLevel, number> = {
+  none: 0,
+  balance: 1,
+  view: 2,
+  contribute: 3,
+  manage: 4,
+  owner: 5,
+}
+
+export const LEVEL_LABEL: Record<GrantLevel, string> = {
+  owner: 'Owner',
+  manage: 'Manage',
+  contribute: 'Add entries',
+  view: 'View only',
   balance: 'Balance only',
-  private: 'Private',
+  none: 'No access',
 }
 
-export const VISIBILITY_HINT: Record<AccountVisibility, string> = {
-  shared: 'Both of you see this account and everything on it.',
-  balance: 'They see the account and what it holds, but not what you spent it on.',
-  private: 'They cannot see this account at all.',
+export const LEVEL_HINT: Record<GrantLevel, string> = {
+  owner: 'Full control, including who else can see it.',
+  manage: 'Can add, change and remove anything on this account, but not change who can see it.',
+  contribute: 'Can add transactions, and change or remove the ones they added.',
+  view: 'Can see everything on this account, but change nothing.',
+  balance: 'Sees what the account holds, but not what it was spent on.',
+  none: 'Cannot see this account at all.',
 }
 
-/** Can this user record spending against the account? */
-export function canUseAccount(a: Account, myUserId?: string) {
-  return a.visibility === 'shared' || !a.ownerId || a.ownerId === myUserId
+/** Highest first, which is the order the level picker offers them in. */
+export const LEVELS: GrantLevel[] = ['owner', 'manage', 'contribute', 'view', 'balance', 'none']
+
+export const atLeast = (level: GrantLevel, min: GrantLevel) => RANK[level] >= RANK[min]
+
+/** My level on an account. No grant means no access, which is the whole model. */
+export const levelOn = (accountId: string, levels: Map<string, GrantLevel>): GrantLevel =>
+  levels.get(accountId) ?? 'none'
+
+/* Each of these names the policy it mirrors. */
+export const canSeeAccount = (l: GrantLevel) => atLeast(l, 'balance') // accounts_select
+export const canSeeTransactionsAt = (l: GrantLevel) => atLeast(l, 'view') // transactions_select
+export const canAddTransactions = (l: GrantLevel) => atLeast(l, 'contribute') // transactions_insert
+export const canManageAccount = (l: GrantLevel) => atLeast(l, 'manage') // accounts_update
+export const canAdministerAccount = (l: GrantLevel) => atLeast(l, 'owner') // account_grants, delete_account
+
+/**
+ * `transactions_update`, exactly — including the `created_by` half.
+ *
+ * At `contribute` you may change what you added and nothing else. The server
+ * pins `created_by` on update, so this is not a courtesy check: it is the same
+ * condition, asked early enough to grey out a button.
+ */
+export function canEditTransaction(
+  t: Pick<Transaction, 'createdBy'>,
+  level: GrantLevel,
+  myUserId?: string,
+): boolean {
+  if (atLeast(level, 'manage')) return true
+  return atLeast(level, 'contribute') && !!myUserId && t.createdBy === myUserId
 }
 
-/** Can this user read the account's individual transactions? Mirrors the server's RLS. */
-export function canSeeTransactions(a: Account, myUserId?: string) {
-  return a.visibility === 'shared' || (!!myUserId && a.ownerId === myUserId)
-}
+/** The same rule for a bill, which follows its account's ladder. */
+export const canEditBill = canEditTransaction
 
 /** Balance from the transactions we hold locally. */
 export function computeBalance(account: Account, txns: Transaction[]) {
@@ -36,9 +91,9 @@ export function computeBalance(account: Account, txns: Transaction[]) {
  *
  * Computed locally whenever this device can see the underlying transactions, so
  * that adding one moves the number immediately rather than after a round trip.
- * For a partner's balance-only account we cannot see the line items at all, so
- * the figure comes from the server's `account_balances()` function, which sums
- * the rows RLS hides from us.
+ * At `balance` level we cannot see the line items at all, so the figure comes
+ * from the server's `account_balances()` function, which sums the rows RLS
+ * hides from us.
  *
  * There is deliberately no stored `balanceMinor` column any more. The old one
  * was recomputed and re-uploaded by both devices on every sync, so an account
@@ -48,28 +103,38 @@ export function balanceOf(
   account: Account,
   txns: Transaction[],
   remoteBalances: Map<string, number>,
-  myUserId?: string,
+  level: GrantLevel,
 ): number {
-  if (canSeeTransactions(account, myUserId)) return computeBalance(account, txns)
+  if (canSeeTransactionsAt(level)) return computeBalance(account, txns)
   return remoteBalances.get(account.id) ?? account.openingBalanceMinor
 }
 
 /**
- * Change an account's privacy.
+ * Give somebody a level on an account, or take it away.
  *
- * A plain field update now: the server bumps the household's visibility epoch,
- * and the partner's device responds by dropping its cache and re-pulling. The
- * old client had to emit a "purge" record by hand for the partner to act on,
- * which only covered the case it remembered to emit — not a transaction being
- * moved onto a private account, nor an ownership change, nor someone leaving.
+ * Queued through the outbox rather than called directly: a grant is idempotent
+ * and additive, so replaying one after a lost response is harmless, and the row
+ * appearing immediately is worth having. The server refuses if the caller is
+ * not an owner, and that arrives as a dead letter.
+ *
+ * `none` removes it. The existing grant row is reused when there is one, so the
+ * server's `(account_id, user_id)` unique index is never fought with.
  */
-export async function setAccountVisibility(account: Account, visibility: AccountVisibility, myUserId?: string) {
-  if (account.visibility === visibility) return
-  await update('accounts', account.id, {
-    visibility,
-    // A non-shared account needs an owner: it is who it is private *to*.
-    ownerId: account.ownerId ?? myUserId,
-  })
+export async function setAccountLevel(
+  accountId: string,
+  userId: string,
+  level: GrantLevel,
+  existing?: AccountGrant,
+) {
+  if (level === 'none') {
+    if (existing) await remove('account_grants', existing.id)
+    return
+  }
+  if (existing) {
+    await update('account_grants', existing.id, { level })
+    return
+  }
+  await create('account_grants', { id: newId(), accountId, userId, level: level as AccessLevel })
 }
 
 /** How many transactions this device knows about on an account — what the confirmation says. */
@@ -88,8 +153,8 @@ export const transactionsOn = (accountId: string) =>
  * account that is no longer on screen to explain it.
  *
  * And the server is the only place that can refuse. `delete_account()` re-checks
- * that the account is shared or the caller's own — the sheet offering the button
- * is not what protects anything, since anyone can call the API directly.
+ * that the caller owns it — the sheet offering the button is not what protects
+ * anything, since anyone can call the API directly.
  *
  * The cost is that it needs a connection. That is the right trade for a rare,
  * deliberate, irreversible action; the alternative is queueing a destructive
@@ -102,8 +167,7 @@ export async function deleteAccount(accountId: string, withTransactions: boolean
     p_account_id: accountId,
     p_with_transactions: withTransactions,
   })
-  // The wipe touched several tables at once, and re-seeded a starter account if
-  // that was the last one. Re-reading is simpler than replaying it locally.
+  // Several tables moved at once. Re-reading is simpler than replaying it locally.
   await fullPull()
   return removed
 }

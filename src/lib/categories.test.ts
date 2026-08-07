@@ -60,24 +60,25 @@ describe('roll-up', () => {
 describe('personal categories', () => {
   const mine = cat({ id: 'p', name: 'Therapy', icon: 'health', slot: 4, ownerId: 'me' })
   const all = [groceries, mine]
-  const shared = { visibility: 'shared', ownerId: undefined }
-  const myPrivate = { visibility: 'private', ownerId: 'me' }
-  const theirPrivate = { visibility: 'private', ownerId: 'them' }
+  // Since migration 07 "private" means one thing: nobody else holds a grant.
+  const onlyMine = [{ userId: 'me' }]
+  const sharedWithThem = [{ userId: 'me' }, { userId: 'them' }]
+  const onlyTheirs = [{ userId: 'them' }]
 
-  it('offers a personal category on your own private account', () => {
-    expect(usableOn(all, myPrivate, 'me').map((c) => c.id)).toEqual(['groc', 'p'])
+  it('offers a personal category on an account nobody else shares', () => {
+    expect(usableOn(all, onlyMine, 'me').map((c) => c.id)).toEqual(['groc', 'p'])
   })
 
-  it('hides it on a shared account, which the server would reject', () => {
-    expect(usableOn(all, shared, 'me').map((c) => c.id)).toEqual(['groc'])
+  it('hides it as soon as somebody else can see the account', () => {
+    expect(usableOn(all, sharedWithThem, 'me').map((c) => c.id)).toEqual(['groc'])
   })
 
   it('hides someone else’s personal category everywhere', () => {
-    expect(usableOn(all, theirPrivate, 'me').map((c) => c.id)).toEqual(['groc'])
+    expect(usableOn(all, onlyTheirs, 'me').map((c) => c.id)).toEqual(['groc'])
   })
 
   it('keeps household categories available regardless', () => {
-    expect(usableOn(all, undefined, undefined).map((c) => c.id)).toEqual(['groc'])
+    expect(usableOn(all, [], undefined).map((c) => c.id)).toEqual(['groc'])
   })
 })
 

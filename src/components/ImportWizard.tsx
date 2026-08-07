@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileUp, CheckCircle2 } from 'lucide-react'
 import { db } from '../lib/db'
-import { useAccounts, useCategories } from '../lib/cache'
+import { useAccounts, useCategories, useMyLevels } from '../lib/cache'
 import { fullName } from '../lib/categories'
-import { canUseAccount } from '../lib/accounts'
+import { canAddTransactions, levelOn } from '../lib/accounts'
 import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping, type ImportRow } from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
 import { matchRule, prettyPayee, learnRule, buildHistoryMatcher } from '../lib/rules'
@@ -34,7 +34,11 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   const categories = useCategories()
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const allAccounts = useAccounts()
-  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
+  const levels = useMyLevels()
+  const accounts = useMemo(
+    () => allAccounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
+    [allAccounts, levels],
+  )
   // A statement belongs to one account, and every transaction now needs one, so
   // this is asked rather than guessed — importing into the wrong account would
   // quietly corrupt two balances at once.

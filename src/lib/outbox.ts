@@ -237,6 +237,15 @@ const RPC_WRITERS: Partial<Record<SyncedTable, (entry: OutboxEntry) => Promise<u
     e.op === 'delete'
       ? softDeleteRow('rules', e.rowId)
       : rpc('upsert_rule', { p_id: e.rowId, p_match: e.payload.match, p_category_id: e.payload.categoryId }),
+  // Revoking is the same call with 'none': the server tombstones rather than
+  // deleting, so there is no separate delete path to keep in step.
+  account_grants: (e) =>
+    rpc('upsert_account_grant', {
+      p_id: e.rowId,
+      p_account_id: e.payload.accountId,
+      p_user_id: e.payload.userId,
+      p_level: e.op === 'delete' ? 'none' : e.payload.level,
+    }),
 }
 
 async function send(batch: OutboxEntry[]) {
@@ -344,6 +353,8 @@ const SINGULAR: Record<SyncedTable, string> = {
   transactions: 'transaction',
   categories: 'category',
   accounts: 'account',
+  account_grants: 'sharing setting',
+  household_members: 'person',
   goals: 'goal',
   budgets: 'budget',
   bills: 'bill',

@@ -47,6 +47,7 @@ read-only detector that reports which are present — run it when unsure.
 | `04-subcategories-budgets-goals.sql` | subcategories, personal categories, monthly budgets, goals, transfers |
 | `05-ownership-and-deletes.sql` | scoped wipe, `delete_account`, owner pinning |
 | `06-category-palette.sql` | widens `categories.slot` to 12 |
+| `07-permissions.sql` | `household_members`, `account_grants`, per-level RLS, the departure cascade |
 
 All are re-runnable. `05` refuses to install if `04` is missing — necessary,
 because **plpgsql bodies are only syntax-checked at creation time**, so a
@@ -94,43 +95,82 @@ allow-lists), `session.ts` (auth, household, sync orchestration).
 
 This is the part worth being careful with.
 
-| Account visibility | Partner sees the account | Partner sees its transactions |
-|---|---|---|
-| `shared` | yes | yes |
-| `balance` | yes, and the correct total | **no** |
-| `private` | no | no |
+**An account belongs to the people granted on it, not to the household.** That
+inverted in migration 07: every policy used to begin `household_id =
+my_household()`, and now `account_grants` is the only thing that authorises an
+account, its transactions and its bills. The household's remaining job is to
+decide who you are allowed to share with.
 
-Categories, budgets and goals carry an `owner_id`: `null` = the household's,
-set = that person's alone. Accounts carry an `owner_id` too, plus a visibility.
+Access is **deny by default** — no grant means the account does not exist as far
+as that person is concerned — at six levels, an ordered Postgres enum so
+`level >= 'contribute'` is a native comparison:
 
-**Shared rows are jointly owned — either person may edit or erase them. Owned rows
-belong to one person and nobody else may destroy them.** "Erase everything" means
-*shared data + my own*, never the partner's.
+| Level | Sees the account | Sees its transactions | Can write |
+|---|---|---|---|
+| `owner` | yes | yes | everything, plus who else can see it |
+| `manage` | yes | yes | everything on it, but cannot re-share it |
+| `contribute` | yes | yes | add, and edit or delete **only what they added** |
+| `view` | yes | yes | nothing |
+| `balance` | yes, and the correct total | **no** | nothing |
+| no grant | no | no | nothing |
 
-Three rules that follow:
+`contribute` is enforced against `transactions.created_by`, which
+`stamp_ownership` pins, so "you may change what you added" needs no extra
+policy — a soft delete is an UPDATE and falls out of the same expression.
+
+Categories, budgets and goals still carry an `owner_id` (`null` = the
+household's, set = that person's alone) and are still household-scoped. Only
+accounts moved.
+
+**A household admin manages people and nothing else.** They can invite, remove
+and promote; they gain no access to any account they were not granted, and
+`my_account_ids()` must never consult `is_household_admin()`.
+
+Four rules that follow:
 
 - **RLS is the only enforcement, and `security definer` switches it off.** Any
   definer function must restate in its body every predicate the policies would
-  have applied. `wipe_household()` did not, and one partner's "Erase everything"
+  have applied. `wipe_household()` did not, and one person's "Erase everything"
   deleted the other's private accounts.
 - **There are no DELETE policies anywhere.** Deletion is `set deleted_at`, an
   UPDATE. A hard delete would leave the other device's cache holding the row
   forever with nothing left to replicate.
-- **Visibility changes bump `households.visibility_epoch`.** A row that becomes
-  invisible emits no realtime event and no tombstone, so the epoch is the only
-  signal; a client seeing a new one drops its cache and re-pulls.
+- **Grants outlive the accounts they point at.** `delete_account()` and
+  `wipe_household()` deliberately leave `account_grants` alone: `accounts_select`
+  needs a grant, so revoking one would leave every other device holding the
+  account forever with no tombstone it is allowed to read.
+- **Anything that changes who-can-see-what bumps `households.visibility_epoch`.**
+  A row that becomes invisible emits no realtime event and no tombstone, so the
+  epoch is the only signal; a client seeing a new one drops its cache and
+  re-pulls. Creating an account deliberately does *not* bump it — that would
+  make every new account wipe its creator's own cache.
+
+**Leaving takes your own accounts with you.** `depart_household()` revokes what
+you were only a guest on, moves the accounts you own alone (with their
+transactions, bills and a copy of the household's category names so your history
+still reads), and leaves co-owned ones behind. It is the one function here that
+can corrupt rather than merely deny.
 
 ### Client predicates must mirror server policies
 
 Use these — do not hand-roll an ownership check. Getting this wrong has caused
-real bugs twice (a shared account that could not be edited or deleted, and bills
-that silently hid your own private accounts).
+real bugs three times (a shared account that could not be edited or deleted,
+bills that silently hid your own accounts, and a goal picker that offered
+accounts you could not post to).
+
+Every one takes a **level** and nothing else, because the server's
+`my_account_ids(min_level)` reads a grant and nothing else. `useMyLevels()` is
+the single place a level comes from.
 
 | Helper (`lib/accounts.ts`, `lib/categories.ts`) | Mirrors |
 |---|---|
-| `canUseAccount(a, userId)` | `accounts_update` policy — **pass `userId`; it is not optional** |
-| `canSeeTransactions(a, userId)` | `transactions_select` policy |
-| `usableOn(cats, account, userId)` | `personal_category_guard` trigger |
+| `canSeeAccount(level)` | `accounts_select` |
+| `canSeeTransactionsAt(level)` | `transactions_select` |
+| `canAddTransactions(level)` | `transactions_insert` |
+| `canManageAccount(level)` | `accounts_update` |
+| `canAdministerAccount(level)` | `account_grants` writes, `delete_account` |
+| `canEditTransaction(txn, level, userId)` | `transactions_update`, `created_by` half included |
+| `usableOn(cats, grants, userId)` | `personal_category_guard` trigger |
 
 ## Traps that have actually bitten
 
@@ -150,6 +190,11 @@ that silently hid your own private accounts).
 - **Writes fail late and quietly.** Everything goes through the outbox, so a bad
   row surfaces minutes later as a dead letter in Settings, not as an error on the
   form. Validate at the boundary (`insertToDb` throws on non-writable columns).
+- **`insert … returning` runs the SELECT policy too.** The creator's `owner`
+  grant is written by an AFTER trigger, so for that one instant the row cannot
+  see itself — and PostgREST asks for the row back on every insert, so account
+  creation failed outright. `accounts_select` carries a second disjunct for
+  exactly that case; do not "simplify" it away.
 - **Do not use CSS `columns` for cards.** Safari ignores `break-inside: avoid`
   in a multi-column layout and cuts a card in half at the column boundary,
   stranding its bottom border at the top of the next column; `column-span: all`

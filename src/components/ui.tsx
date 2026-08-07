@@ -419,6 +419,37 @@ export function Progress({ fraction, tone, className }: { fraction: number; tone
   )
 }
 
+/* ---------- Chip ---------- */
+/**
+ * A small label: a permission level, a role, the "you" marker.
+ *
+ * These were three hand-rolled spans in three files before permissions arrived
+ * and needed a fourth.
+ */
+export function Chip({
+  tone = 'neutral',
+  children,
+  className,
+}: {
+  tone?: 'neutral' | 'accent' | 'warn'
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <span
+      className={cx(
+        'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium',
+        tone === 'neutral' && 'bg-surface-2 text-ink-3',
+        tone === 'accent' && 'bg-accent/10 text-accent',
+        tone === 'warn' && 'bg-warning/15 text-ink-2',
+        className,
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
 /* ---------- Empty state ---------- */
 export function Empty({ icon: Icon, title, hint, action }: { icon: LucideIcon; title: string; hint?: string; action?: ReactNode }) {
   return (

@@ -1,7 +1,7 @@
 import { format, subMonths, addDays, startOfMonth } from 'date-fns'
-import { db, type Account, type Transaction, type Bill, type Budget } from './db'
+import { db, type Account, type Transaction, type Bill, type Budget, type GrantLevel } from './db'
 import { createMany } from './data'
-import { canUseAccount } from './accounts'
+import { canAddTransactions, levelOn } from './accounts'
 
 /**
  * Where demo data goes when the user has not been asked.
@@ -11,9 +11,14 @@ import { canUseAccount } from './accounts'
  * a joint account is the least surprising place for it to turn up. Settings asks
  * outright instead — see `DemoDataForm`.
  */
-export function defaultDemoAccount(accounts: Account[], userId?: string): Account | undefined {
-  const usable = accounts.filter((a) => canUseAccount(a, userId))
-  return usable.find((a) => a.visibility === 'shared') ?? usable[0]
+export function defaultDemoAccount(
+  accounts: Account[],
+  levels: Map<string, GrantLevel>,
+): Account | undefined {
+  const usable = accounts.filter((a) => canAddTransactions(levelOn(a.id, levels)))
+  // Prefer one other people can see too: demo data is for looking around, and a
+  // shared account is the least surprising place for it to turn up.
+  return usable.find((a) => levelOn(a.id, levels) === 'owner') ?? usable[0]
 }
 
 /** Deterministic pseudo-random so demo data is stable between runs. */

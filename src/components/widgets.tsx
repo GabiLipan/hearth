@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Lock, Eye } from 'lucide-react'
+import { ArrowRight, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
-import type { Transaction, Category, Budget, Bill, Account } from '../lib/db'
+import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
 import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
 import { spendByCategory, monthlySeries, monthTotals, monthlySpendByCategory, monthsEndingAt } from '../lib/stats'
 import { typicalRange } from '../lib/budgetHistory'
-import { balanceOf } from '../lib/accounts'
+import { balanceOf, canSeeTransactionsAt, levelOn } from '../lib/accounts'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Progress, cx } from './ui'
 import { BudgetBullet } from './BudgetBullet'
@@ -22,6 +22,8 @@ export interface HomeData {
   accounts: Account[]
   /** Server-computed balances for accounts whose transactions we cannot read. */
   remoteBalances: Map<string, number>
+  /** What I may do on each account — the mirror of `my_account_ids()`. */
+  levels: Map<string, GrantLevel>
   userId?: string
 }
 
@@ -191,7 +193,7 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
 export function AccountsWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
   if (data.accounts.length === 0) return null
-  const balance = (a: Account) => balanceOf(a, data.txns, data.remoteBalances, data.userId)
+  const balance = (a: Account) => balanceOf(a, data.txns, data.remoteBalances, levelOn(a.id, data.levels))
   const total = data.accounts.reduce((s, a) => s + balance(a), 0)
   return (
     <Card className="p-4 md:p-3">
@@ -201,14 +203,16 @@ export function AccountsWidget({ data }: { data: HomeData }) {
       </div>
       <ul className="divide-y divide-hairline">
         {data.accounts.map((a) => {
-          const vis = a.visibility
+          const level = levelOn(a.id, data.levels)
           const bal = balance(a)
           return (
             <li key={a.id} className="flex items-center gap-2 py-2 md:py-1">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
                 {a.name}
-                {vis === 'private' && <Lock size={12} className="ml-1.5 inline text-ink-3" />}
-                {vis === 'balance' && <Eye size={12} className="ml-1.5 inline text-ink-3" />}
+                {/* The eye means "you can see what is in it, not what it was
+                    spent on" — the one tier where the total on the right comes
+                    from the server rather than from rows this device holds. */}
+                {!canSeeTransactionsAt(level) && <Eye size={12} className="ml-1.5 inline text-ink-3" />}
               </span>
               <span className={cx('text-sm font-semibold tabular', bal < 0 && 'text-critical-text')}>{money(bal)}</span>
             </li>

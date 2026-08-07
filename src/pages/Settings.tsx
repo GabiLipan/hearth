@@ -1,17 +1,33 @@
 import { useMemo, useRef, useState } from 'react'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, Check, AlertTriangle } from 'lucide-react'
-import { db, type Category, type Account, type AccountVisibility } from '../lib/db'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, Check, AlertTriangle, ChevronRight } from 'lucide-react'
+import { db, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
   balanceOf,
-  canUseAccount,
+  canAddTransactions,
+  canAdministerAccount,
+  canManageAccount,
+  canSeeTransactionsAt,
   deleteAccount as removeAccount,
-  setAccountVisibility,
+  levelOn,
+  setAccountLevel,
   transactionsOn,
-  VISIBILITY_LABEL,
-  VISIBILITY_HINT,
+  LEVELS,
+  LEVEL_LABEL,
+  LEVEL_HINT,
 } from '../lib/accounts'
-import { useAccounts, useAllTransactions, useCategories, useDeadLetters, useRemoteBalances, useRules } from '../lib/cache'
+import {
+  useAccounts,
+  useAllTransactions,
+  useCategories,
+  useDeadLetters,
+  useGrantsFor,
+  useIsAdmin,
+  useMembers,
+  useMyLevels,
+  useRemoteBalances,
+  useRules,
+} from '../lib/cache'
 import { grouped, styleOf, topLevel } from '../lib/categories'
 import { discardAllDeadLetters, discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
@@ -19,9 +35,10 @@ import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backu
 import { SLOTS, SLOT_NAMES, slotVar, nextFreeSlot } from '../lib/palette'
 import { seedDemoData } from '../lib/demo'
 import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
+import { rpc } from '../lib/api'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
-import { Card, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, cx } from '../components/ui'
+import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, cx } from '../components/ui'
 import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
 
 /**
@@ -75,7 +92,7 @@ function HouseholdCard() {
       {sync.joinCode && (
         <div className="flex items-center gap-2 rounded-xl bg-surface-2 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-ink-3">Invite code — share with your partner so they can join this household</p>
+            <p className="text-xs text-ink-3">Invite code — share it with anyone you want in this household</p>
             <p className="text-lg font-bold tracking-widest tabular">{sync.joinCode}</p>
           </div>
           <Button
@@ -98,8 +115,8 @@ function HouseholdCard() {
       <details className="text-sm">
         <summary className="cursor-pointer text-ink-3 hover:text-ink-2">Join a different household</summary>
         <p className="mt-2 text-xs text-ink-3">
-          Enter your partner's invite code to share one household. This device's copy is replaced by theirs, and
-          anything not yet saved is discarded.
+          Enter someone's invite code to share a household with them. Accounts you own come with you; anything you
+          only had access to stays behind, and anything not yet saved is discarded.
         </p>
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <TextInput
@@ -112,7 +129,7 @@ function HouseholdCard() {
             variant="subtle"
             disabled={busy || joinCode.trim().length < 6}
             onClick={() => {
-              if (confirm('Joining replaces this device\u2019s data with your partner\u2019s household. Continue?')) {
+              if (confirm('Joining replaces this device\u2019s data with that household\u2019s. Continue?')) {
                 void run(() => joinHousehold(joinCode))
               }
             }}
@@ -228,6 +245,11 @@ export default function SettingsPage() {
       <section>
         <SectionTitle>Household</SectionTitle>
         <HouseholdCard />
+      </section>
+
+      <section>
+        <SectionTitle>People</SectionTitle>
+        <MembersCard />
       </section>
 
       <UnsavedChanges />
@@ -369,7 +391,7 @@ export default function SettingsPage() {
             onClick={async () => {
               if (
                 confirm(
-                  'Delete the shared accounts, transactions, budgets, bills and categories — for both of you — along with anything private to you? Your partner keeps their own private accounts and personal budgets. Export a backup first if you want a copy.',
+                  'Delete every account you own and everything on it, along with your own budgets, goals and categories, and the household\u2019s shared ones? Accounts other people own are untouched, and so is anything private to them. Export a backup first if you want a copy.',
                 ) &&
                 confirm('Really erase everything of yours? This cannot be undone.')
               ) {
@@ -402,15 +424,222 @@ export default function SettingsPage() {
   )
 }
 
+
+/**
+ * Everyone in the household, and what an admin may do about them.
+ *
+ * An admin manages PEOPLE and nothing else — they gain no access to any account
+ * they were not granted, which is why nothing here touches an account directly.
+ * The one exception is removal, and that is spelled out on its own screen
+ * before it happens.
+ */
+function MembersCard() {
+  const { userId } = useSyncState()
+  const members = useMembers()
+  const isAdmin = useIsAdmin()
+  const [open, setOpen] = useState<HouseholdMember | null>(null)
+
+  if (members.length === 0) {
+    return (
+      <Card className="p-4 md:p-3">
+        <p className="text-sm text-ink-3">
+          Your household list has not synced yet. It will appear once you are back online.
+        </p>
+      </Card>
+    )
+  }
+
+  return (
+    <>
+      <Card>
+        <ul className="divide-y divide-hairline">
+          {members.map((m) => (
+            <li key={m.userId}>
+              <button
+                onClick={() => setOpen(m)}
+                className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 md:px-3 desktop:py-2"
+              >
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {m.displayName ?? 'Someone'}
+                  {m.userId === userId && <span className="ml-1.5 text-sm font-normal text-ink-3">you</span>}
+                </span>
+                {m.role === 'admin' && <Chip tone="accent">Admin</Chip>}
+                <ChevronRight size={16} className="shrink-0 text-ink-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      {members.length === 1 && (
+        <p className="mt-2 px-1 text-xs text-ink-3">
+          Share your invite code above to bring somebody in. Nothing of yours becomes visible to them until you
+          share an account with them.
+        </p>
+      )}
+      {open && (
+        <MemberSheet
+          key={open.userId}
+          member={open}
+          isAdmin={isAdmin}
+          isMe={open.userId === userId}
+          onClose={() => setOpen(null)}
+        />
+      )}
+    </>
+  )
+}
+
+interface DeparturePreviewRow {
+  account_id: string
+  account_name: string
+  outcome: 'leaves_with_them' | 'stays_with_others' | 'loses_access'
+}
+
+function MemberSheet({
+  member,
+  isAdmin,
+  isMe,
+  onClose,
+}: {
+  member: HouseholdMember
+  isAdmin: boolean
+  isMe: boolean
+  onClose: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+  const [preview, setPreview] = useState<DeparturePreviewRow[] | null>(null)
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await fn()
+      await syncNow()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That did not work')
+    }
+    setBusy(false)
+  }
+
+  const name = member.displayName ?? 'They'
+
+  return (
+    <Sheet open onClose={onClose} title={member.displayName ?? 'Household member'}>
+      <div className="space-y-4">
+        {isAdmin && !isMe && (
+          <Field
+            label="Role"
+            hint="Admins can invite and remove people, and reset the invite code. It gives them no access to any account."
+          >
+            <Segmented
+              value={member.role}
+              onChange={(role) => void run(() => rpc('set_member_role', { p_user_id: member.userId, p_role: role }))}
+              options={[
+                { value: 'member', label: 'Member' },
+                { value: 'admin', label: 'Admin' },
+              ]}
+            />
+          </Field>
+        )}
+
+        {error && <p className="text-sm text-critical-text">{error}</p>}
+
+        {isAdmin && !isMe && !preview && (
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                // Ask the server what would happen rather than guessing from
+                // this device's cache, which cannot see accounts it holds no
+                // grant on — exactly the accounts most affected.
+                const rows = await rpc<DeparturePreviewRow[]>('preview_departure', { p_user_id: member.userId })
+                setPreview(rows ?? [])
+              })
+            }
+          >
+            <Trash2 size={15} /> Remove from the household
+          </Button>
+        )}
+
+        {preview && (
+          <div className="space-y-3">
+            <p className="text-sm font-medium">If you remove {name}:</p>
+            <DepartureGroup
+              title={`${name} takes these with them`}
+              hint="They are the only owner, so it disappears from your list."
+              rows={preview.filter((r) => r.outcome === 'leaves_with_them')}
+            />
+            <DepartureGroup
+              title="These stay with you"
+              hint={`Somebody else owns them too, so ${name} simply loses access.`}
+              rows={preview.filter((r) => r.outcome === 'stays_with_others')}
+            />
+            <DepartureGroup
+              title={`${name} loses access to these`}
+              hint="They were never an owner of them."
+              rows={preview.filter((r) => r.outcome === 'loses_access')}
+            />
+            <p className="text-xs text-ink-3">
+              Anything {name} recorded on an account that stays here stays here too, under their name. They keep a
+              copy of the category names so their own history still reads properly.
+            </p>
+            <div className="flex gap-2">
+              <Button variant="ghost" disabled={busy} onClick={() => setPreview(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                className="flex-1"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await rpc('remove_member', { p_user_id: member.userId })
+                    onClose()
+                  })
+                }
+              >
+                {busy ? 'Removing…' : `Remove ${name}`}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {!isAdmin && (
+          <p className="text-sm text-ink-3">
+            Only an admin can change roles or remove somebody from the household.
+          </p>
+        )}
+      </div>
+    </Sheet>
+  )
+}
+
+function DepartureGroup({ title, hint, rows }: { title: string; hint: string; rows: DeparturePreviewRow[] }) {
+  if (rows.length === 0) return null
+  return (
+    <div className="rounded-xl bg-surface-2 px-4 py-3">
+      <p className="text-sm font-medium">{title}</p>
+      <ul className="mt-1 space-y-0.5">
+        {rows.map((r) => (
+          <li key={r.account_id} className="text-sm text-ink-2">
+            {r.account_name}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-xs text-ink-3">{hint}</p>
+    </div>
+  )
+}
+
 function AccountsSection() {
   const { money } = useApp()
-  const { userId } = useSyncState()
   const accounts = useAccounts()
   const txns = useAllTransactions() ?? []
   const remoteBalances = useRemoteBalances()
+  const levels = useMyLevels()
   const [editing, setEditing] = useState<Account | 'new' | null>(null)
-
-  const balance = (a: Account) => balanceOf(a, txns, remoteBalances, userId)
 
   return (
     <section>
@@ -426,35 +655,34 @@ function AccountsSection() {
       <Card>
         <ul className="divide-y divide-hairline">
           {accounts.map((a) => {
-            const vis = a.visibility
-            // Who may open this to edit or delete it. `canUseAccount` is the same
-            // predicate as the `accounts_update` policy in 02-rls.sql, which is
-            // the point of reusing it: a SHARED account is editable by either
-            // person — that is what makes a joint account joint — so gating on
-            // "did I create it?" locked the other person out of a row the server
-            // would happily have let them change, and out of deleting it at all.
-            const editable = canUseAccount(a, userId)
+            const level = levelOn(a.id, levels)
+            // Opening the edit sheet needs `manage`, the same bar as the
+            // accounts_update policy. Below that there is nothing to edit, so
+            // the row is a read-only line rather than a dead button.
+            const editable = canManageAccount(level)
             return (
               <li key={a.id}>
                 <button
                   onClick={() => (editable ? setEditing(a) : undefined)}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2 ${editable ? 'hover:bg-surface-2/50' : 'cursor-default'}`}
+                  className={cx(
+                    'flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2',
+                    editable ? 'hover:bg-surface-2/50' : 'cursor-default',
+                  )}
                 >
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-1.5 font-medium">
                       {a.name}
-                      {vis === 'private' && <Lock size={13} className="text-ink-3" />}
-                      {vis === 'balance' && <Eye size={13} className="text-ink-3" />}
+                      {/* The eye means the total is all you get: no line items,
+                          so no Activity, no reports, no budget contribution. */}
+                      {!canSeeTransactionsAt(level) && <Eye size={13} className="text-ink-3" />}
                     </p>
-                    <p className="text-sm text-ink-3">
+                    <p className="flex items-center gap-1.5 text-sm text-ink-3">
                       {a.kind}
-                      {/* Only a non-shared account of theirs is "partner's". A shared
-                          one belongs to you both, so labelling it theirs was wrong. */}
-                      {!editable ? " · partner's" : vis !== 'shared' ? ` · ${VISIBILITY_LABEL[vis].toLowerCase()}` : ''}
+                      {level !== 'owner' && <Chip>{LEVEL_LABEL[level]}</Chip>}
                     </p>
                   </div>
-                  <span className={`font-semibold tabular ${balance(a) < 0 ? 'text-critical-text' : ''}`}>
-                    {money(balance(a))}
+                  <span className={cx('font-semibold tabular', balanceOf(a, txns, remoteBalances, level) < 0 && 'text-critical-text')}>
+                    {money(balanceOf(a, txns, remoteBalances, level))}
                   </span>
                 </button>
               </li>
@@ -473,6 +701,105 @@ function AccountsSection() {
 }
 
 /**
+ * Who can see one account, and at what level.
+ *
+ * A `Select` per person rather than the stack of radio cards the old
+ * three-way visibility picker used: six levels times however many people is an
+ * enormous scroll on a phone, and the explanation belongs behind a disclosure
+ * rather than repeated on every row.
+ *
+ * Only an owner may change anything here — `upsert_account_grant` refuses
+ * otherwise — so for everybody else this is a read-only summary.
+ */
+function AccountAccessSheet({ account, open, onClose }: { account: Account; open: boolean; onClose: () => void }) {
+  const { userId } = useSyncState()
+  const members = useMembers()
+  const grants = useGrantsFor(account.id)
+  const levels = useMyLevels()
+  const mayShare = canAdministerAccount(levelOn(account.id, levels))
+  const [error, setError] = useState<{ userId: string; message: string } | null>(null)
+
+  const levelFor = (uid: string): GrantLevel =>
+    (grants.find((g) => g.userId === uid)?.level as GrantLevel | undefined) ?? 'none'
+
+  const owners = grants.filter((g) => g.level === 'owner')
+
+  async function change(uid: string, next: GrantLevel) {
+    setError(null)
+    // The server refuses to leave an account with no owner. Saying so here,
+    // against the row that caused it, beats an alert that has lost the context.
+    if (next !== 'owner' && levelFor(uid) === 'owner' && owners.length <= 1) {
+      setError({ userId: uid, message: 'An account must always have an owner. Make somebody else an owner first.' })
+      return
+    }
+    await setAccountLevel(account.id, uid, next, grants.find((g) => g.userId === uid))
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title={`Who can see ${account.name}`}>
+      <div className="space-y-4">
+        {!mayShare && (
+          <p className="text-sm text-ink-3">
+            Only an owner of this account can change who sees it.
+          </p>
+        )}
+        <ul className="divide-y divide-hairline">
+          {members.map((m) => {
+            const level = levelFor(m.userId)
+            return (
+              <li key={m.userId} className="py-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    {m.displayName ?? 'Someone'}
+                    {m.userId === userId && <span className="ml-1.5 text-xs font-normal text-ink-3">you</span>}
+                  </span>
+                  {mayShare ? (
+                    <Select
+                      className="w-40"
+                      value={level}
+                      onChange={(e) => void change(m.userId, e.target.value as GrantLevel)}
+                    >
+                      {LEVELS.map((l) => (
+                        <option key={l} value={l}>
+                          {LEVEL_LABEL[l]}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Chip>{LEVEL_LABEL[level]}</Chip>
+                  )}
+                </div>
+                {error?.userId === m.userId && (
+                  <p className="mt-1.5 text-xs text-critical-text">{error.message}</p>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+
+        {members.length === 1 && (
+          <p className="text-sm text-ink-3">
+            Nobody else is in your household yet. Invite someone from the People section and they will appear here.
+          </p>
+        )}
+
+        <details className="text-sm">
+          <summary className="cursor-pointer text-ink-3 hover:text-ink-2">What these mean</summary>
+          <dl className="mt-2 space-y-2">
+            {LEVELS.map((l) => (
+              <div key={l}>
+                <dt className="text-sm font-medium">{LEVEL_LABEL[l]}</dt>
+                <dd className="text-xs text-ink-3">{LEVEL_HINT[l]}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      </div>
+    </Sheet>
+  )
+}
+
+/**
  * Where should six months of fake spending go?
  *
  * Asking is the whole point. This used to pick `db.accounts.toArray()[0]` —
@@ -483,13 +810,15 @@ function AccountsSection() {
  * every other account picker in the app.
  */
 function DemoDataForm({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { userId } = useSyncState()
   const allAccounts = useAccounts()
-  const accounts = useMemo(() => allAccounts.filter((a) => canUseAccount(a, userId)), [allAccounts, userId])
-  // Default to a shared account rather than a private one: demo data is for
-  // having a look around, and the joint account is the least surprising place
-  // for it to appear.
-  const preferred = accounts.find((a) => a.visibility === 'shared') ?? accounts[0]
+  const levels = useMyLevels()
+  const accounts = useMemo(
+    () => allAccounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
+    [allAccounts, levels],
+  )
+  // Default to one you own outright: demo data is for having a look around, and
+  // an account you control is the least surprising place for it to appear.
+  const preferred = accounts.find((a) => levelOn(a.id, levels) === 'owner') ?? accounts[0]
   const [accountId, setAccountId] = useState<string | undefined>(preferred?.id)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>()
@@ -531,7 +860,7 @@ function DemoDataForm({ open, onClose }: { open: boolean; onClose: () => void })
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
-                {a.visibility !== 'shared' ? ` · ${VISIBILITY_LABEL[a.visibility].toLowerCase()}` : ''}
+                {levelOn(a.id, levels) !== 'owner' ? ` · ${LEVEL_LABEL[levelOn(a.id, levels)].toLowerCase()}` : ''}
               </option>
             ))}
           </Select>
@@ -547,33 +876,33 @@ function DemoDataForm({ open, onClose }: { open: boolean; onClose: () => void })
 
 function AccountForm({ account, open, onClose }: { account?: Account; open: boolean; onClose: () => void }) {
   const { currency } = useApp()
-  const { userId } = useSyncState()
   const [name, setName] = useState(account?.name ?? '')
   const [kind, setKind] = useState<Account['kind']>(account?.kind ?? 'current')
-  const [visibility, setVisibility] = useState<AccountVisibility>(account?.visibility ?? 'shared')
+  const [sharing, setSharing] = useState(false)
   const [opening, setOpening] = useState(
     account?.openingBalanceMinor ? String(account.openingBalanceMinor / 100) : '',
   )
   const [deleting, setDeleting] = useState(false)
+  const levels = useMyLevels()
+  const grants = useGrantsFor(account?.id)
+  const canDelete = !!account && canAdministerAccount(levelOn(account.id, levels))
   const canSave = name.trim().length > 0
 
-  const visOptions: AccountVisibility[] = ['shared', 'balance', 'private']
+  // Everyone with any access, so the row can say "3 people" without opening it.
+  const sharedWith = grants.length
 
   async function save() {
     if (!canSave) return
     const openingMinor = parseAmount(opening) ?? 0
     if (account?.id) {
       await update('accounts', account.id, { name: name.trim(), kind, openingBalanceMinor: openingMinor })
-      // Separate call: changing privacy has server-side consequences (the
-      // household's visibility epoch bumps, and the partner re-pulls).
-      await setAccountVisibility({ ...account, openingBalanceMinor: openingMinor }, visibility, userId)
     } else {
+      // Nothing about sharing is decided here. Creating an account makes you
+      // its owner (a server trigger writes the grant), and who else can see it
+      // is a separate, deliberate step.
       await create('accounts', {
         name: name.trim(),
         kind,
-        visibility,
-        // A non-shared account needs an owner: it is who it is private *to*.
-        ownerId: visibility === 'shared' ? undefined : userId,
         openingBalanceMinor: openingMinor,
         sortOrder: 0,
       })
@@ -615,7 +944,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
       title={account ? 'Edit account' : 'New account'}
       footer={
         <div className="flex gap-2">
-          {account?.id && (
+          {canDelete && (
             <Button variant="danger" size="lg" disabled={deleting} onClick={deleteAccount}>
               {deleting ? 'Deleting…' : 'Delete'}
             </Button>
@@ -643,38 +972,28 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         <Field label={`Opening balance (${currencySymbol(currency)}, optional)`} hint="The balance before the first transaction recorded in Hearth.">
           <TextInput value={opening} onChange={(e) => setOpening(e.target.value)} inputMode="decimal" placeholder="0.00" />
         </Field>
-        <div>
-          <span className="mb-1.5 block text-sm font-medium text-ink-2">Who can see it?</span>
-          <div className="space-y-2">
-            {visOptions.map((o) => (
-              <label
-                key={o}
-                className={`flex cursor-pointer items-start gap-3 rounded-xl px-4 py-3 ring-1 transition ${
-                  visibility === o ? 'bg-accent/8 ring-accent' : 'bg-surface-2 ring-transparent'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="visibility"
-                  checked={visibility === o}
-                  onChange={() => setVisibility(o)}
-                  className="mt-0.5 accent-[var(--accent)]"
-                />
-                <span>
-                  <span className="block text-sm font-medium">{VISIBILITY_LABEL[o]}</span>
-                  <span className="block text-xs text-ink-3">{VISIBILITY_HINT[o]}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          {visibility === 'balance' && (
-            <p className="mt-2 text-xs text-ink-3">
-              A balance is still a number they can watch change, so this hides what you spent it on rather than how
-              much you have.
-            </p>
-          )}
-        </div>
+        {account && (
+          <button
+            type="button"
+            onClick={() => setSharing(true)}
+            className="flex w-full items-center gap-2 rounded-xl bg-surface-2 px-4 py-3 text-left transition-colors hover:bg-surface-2/70"
+          >
+            <span className="flex-1 text-sm font-medium text-ink-2">Who can see it?</span>
+            <span className="text-sm text-ink-3">
+              {sharedWith === 1 ? 'Only you' : `${sharedWith} people`}
+            </span>
+            <ChevronRight size={16} className="text-ink-3" />
+          </button>
+        )}
+        {!account && (
+          <p className="text-sm text-ink-3">
+            It starts as yours alone. Once it exists you can choose who else sees it, and how much.
+          </p>
+        )}
       </div>
+      {account && (
+        <AccountAccessSheet account={account} open={sharing} onClose={() => setSharing(false)} />
+      )}
     </Sheet>
   )
 }
@@ -804,7 +1123,7 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
             <span>
               <span className="block text-sm font-medium">Keep this to myself</span>
               <span className="block text-xs text-ink-3">
-                Your partner won't see it, and it can only be used on your own private accounts.
+                Nobody else sees it, and it can only be used on an account nobody else shares.
               </span>
             </span>
           </label>

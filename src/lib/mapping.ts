@@ -38,8 +38,19 @@ const appName = (k: string) => FROM_DB[k] ?? snakeToCamel(k)
  * name fails loudly at the boundary instead of being posted and dropped.
  */
 const WRITABLE: Record<SyncedTable, readonly string[]> = {
+  // Read-only on the client: membership is a projection of `profiles`, written
+  // by a trigger. An empty allow-list makes patchToDb throw at the boundary
+  // rather than posting something the server would refuse.
+  household_members: [],
   categories: ['id', 'name', 'icon', 'slot', 'kind', 'sortOrder', 'parentId', 'ownerId'],
+  // `visibility` and `ownerId` are deprecated by 07 and pinned inert on the
+  // server. They stay writable for one release so a patch queued by an older
+  // tab still matches a row and drains, instead of dead-lettering; 08 removes
+  // them from here and from the table.
   accounts: ['id', 'name', 'kind', 'visibility', 'ownerId', 'openingBalanceMinor', 'sortOrder'],
+  // Written by upsert_account_grant, so the whole row is the RPC's argument
+  // list — see RPC_TABLES in outbox.ts.
+  account_grants: ['id', 'accountId', 'userId', 'level'],
   goals: ['id', 'name', 'icon', 'slot', 'targetMinor', 'targetDate', 'ownerId', 'accountId', 'sortOrder'],
   bills: ['id', 'name', 'payee', 'amountMinor', 'categoryId', 'accountId', 'freq', 'nextDue', 'active', 'autoPost'],
   // transferId and goalId are set by create_transfer server-side, never posted
@@ -51,7 +62,9 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
 
 /** Columns to request when pulling. Explicit, so adding a server column does not silently change payload size. */
 const READABLE: Record<SyncedTable, readonly string[]> = {
+  household_members: ['id', 'userId', 'displayName', 'role', 'joinedAt', 'updatedAt', 'deletedAt'],
   categories: [...WRITABLE.categories, 'updatedAt', 'deletedAt'],
+  account_grants: [...WRITABLE.account_grants, 'grantedBy', 'updatedAt', 'deletedAt'],
   accounts: [...WRITABLE.accounts, 'createdBy', 'updatedAt', 'deletedAt'],
   goals: [...WRITABLE.goals, 'createdBy', 'updatedAt', 'deletedAt'],
   bills: [...WRITABLE.bills, 'createdBy', 'updatedAt', 'deletedAt'],

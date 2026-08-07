@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./supabase', () => ({ supabase: {}, isConfigured: true }))
 
 const { db } = await import('./db')
+type GrantLevel = import('./db').GrantLevel
 const { seedDemoData, defaultDemoAccount } = await import('./demo')
 const { insertToDb } = await import('./mapping')
 
@@ -89,19 +90,27 @@ describe('seedDemoData', () => {
 })
 
 describe('defaultDemoAccount', () => {
-  it('prefers a shared account over a private one', () => {
-    const shared = account()
-    const priv = account({ id: 'acct-private', visibility: 'private', ownerId: 'me' })
-    expect(defaultDemoAccount([priv, shared], 'me')?.id).toBe('acct-shared')
+  const levels = (entries: [string, GrantLevel][]) => new Map<string, GrantLevel>(entries)
+
+  it('prefers one you own over one you only contribute to', () => {
+    const owned = account()
+    const helping = account({ id: 'acct-helping' })
+    expect(
+      defaultDemoAccount([helping, owned], levels([['acct-helping', 'contribute'], ['acct-shared', 'owner']]))?.id,
+    ).toBe('acct-shared')
   })
 
   it('never picks an account the user cannot record against', () => {
-    const theirs = account({ id: 'acct-theirs', visibility: 'private', ownerId: 'partner' })
-    expect(defaultDemoAccount([theirs], 'me')).toBeUndefined()
+    const theirs = account({ id: 'acct-theirs' })
+    expect(defaultDemoAccount([theirs], levels([['acct-theirs', 'view']]))).toBeUndefined()
   })
 
-  it('falls back to the user’s own account when nothing is shared', () => {
-    const mine = account({ id: 'acct-mine', visibility: 'private', ownerId: 'me' })
-    expect(defaultDemoAccount([mine], 'me')?.id).toBe('acct-mine')
+  it('picks nothing at all when no grant reaches contribute', () => {
+    expect(defaultDemoAccount([account()], levels([]))).toBeUndefined()
+  })
+
+  it('falls back to one you can post to when you own none', () => {
+    const helping = account({ id: 'acct-helping' })
+    expect(defaultDemoAccount([helping], levels([['acct-helping', 'contribute']]))?.id).toBe('acct-helping')
   })
 })

@@ -63,17 +63,23 @@ export function fullName(category: Category, byId: Map<string, Category>): strin
 /**
  * The categories usable when recording against a given account.
  *
- * A personal category is only valid on a non-shared account its owner owns —
- * the database refuses anything else, so the picker must not offer it.
+ * A personal category is only valid on an account nobody else can see — since
+ * migration 07 that means an account whose only grant is its owner's. The
+ * database refuses anything else (`personal_category_guard`), so the picker
+ * must not offer it.
+ *
+ * `grants` is every grant on that account. For an account you own you see them
+ * all, which is the only case where a personal category could apply anyway.
  */
 export function usableOn(
   categories: Category[],
-  account: { visibility: string; ownerId?: string } | undefined,
+  grants: { userId: string }[],
   myUserId: string | undefined,
 ): Category[] {
+  const mineAlone = grants.length === 1 && !!myUserId && grants[0].userId === myUserId
   return categories.filter((c) => {
     if (!c.ownerId) return true
     if (c.ownerId !== myUserId) return false
-    return !!account && account.visibility !== 'shared' && account.ownerId === c.ownerId
+    return mineAlone
   })
 }

@@ -4,8 +4,8 @@ import type { Goal } from '../lib/db'
 import { create, update, remove } from '../lib/data'
 import { goalProgress, transfer } from '../lib/goals'
 import { syncNow } from '../lib/session'
-import { useAccounts, useAllTransactions, useGoals } from '../lib/cache'
-import { canUseAccount } from '../lib/accounts'
+import { useAccounts, useAllTransactions, useGoals, useMyLevels } from '../lib/cache'
+import { canAddTransactions, levelOn } from '../lib/accounts'
 import { fmtFullDate, todayISO } from '../lib/dates'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { slotVar } from '../lib/palette'
@@ -127,7 +127,15 @@ function GoalForm({
   userId?: string
 }) {
   const { currency } = useApp()
-  const accounts = useAccounts()
+  // This picker was never filtered, which made it the one place a goal could be
+  // pointed at an account you cannot record against. There is no call for the
+  // compiler to have caught, so it is written out here deliberately.
+  const allAccounts = useAccounts()
+  const levels = useMyLevels()
+  const accounts = useMemo(
+    () => allAccounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
+    [allAccounts, levels],
+  )
   const [name, setName] = useState(goal?.name ?? '')
   const [icon, setIcon] = useState(goal?.icon ?? 'piggy')
   const [target, setTarget] = useState(goal ? String(goal.targetMinor / 100) : '')
@@ -230,7 +238,7 @@ function GoalForm({
             />
             <span>
               <span className="block text-sm font-medium">Keep this to myself</span>
-              <span className="block text-xs text-ink-3">Your partner won't see this goal at all.</span>
+              <span className="block text-xs text-ink-3">Nobody else in the household sees this goal.</span>
             </span>
           </label>
         )}
@@ -248,9 +256,13 @@ function GoalForm({
  */
 function FundGoal({ goal, open, onClose }: { goal: Goal | null; open: boolean; onClose: () => void }) {
   const { currency, money } = useApp()
-  const { userId, online } = useSyncState()
+  const { online } = useSyncState()
   const accounts = useAccounts()
-  const usable = useMemo(() => accounts.filter((a) => canUseAccount(a, userId)), [accounts, userId])
+  const levels = useMyLevels()
+  const usable = useMemo(
+    () => accounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
+    [accounts, levels],
+  )
 
   const [from, setFrom] = useState<string | undefined>()
   const [amount, setAmount] = useState('')

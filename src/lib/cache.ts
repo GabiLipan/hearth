@@ -1,7 +1,20 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useMemo } from 'react'
-import { db, type Account, type Bill, type Budget, type Category, type Goal, type Rule, type Transaction } from './db'
+import {
+  db,
+  type Account,
+  type AccountGrant,
+  type Bill,
+  type Budget,
+  type Category,
+  type Goal,
+  type GrantLevel,
+  type HouseholdMember,
+  type Rule,
+  type Transaction,
+} from './db'
 import { monthKey } from './dates'
+import { useSyncState } from '../hooks/useSync'
 
 /**
  * How pages read data.
@@ -26,6 +39,63 @@ export function useCategories(): Category[] {
 
 export function useAccounts(): Account[] {
   return useLiveQuery(() => db.accounts.orderBy('sortOrder').toArray(), [], []) ?? []
+}
+
+/** Everyone in the household, including you. */
+export function useMembers(): HouseholdMember[] {
+  return useLiveQuery(() => db.household_members.toArray(), [], []) ?? []
+}
+
+export function useMemberMap(): Map<string, HouseholdMember> {
+  const members = useMembers()
+  return useMemo(() => new Map(members.map((m) => [m.userId, m])), [members])
+}
+
+/**
+ * Am I this household's admin?
+ *
+ * Membership only — it decides who may invite, remove and promote people. It
+ * confers nothing on any account, which is why no permission predicate in
+ * accounts.ts takes it as an argument.
+ */
+export function useIsAdmin(): boolean {
+  const { userId } = useSyncState()
+  const members = useMembers()
+  return !!userId && members.some((m) => m.userId === userId && m.role === 'admin')
+}
+
+/**
+ * What I may do on each account — the client mirror of `my_account_ids()`.
+ *
+ * Keyed by account id, and absent means no access, exactly as on the server.
+ * Every permission decision in the UI starts here; nothing else should be
+ * reading `account_grants` directly.
+ */
+export function useMyLevels(): Map<string, GrantLevel> {
+  const { userId } = useSyncState()
+  const grants = useLiveQuery(
+    () =>
+      userId
+        ? db.account_grants.where('userId').equals(userId).toArray()
+        : Promise.resolve([] as AccountGrant[]),
+    [userId],
+    [] as AccountGrant[],
+  )
+  return useMemo(() => new Map((grants ?? []).map((g) => [g.accountId, g.level as GrantLevel])), [grants])
+}
+
+/** Everyone's access to one account. Only populated for accounts you manage. */
+export function useGrantsFor(accountId?: string): AccountGrant[] {
+  return (
+    useLiveQuery(
+      () =>
+        accountId
+          ? db.account_grants.where('accountId').equals(accountId).toArray()
+          : Promise.resolve([] as AccountGrant[]),
+      [accountId],
+      [] as AccountGrant[],
+    ) ?? []
+  )
 }
 
 /** Every budget, all months. Used for history and the sparklines. */

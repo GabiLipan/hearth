@@ -29,6 +29,10 @@ const FOREIGN_KEYS: Record<SyncedTable, Record<string, SyncedTable>> = {
   rules: { categoryId: 'categories' },
   goals: { accountId: 'accounts' },
   accounts: {},
+  // A grant is meaningless until its account exists.
+  account_grants: { accountId: 'accounts' },
+  // Read-only: the server maintains it from `profiles`.
+  household_members: {},
   // A subcategory depends on its parent existing first.
   categories: { parentId: 'categories' },
 }
@@ -39,7 +43,7 @@ const FOREIGN_KEYS: Record<SyncedTable, Record<string, SyncedTable>> = {
  * name. Their queued payload is always the WHOLE row, since the RPC needs every
  * argument to resolve the conflict — not just what changed.
  */
-const RPC_TABLES: ReadonlySet<SyncedTable> = new Set(['budgets', 'rules'])
+const RPC_TABLES: ReadonlySet<SyncedTable> = new Set(['budgets', 'rules', 'account_grants'])
 
 function refsFor(table: SyncedTable, row: Record<string, unknown>): string[] {
   return Object.entries(FOREIGN_KEYS[table])

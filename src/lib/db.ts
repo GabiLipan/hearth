@@ -132,10 +132,10 @@ export interface Rule {
 }
 
 /**
- * Account visibility, enforced by RLS on the server (see supabase/02-rls.sql):
- *  - 'shared'  — partner sees the account and every transaction on it
- *  - 'balance' — partner sees the account and its total, but no line items
- *  - 'private' — partner sees nothing at all
+ * @deprecated Migration 07 replaced this with per-person grants. The column
+ * still exists and is pinned inert server-side so a write queued by an older
+ * tab still matches a row instead of dead-lettering; migration 08 drops it.
+ * Nothing may read it.
  */
 export type AccountVisibility = 'shared' | 'balance' | 'private'
 
@@ -143,7 +143,9 @@ export interface Account {
   id: string
   name: string
   kind: 'current' | 'credit' | 'savings' | 'cash'
-  visibility: AccountVisibility
+  /** @deprecated 07 — see AccountVisibility. Optional: the server pins it. */
+  visibility?: AccountVisibility
+  /** @deprecated 07 — ownership is an `owner` grant in account_grants. */
   ownerId?: string
   openingBalanceMinor: number
   sortOrder: number
@@ -152,8 +154,56 @@ export interface Account {
 }
 
 /**
- * Balances for accounts whose transactions this device cannot see (a partner's
- * 'balance'-tier account). Read from the server's `account_balances()` function,
+ * What one person may do with one account, lowest to highest.
+ *
+ * Mirrors `public.access_level` in supabase/07-permissions.sql, which is an
+ * ORDERED enum — `level >= 'contribute'` is a native comparison there, and
+ * `atLeast()` in lib/accounts.ts is the same comparison here.
+ *
+ *  - balance    — sees the account and what it holds, not what it was spent on
+ *  - view       — sees everything on it, changes nothing
+ *  - contribute — adds transactions, and edits or removes the ones they added
+ *  - manage     — adds, edits and removes anything on it, but cannot re-share it
+ *  - owner      — all of that, plus deciding who else can see it
+ */
+export type AccessLevel = 'balance' | 'view' | 'contribute' | 'manage' | 'owner'
+
+/**
+ * `none` is never stored — the absence of a grant is what no access means. It
+ * exists so the revoke path has something to send, and so `levelOn()` can
+ * answer for an account you hold nothing on.
+ */
+export type GrantLevel = AccessLevel | 'none'
+
+export type MemberRole = 'member' | 'admin'
+
+/**
+ * Somebody in your household. A projection of `profiles`, maintained by a
+ * trigger server-side, so the client has one syncable table with a tombstone
+ * rather than having to read profiles it may not be allowed to see.
+ */
+export interface HouseholdMember {
+  id: string
+  userId: string
+  displayName?: string
+  role: MemberRole
+  joinedAt: string
+  updatedAt: string
+}
+
+/** One person's access to one account. Written only by RPC. */
+export interface AccountGrant {
+  id: string
+  accountId: string
+  userId: string
+  level: AccessLevel
+  grantedBy?: string
+  updatedAt: string
+}
+
+/**
+ * Balances for accounts whose transactions this device cannot see (one held at
+ * `balance` level). Read from the server's `account_balances()` function,
  * which sums the rows RLS hides from us. For accounts we CAN see in full the
  * balance is computed locally instead, so optimistic edits show up immediately.
  */
@@ -163,14 +213,35 @@ export interface CachedBalance {
   fetchedAt: number
 }
 
-// Parents before children: a full pull applies them in this order, so a
-// transaction is never written before the account it belongs to.
-export const SYNCED_TABLES = ['categories', 'accounts', 'goals', 'bills', 'transactions', 'budgets', 'rules'] as const
+/**
+ * Parents before children: a full pull applies them in this order, so a
+ * transaction is never written before the account it belongs to.
+ *
+ * The two snake_case names are deliberate. A `SyncedTable` value is used
+ * verbatim as the PostgREST table name, the Dexie store name and the
+ * `sync_checksums()` key; mapping.ts converts *columns* between cases, never
+ * table names. `household_members` comes first because a name is needed to
+ * render anything about a person, and `account_grants` after `accounts`
+ * because it points at them.
+ */
+export const SYNCED_TABLES = [
+  'household_members',
+  'categories',
+  'accounts',
+  'account_grants',
+  'goals',
+  'bills',
+  'transactions',
+  'budgets',
+  'rules',
+] as const
 export type SyncedTable = (typeof SYNCED_TABLES)[number]
 
 export interface TableRowMap {
+  household_members: HouseholdMember
   categories: Category
   accounts: Account
+  account_grants: AccountGrant
   goals: Goal
   bills: Bill
   transactions: Transaction
@@ -241,6 +312,8 @@ export const db = new Dexie('hearth') as Dexie & {
   rules: EntityTable<Rule, 'id'>
   accounts: EntityTable<Account, 'id'>
   goals: EntityTable<Goal, 'id'>
+  household_members: EntityTable<HouseholdMember, 'id'>
+  account_grants: EntityTable<AccountGrant, 'id'>
   balances: EntityTable<CachedBalance, 'accountId'>
   outbox: EntityTable<OutboxEntry, 'seq'>
   deadLetters: EntityTable<DeadLetter, 'id'>
@@ -274,6 +347,14 @@ db.version(2).stores({
   goals: 'id, sortOrder, updatedAt',
 })
 
+// v3 adds the two tables migration 07 introduced. `[accountId+userId]` is the
+// lookup the permissions UI does per row; `userId` on its own answers "what may
+// I do here", which every account picker in the app asks.
+db.version(3).stores({
+  household_members: 'id, userId, updatedAt',
+  account_grants: 'id, accountId, userId, [accountId+userId], updatedAt',
+})
+
 export const newId = () => crypto.randomUUID()
 
 export const rowKey = (table: SyncedTable, id: string) => `${table}:${id}`
@@ -296,19 +377,17 @@ export async function delSetting(key: string) {
   await db.meta.delete(key)
 }
 
-/** Wipe every cached row, keeping the outbox and device settings intact. */
+/**
+ * Wipe every cached row, keeping the outbox and device settings intact.
+ *
+ * Derived from SYNCED_TABLES rather than listing the tables by hand. The hand
+ * written version was a standing trap: a table left out of it survives an epoch
+ * bump as stale rows, and nothing type-checks the omission.
+ */
 export async function clearCache() {
-  await db.transaction('rw', [db.transactions, db.categories, db.budgets, db.bills, db.rules, db.accounts, db.goals, db.balances], async () => {
-    await Promise.all([
-      db.transactions.clear(),
-      db.categories.clear(),
-      db.budgets.clear(),
-      db.bills.clear(),
-      db.rules.clear(),
-      db.accounts.clear(),
-      db.goals.clear(),
-      db.balances.clear(),
-    ])
+  const tables = [...SYNCED_TABLES.map((t) => db.table(t)), db.balances]
+  await db.transaction('rw', tables, async () => {
+    await Promise.all(tables.map((t) => t.clear()))
   })
 }
 

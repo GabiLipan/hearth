@@ -1,7 +1,8 @@
 import { useEffect, useState, type ComponentType } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Sparkles, SlidersHorizontal, Check, ChevronUp, ChevronDown, EyeOff, Plus } from 'lucide-react'
 import { getSetting, setSetting } from '../lib/db'
-import { useAccounts, useAllTransactions, useBills, useBudgetsForMonth, useCategories, useRemoteBalances } from '../lib/cache'
+import { useAccounts, useAllTransactions, useBills, useBudgetsForMonth, useCategories, useRemoteBalances, useMyLevels } from '../lib/cache'
 import { thisMonthKey } from '../lib/dates'
 import { defaultDemoAccount, seedDemoData } from '../lib/demo'
 import { useSyncState } from '../hooks/useSync'
@@ -61,6 +62,7 @@ function normaliseLayout(stored: LayoutItem[] | null): LayoutItem[] {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const { userId } = useSyncState()
   const txns = useAllTransactions()
   const categories = useCategories()
@@ -70,6 +72,7 @@ export default function Dashboard() {
   const bills = useBills()
   const accounts = useAccounts()
   const remoteBalances = useRemoteBalances()
+  const levels = useMyLevels()
   const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT)
   const [editing, setEditing] = useState(false)
   const [seeding, setSeeding] = useState(false)
@@ -106,35 +109,48 @@ export default function Dashboard() {
   }
 
   if (txns && txns.length === 0) {
+    // Nothing creates an account for you any more, so the first thing somebody
+    // needs is one. Without this the only action here was "Load demo data",
+    // which is disabled until an account exists — a dead end on a fresh
+    // household, and after erasing everything.
+    const target = defaultDemoAccount(accounts, levels)
     return (
       <Empty
         icon={Sparkles}
         title="Welcome to Hearth"
-        hint="Your shared home for budgets, bills and spending. Add your first transaction with the + button, import a bank statement from the Activity tab — or explore with demo data first."
+        hint={
+          target
+            ? 'Your shared home for budgets, bills and spending. Add your first transaction with the + button, import a bank statement from the Activity tab — or explore with demo data first.'
+            : 'Your shared home for budgets, bills and spending. Start with an account — a current account, a credit card, whatever you actually use — and everything else hangs off that.'
+        }
         action={
-          <Button
-            disabled={seeding || !defaultDemoAccount(accounts, userId)}
-            onClick={async () => {
-              const target = defaultDemoAccount(accounts, userId)
-              if (!target) return
-              setSeeding(true)
-              try {
-                await seedDemoData(target.id)
-              } finally {
-                // Without this the button stays on "Loading…" forever when
-                // seeding fails, with nothing to say what went wrong.
-                setSeeding(false)
-              }
-            }}
-          >
-            <Sparkles size={16} /> {seeding ? 'Loading…' : 'Load demo data'}
-          </Button>
+          target ? (
+            <Button
+              disabled={seeding}
+              onClick={async () => {
+                setSeeding(true)
+                try {
+                  await seedDemoData(target.id)
+                } finally {
+                  // Without this the button stays on "Loading…" forever when
+                  // seeding fails, with nothing to say what went wrong.
+                  setSeeding(false)
+                }
+              }}
+            >
+              <Sparkles size={16} /> {seeding ? 'Loading…' : 'Load demo data'}
+            </Button>
+          ) : (
+            <Button onClick={() => navigate('/settings')}>
+              <Plus size={16} /> Add an account
+            </Button>
+          )
         }
       />
     )
   }
 
-  const data: HomeData = { txns: txns ?? [], categories, budgets, bills, accounts, remoteBalances, userId }
+  const data: HomeData = { txns: txns ?? [], categories, budgets, bills, accounts, remoteBalances, levels, userId }
   const visible = layout.filter((l) => l.on)
   const hidden = layout.filter((l) => !l.on)
   const defOf = (id: string) => WIDGETS.find((w) => w.id === id)!

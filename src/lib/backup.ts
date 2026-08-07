@@ -1,4 +1,4 @@
-import { db, SYNCED_TABLES } from './db'
+import { db, SYNCED_TABLES, type SyncedTable } from './db'
 import { createMany } from './data'
 import { rpc } from './api'
 import { fullPull } from './pull'
@@ -12,10 +12,22 @@ import { fullPull } from './pull'
  * another transplanted its sync state along with the data.
  */
 
+/**
+ * Tables a backup deliberately leaves out.
+ *
+ * Both describe PEOPLE rather than money. A grant names a user id that means
+ * nothing in anybody else's household, and the membership list is a projection
+ * the server maintains — restoring either would at best dead-letter and at
+ * worst hand somebody a stale claim on an account. Restoring a backup gives you
+ * your accounts back; who they are shared with is decided fresh.
+ */
+const NOT_BACKED_UP: readonly SyncedTable[] = ['household_members', 'account_grants']
+const backupTables = () => SYNCED_TABLES.filter((t) => !NOT_BACKED_UP.includes(t))
+
 /** Full-household JSON snapshot. */
 export async function exportJSON(): Promise<string> {
   const dump: Record<string, unknown[]> = {}
-  for (const name of SYNCED_TABLES) {
+  for (const name of backupTables()) {
     dump[name] = await db.table(name).toArray()
   }
   return JSON.stringify({ app: 'hearth', version: 2, exportedAt: new Date().toISOString(), data: dump }, null, 2)
@@ -52,7 +64,7 @@ export async function importJSON(text: string) {
   // what stops the two drifting apart again — and SYNCED_TABLES is already
   // ordered parents-before-children, so a transaction is never queued ahead of
   // the account it belongs to.
-  for (const name of SYNCED_TABLES) {
+  for (const name of backupTables()) {
     const rows = parsed.data[name]
     if (!Array.isArray(rows) || !rows.length) continue
     await createMany(name, name === 'budgets' ? rows.map(withMonth) : rows)

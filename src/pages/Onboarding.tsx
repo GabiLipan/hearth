@@ -23,7 +23,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <BrandMark size={44} />
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Hearth</h1>
-            <p className="text-sm text-ink-3">Money, kept between the two of you.</p>
+            <p className="text-sm text-ink-3">Money, kept between the people you choose.</p>
           </div>
         </div>
         {children}
@@ -130,7 +130,7 @@ function ChooseHousehold() {
             <Users size={16} /> Create a household
           </Button>
           <p className="text-xs text-ink-3">
-            You'll get an invite code to share with your partner whenever you're ready.
+            You'll get an invite code to share with anyone whenever you're ready.
           </p>
         </div>
 
@@ -139,7 +139,7 @@ function ChooseHousehold() {
         </div>
 
         <div className="space-y-2">
-          <p className="text-sm font-medium">Joining your partner?</p>
+          <p className="text-sm font-medium">Been given a code?</p>
           <div className="flex gap-2">
             <TextInput
               value={code}
