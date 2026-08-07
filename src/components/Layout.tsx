@@ -217,14 +217,18 @@ const TAB_MS = 460
 /** Damped: overshoots by a few per cent and settles, so the pill lands with weight. */
 const TAB_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
 /**
- * How far the pill is drawn outside the tab it belongs to.
+ * At most how far the pill is drawn outside the tab it belongs to.
  *
- * The room around the icon and its label is drawn, not laid out: the tabs are
- * spread across the bar, so padding them enough for the pill to breathe would
- * push the whole row wider rather than fatten the pill. Painting it a few
- * pixels larger than its tab costs the layout nothing.
+ * The room inside the pill is drawn, not laid out. Padding the tabs themselves
+ * pads all six, and with the row spread edge to edge that spends the width
+ * budget without fattening the pill — the free space just moves into the gaps.
+ * Painting the pill larger than its tab costs the layout nothing, and takes the
+ * padding out of the gap either side, which is the space going spare anyway.
+ *
+ * A maximum rather than a promise: it is clamped to the gap actually available,
+ * so a narrow phone with six tabs and no room to give quietly gets none.
  */
-const PILL_BLEED = 5
+const PILL_BLEED = 9
 
 /**
  * The mobile tab bar: icons alone, and the current one opened into a pill with
@@ -290,10 +294,17 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
       el.style.width = goes[i] ? 'auto' : '0px'
     })
 
-    // 4. Now the geometry means something.
+    // 4. Now the geometry means something. The pill takes its padding out of
+    //    the gap to its neighbours, so it can only have what the gap has —
+    //    keeping a couple of pixels back so the two never quite touch.
+    const tabs = [...wrap.querySelectorAll<HTMLElement>('[data-tab]')]
+    const gap = Math.min(
+      ...tabs.slice(1).map((el, i) => el.offsetLeft - (tabs[i].offsetLeft + tabs[i].offsetWidth)),
+    )
+    const bleed = Math.max(0, Math.min(PILL_BLEED, gap - 2))
     const to = { left: active.offsetLeft, width: active.offsetWidth }
-    pill.style.left = `${to.left - PILL_BLEED}px`
-    pill.style.width = `${to.width + PILL_BLEED * 2}px`
+    pill.style.left = `${to.left - bleed}px`
+    pill.style.width = `${to.width + bleed * 2}px`
     pill.style.opacity = '1'
     placed.current = true
 
@@ -310,7 +321,7 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
     pill.animate(
       [
         { left: `${from.left}px`, width: `${from.width}px` },
-        { left: `${to.left - PILL_BLEED}px`, width: `${to.width + PILL_BLEED * 2}px` },
+        { left: `${to.left - bleed}px`, width: `${to.width + bleed * 2}px` },
       ],
       { duration: TAB_MS, easing: TAB_SPRING },
     )
@@ -329,7 +340,11 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
       if (pillRef.current?.getAnimations().length) return
       place(false)
     })
+    // The tabs as well as the bar: a font arriving late changes how wide they
+    // are without changing the bar at all, and the pill would be left behind
+    // pointing at where the tab used to be.
     observer.observe(wrap)
+    wrap.querySelectorAll('[data-tab]').forEach((el) => observer.observe(el))
     return () => observer.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -348,7 +363,11 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
         "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-32 after:bg-surface/90 after:content-['']",
       )}
     >
-      <div ref={wrapRef} className="relative flex items-center justify-between px-2 py-1.5">
+      {/* The padding here has to cover the pill's bleed as well as the tab, or
+          the first and last pills sit closer to the edge than the icons did.
+          Narrower below 360px, where six tabs and a label need the width more
+          than the margin does. */}
+      <div ref={wrapRef} className="relative flex items-center justify-between px-3 py-1.5 min-[360px]:px-5">
         <span
           ref={pillRef}
           aria-hidden
