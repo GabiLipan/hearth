@@ -223,13 +223,11 @@ body {
 .animate-page-back { animation: page-back 0.26s var(--ease-out-soft); }
 .animate-tab { animation: tab-pop 0.32s var(--ease-out-soft); }
 
-/* A page slides in from off to one side, which would otherwise widen the
-   document for the length of the animation and flash a horizontal scrollbar.
-   `clip` rather than `hidden`: it stops the scroll without making <html> a
-   scroll container, which would break every `position: sticky` header. */
-html {
-  overflow-x: clip;
-}
+/* The sideways travel of a page change is contained by `main`, not by <html>.
+   Any overflow on the root element propagates to the viewport, and on iOS that
+   detaches `position: fixed` from the visual viewport: the bottom tab bar stops
+   tracking the screen, gets left behind by a taller page, and only snaps back
+   when you scroll. See the note on `main` in Layout.tsx. */
 
 /* Reduced motion keeps the change of state legible — things still appear and
    disappear — but nothing travels or scales. */

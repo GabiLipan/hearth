@@ -169,7 +169,13 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* Content — fills every pixel the sidebar leaves, at any viewport width.
           Pages decide their own column counts from there. */}
-      <main className="w-full min-w-0 flex-1 px-4 pb-32 pt-4 md:px-5 md:pb-8 md:pt-4 xl:px-6">
+      {/* `max-md:overflow-x-clip` catches the sideways travel of a page change.
+          On a phone this element is exactly the width of the viewport, so it
+          clips where the viewport would have — and unlike the same rule on
+          <html>, it does not propagate to the viewport and take the fixed tab
+          bar's positioning with it. Desktop needs no clip: its page padding is
+          wider than the travel, and nothing there is full-bleed. */}
+      <main className="w-full min-w-0 flex-1 px-4 pb-32 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-4 xl:px-6">
         {/* Desktop page title. Mobile gets the same title in its top bar. */}
         <h1 className="mb-3 hidden text-xl font-bold tracking-tight md:block">{title}</h1>
         {/* Keyed on the path so the animation restarts on every page change:

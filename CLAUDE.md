@@ -210,6 +210,13 @@ the single place a level comes from.
 - **A sticky table column must be opaque.** `table.pinned` paints `--surface`,
   and its hover state is `--row-hover` rather than `surface-2/50`, because at
   50% alpha the columns scrolling underneath are readable straight through it.
+- **Never set `overflow` on `<html>` or `<body>`.** Overflow on the root
+  propagates to the viewport, and on iOS that detaches `position: fixed` from
+  the visual viewport: the bottom tab bar stopped tracking the screen, sat
+  wrong on a short page, was left behind by a taller one, and only snapped back
+  once you scrolled. `overflow-x: clip` was there to contain the sideways travel
+  of a page change; it lives on `main` instead, mobile only, where the element
+  is exactly the width of the viewport.
 - **iOS keeps painting the page behind the keyboard.** `visualViewport` shrinks
   but the layout viewport does not, so a sheet sized to the visual viewport ends
   at the keyboard's top edge with the dimmed page showing through beneath it —
