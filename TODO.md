@@ -4,9 +4,11 @@ The plan for reshaping Hearth around how we actually move money: salaries land i
 private accounts, most of each salary moves to the joint account, the household
 spends from there, and some personal spending stays behind.
 
-**How to read this.** `[x]` is done and on `main`. `[ ]` is not started. Anything
-marked **decision** is waiting on us, not on code. Phases are in build order —
-each one is useful on its own, and later phases assume earlier ones.
+**How to read this.** Everything still to do is at the top, grouped by what it is
+rather than by when it was thought of; what has shipped is a one-line log at the
+bottom. Anything marked **decision** is waiting on us, not on code. The
+reasoning behind a shipped item lives in its commit message, not here — this
+file is a plan, and a plan made mostly of finished work stops being read.
 
 ---
 
@@ -43,172 +45,121 @@ Two consequences worth remembering:
 
 ---
 
-## Phase 1 — The foundation
+# Still to do
 
-- [x] `lib/books.ts` — classify accounts into household / mine / someone else's
-- [x] Classify every transaction into a flow: contribution, household spend,
-      personal spend, withdrawal, internal, external income
-- [x] Unit tests for classification, including the payday case and the
-      partner-leg-invisible case
-- [x] Book-aware aggregates (`bookTotals`, `bookSeries`) alongside the existing ones
-- [x] `useBook()` — the selected book, device-local like the theme
-- [x] `BookSwitcher` — `Our household · Mine · Everything`
-- [x] Wire Reports to the switcher
-- [x] Wire Home to the switcher
-- [x] Wire Budgets to the switcher
+## Transfers, and what the app cannot see
 
-## Phase 2 — Budgets, bills and goals per book
+The book model is right whenever a transfer is linked. Everything here is about
+the gap before that happens, or where linking is not possible at all.
 
-- [x] Household budgets measure joint-account spending only, so both our screens
-      agree on the same budget
-- [x] Personal budgets measure my private accounts only — they used to filter on
-      who *recorded* the transaction, which is a different question and got both
-      cases wrong
-- [x] Bills grouped by book — household bills from joint, personal subscriptions
-      from mine. A bill belongs to the account it leaves, so nothing needed
-      configuring; the monthly total is now what *that* book costs to run,
-      rather than rent and a music subscription added together. Under
-      `Everything` the list is split under headings instead of filtered
-- [x] Goals marked household or personal, and shown in the matching book. The
-      book comes off the goal's own `owner_id`, not off the account holding the
-      money — a saving pot is an intention, and our house deposit sitting in an
-      account only one of us is on is still ours
-- [x] **Migration 10** — `link_transfer` now takes a goal, and
-      `set_transfer_goal` tags one afterwards, which is the case that actually
-      matters: the reviewer pairs cross-book transfers on its own, so by the
-      time anybody looks at the row it is already linked. `unlink_transfer`
-      releases the goal too. **Apply `supabase/10-goal-transfers.sql` by hand in
-      the SQL editor** — until then the goal picker on a transfer fails
+- [ ] Let the person who CAN see the far leg be told about it. `lib/unexplained.ts`
+      names the blind spot on my screen; the other half is my device telling
+      theirs "there is an arrival here waiting for you to link it", which needs
+      somewhere shared to put the note
+- [ ] **Recurring transfer routes** — learn "£2,000, my private → joint,
+      monthly" the way a bill is learned
+- [ ] **A household bill paid from a personal card** — a per-transaction "this
+      was household spending, I just paid for it" flag
+- [ ] **Reimbursements between us**
+- [ ] **Explicit per-account book override**, for when derivation from grants is
+      wrong. Needs a migration
 
-## Phase 3 — Transfers under book accounting
+## Reporting and visuals
 
-- [x] Auto-link cross-book pairs even when row-ambiguous — if both readings land
-      in the same book every number is identical, so payday resolves itself.
-      Only in one direction: one leg out matching two arrivals is safe, two legs
-      out matching one arrival is not (the leftover would become spending)
-- [x] Label a cross-book pair as money into the household rather than as a
-      generic transfer
-- [ ] Handle joint → private properly as a withdrawal, not household spending
-- [ ] Recurring transfer routes — learn "£2,000, my private → joint, monthly"
-      the way a bill is learned
-- [ ] Explain an incoming leg with no visible partner: "this looks like a
-      transfer only <partner> can confirm", instead of silently counting it
+### New views — *mock these side by side before building any of them*
 
-## Phase 4 — Reporting and visuals
-
-### Drill-down and navigation
-- [x] Drill into a category's **subcategories** from the donut or the table,
-      with a breadcrumb back out (Reports; Home still to do)
-- [x] Click through from any slice to Activity, filtered to that category,
-      month and book. Activity gained the book switcher every other page has,
-      plus a month filter it otherwise never uses — shown as a banner with one
-      tap out of it, because a filter that strong has to be visible or the page
-      just looks like a history that stops
-- [ ] Custom date range, not just whole months
-- [ ] A 12-month / year view with an annual total
-
-### New views
 - [ ] **Household waterfall** — contributions in → spending → to savings → left
       in current, as one figure per step
-- [ ] **Personal stacked bar** — `contributed | personal spend | left over` = salary,
-      one bar per month
-- [x] **Who contributed what** — the split between us, newly possible because
-      both contributions are visible in the joint account. Attributed from the
-      far leg, never from `created_by` (which is whoever did the importing)
+- [ ] **Personal stacked bar** — `contributed | personal spend | left over` =
+      salary, one bar per month
 - [ ] **Fixed vs variable** — tracked bills against everything else
 - [ ] **Savings rate** — percentage put away, and its trend
 - [ ] **Top payees** — where the money actually goes, under the category level
 - [ ] **Category heatmap** — months across, categories down, for spotting drift
 - [ ] **Pace line** — spend-to-date against the same point last month
 
-### Making a part-finished month readable
-Mostly solved by the 25th cut-off above: August now shows July's end-of-month
-contribution from the 1st, rather than nothing until payday.
+### Sharpening what is there
 
-- [x] **Show the joint balance beside the figures.** `bookBalances` winds the
-      book's accounts back to the 1st. It returns nothing rather than a guess
-      when any account in the book is one this device may only see the TOTAL
-      of — no line items means no way to wind it back, and quietly dropping
-      that account would make "start" and "now" measure different sets
-- [x] **Count a contribution towards the month it is FOR, not the month it
-      landed** — cut-off is the 25th, applied to both legs so my book and the
-      household's agree about when it happened
-- [x] Dim or annotate the current month as incomplete, everywhere it is compared
-      against finished months — the bars are drawn at 45% with a note saying
-      why, the month-by-month row is marked "so far", and the CSV carries a
-      completeness column
-
-### Sharpening what's there
-- [x] Fix `monthlySeries` — the dead `else if`/`else` pair meant *any* positive
-      amount counted as income, including refunds and unlinked transfer legs
 - [ ] "Net each month" only claims to be saving where that is actually true
 - [ ] Month-on-month delta per category — "groceries £120 above typical"
 - [ ] Same month last year, where there is a year of history
-- [x] Export the current report as CSV — one button per table, because the page
-      shows two and a single file holding both is readable as neither
+- [ ] Custom date range, not just whole months
+- [ ] A 12-month / year view with an annual total
+- [ ] Drill into subcategories from **Home** as well as Reports
 
-## Phase 5 — Edges the model gets wrong
+## Everyday screens
 
-- [x] Warn before removing your OWN access to an account — legal whenever
-      somebody else owns it, but the account vanishes from your app and only the
-      remaining owner can give it back
-- [x] `dev-repair-accounts.sql` — report every account's real state past RLS,
-      and hand one back to somebody
-- [ ] Productise the above: a household admin should be able to reclaim an
-      ownerless account from Settings, without the SQL editor
-- [x] `supabase/dev-reset-data.sql` — clear test data, keep users and household
-- [ ] Deleting an account is not obviously undoable — `delete_account` sets
-      `deleted_at` and it vanishes for everybody, with no bin to recover from
-
-- [ ] A household bill paid from a personal card — a per-transaction "this was
-      household spending, I just paid for it" flag
-- [ ] Explicit per-account book override, for when derivation from grants is
-      wrong (needs a migration)
-- [ ] Reimbursements between us
-- [ ] Multi-currency for Wise / Revolut — the app is single-currency today and
-      any foreign amount is silently wrong. Out of scope, recorded so it is not
-      forgotten
-
-## Phase 6 — Activity and categorising, as everyday screens
-
-The four below are about the screens we touch most often. Activity is where every
-imported row is read and fixed, so it is the one place worth making fast.
-
-- [x] **Category picker shows categories first, subcategories on expand.** It
-      was one flat list of every category and subcategory together. Now a grid
-      of the parents, and tapping one opens its children in a drawer beneath the
-      whole row — the old iPhone folder. The tap also selects the parent, so the
-      child is one step further rather than a precondition
-- [x] **Show category *and* subcategory in Activity** — the desktop table reads
-      "Groceries · Supermarket" with the parent dimmed, the phone rows use
-      `fullName`. The filter chips are top-level only now, and a subcategory
-      counts towards its parent, the way budgets already worked
-- [x] **Filter Activity by account** — one, several or all. "All" is the absence
-      of a set rather than every id ticked, so an account shared with you
-      tomorrow appears instead of being excluded by a set written today
-- [x] **Activity is one continuous list, newest first**, cut into months, with
-      older rows rendering as you reach them and each heading carrying that
-      month's total. `Jump to` names the month you are in and offers any month
-      that has rows
-
-Still open from the same pass:
-
-- [ ] A month heading that sticks to the top while you scroll its rows. Wants
-      care: `main` carries `overflow-x: clip` on mobile and the header above it
-      is already sticky
+- [ ] A month heading in Activity that sticks to the top while you scroll its
+      rows. Wants care: `main` carries `overflow-x: clip` on mobile and the
+      header above it is already sticky
 - [ ] Activity's search runs inside the book, so a payee in the other book
       returns nothing. The empty state says so, but a "search everything
-      instead" escape from that state would be better than making you find the
-      switcher
+      instead" escape from that state would beat making you find the switcher
 
-## Phase 7 — Carried over from the last round
+## Safety nets
 
-- [x] Bill reconciliation only looks forward from `nextDue`, so a year of history
-      imported after a bill was created is never offered — it now walks both
-      ways, stopping backwards at the oldest payment there is to match. Safe
-      because a settled occurrence's payment carries `bill_id` and so is not a
-      candidate
-- [ ] Unlinking a transfer leaves both legs uncategorised, and the old categories
-      are not recoverable
-- [ ] `importJSON` preserves `ownerId`, so a backup restored by the other person
-      dead-letters rows RLS refuses
+- [ ] **Deleting an account is not obviously undoable** — `delete_account` sets
+      `deleted_at` and it vanishes for everybody, with no bin to recover from
+- [ ] **Reclaim an ownerless account from Settings**, without the SQL editor.
+      `dev-repair-accounts.sql` already does it by hand
+- [ ] **Unlinking a transfer leaves both legs uncategorised**, and the old
+      categories are not recoverable
+- [ ] **`importJSON` preserves `ownerId`**, so a backup restored by the other
+      person dead-letters rows RLS refuses
+
+## Recorded so it is not forgotten
+
+- [ ] **Multi-currency** for Wise / Revolut. The app is single-currency today and
+      any foreign amount is silently wrong. Out of scope for now
+
+---
+
+# Shipped
+
+**The foundation.** `lib/books.ts` classifying accounts into household / mine /
+someone else's, and every transaction into a flow; book-aware aggregates
+(`bookTotals`, `bookSeries`); `useBook()` and the `BookSwitcher`, wired through
+Home, Reports and Budgets; unit tests including the payday case and the
+partner-leg-invisible case.
+
+**Budgets, bills and goals per book.** Household budgets measure joint-account
+spending, personal ones measure my private accounts — they used to filter on who
+*recorded* a row, which got both cases wrong. Bills belong to the account they
+leave, so the monthly total is what that book costs to run; under `Everything`
+the list splits under headings. Goals take their book from their own `owner_id`.
+
+**Migration 10** — a transfer that already exists can fund a goal.
+`link_transfer` takes one, `set_transfer_goal` tags one afterwards (the case that
+matters, since cross-book pairs link themselves), and `unlink_transfer` releases
+it. `may_use_goal()` states the predicate once. Applied.
+
+**Transfers.** Cross-book pairs auto-link even when row-ambiguous, in the one
+direction that is safe. A cross-book pair reads as money into the household
+rather than as a generic transfer.
+
+**Reporting.** Drill into a category's subcategories from the donut or the table.
+Click any slice through to Activity, filtered to that category, month and book.
+Who contributed what, attributed from the far leg rather than from `created_by`.
+The part-finished month says so everywhere — dimmed bars, a "so far" row, and the
+book's balance at the 1st beside the figures. Both tables export as CSV.
+`monthlySeries`' dead branch fixed, which had been counting every refund as
+income.
+
+**Activity and categorising.** The category picker shows parents only and opens
+subcategories in a drawer under the row. Rows show both halves of the category.
+Filter by one account, several or all. One continuous list, newest first, cut
+into months, with a jump-to-month.
+
+**Legs with no visible partner.** `lib/unexplained.ts` finds the rows in the
+joint accounts that read as movements of money and that nothing has paired —
+money out counted as household spending, money in counted as household income —
+and Reports says so under the figures, with the row marked in Activity. It reads
+the words the bank used and nothing else: no amount heuristic, and a category is
+taken as the answer. Nothing is reclassified, because guessing here would make
+the figures wrong in a way nobody could see.
+
+**Bills.** Reconciliation walks both ways from `nextDue`, so a year of history
+imported after a bill was created is offered rather than ignored.
+
+**Edges.** A warning before removing your own access to an account.
+`dev-repair-accounts.sql` and `dev-reset-data.sql`.

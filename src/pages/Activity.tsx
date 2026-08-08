@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X } from 'lucide-react'
+import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight } from 'lucide-react'
 import type { Transaction } from '../lib/db'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
 import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
 import { accountsInBook, BOOK_LABEL, type BookId } from '../lib/books'
+import { looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel } from '../lib/categories'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
@@ -353,9 +354,12 @@ export default function Activity() {
                                   <CategoryDot category={cat} size={34} />
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate font-medium">{t.payee}</p>
-                                    <p className="truncate text-sm text-ink-3">
-                                      {cat ? fullName(cat, catMap) : 'Uncategorised'}
-                                      {t.note ? ` · ${t.note}` : ''}
+                                    <p className="flex items-center gap-1 truncate text-sm text-ink-3">
+                                      {looksLikeTransfer(t) && <MaybeTransfer />}
+                                      <span className="truncate">
+                                        {cat ? fullName(cat, catMap) : 'Uncategorised'}
+                                        {t.note ? ` · ${t.note}` : ''}
+                                      </span>
                                     </p>
                                   </div>
                                   <span className={cx('font-semibold tabular', t.amountMinor > 0 && 'text-good-text')}>
@@ -415,6 +419,7 @@ export default function Activity() {
                           {/* Note rides on the same line as the payee — a second
                               line would make row heights uneven and harder to scan. */}
                           <td className={cx(table.cell, 'max-w-0 truncate pr-3')}>
+                            {looksLikeTransfer(t) && <MaybeTransfer />}
                             <span className="font-medium">{t.payee}</span>
                             {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
                           </td>
@@ -486,6 +491,27 @@ const headings = () =>
   [...document.querySelectorAll<HTMLElement>('[data-month]')].filter((el) => el.offsetParent !== null)
 
 const headingFor = (month: string) => headings().find((el) => el.dataset.month === month)
+
+/**
+ * A row the statement calls a movement of money, that nothing has paired.
+ *
+ * Deliberately a mark rather than a claim. `looksLikeTransfer` reads the words
+ * the bank used and nothing else, so this says "worth a look", and the totals
+ * go on counting the row exactly as they did — see `lib/unexplained.ts` for why
+ * guessing here would be the worse failure. Categorising it, or pairing it with
+ * its other half, both make the mark go away.
+ */
+function MaybeTransfer() {
+  return (
+    <span
+      title="This reads like money moved between accounts, and nothing is paired with it. If the other side is in an account you cannot see, only the person who holds it can confirm it."
+      className="mr-1.5 inline-flex shrink-0 items-center rounded-full bg-warning/20 px-1 py-0.5 align-middle text-ink-2"
+      aria-label="Possibly a transfer"
+    >
+      <ArrowLeftRight size={11} />
+    </span>
+  )
+}
 
 /** One month's rows, cut into days — the phone layout's second level. */
 function byDay(items: Transaction[]): [string, Transaction[]][] {

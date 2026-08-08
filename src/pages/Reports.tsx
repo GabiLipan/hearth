@@ -14,6 +14,7 @@ import {
 } from '../lib/cache'
 import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
 import { csvAmount, downloadCSV, toCSV } from '../lib/csv'
+import { unexplainedLegs, unexplainedTotals } from '../lib/unexplained'
 import { useSyncState } from '../hooks/useSync'
 import { nameOf } from '../components/PersonDot'
 import { thisMonthKey, monthLabel } from '../lib/dates'
@@ -100,6 +101,19 @@ export default function Reports() {
     // it is derived from, and `accounts` is one of them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [accounts, txns, book, books, month],
+  )
+
+  /**
+   * Money that crossed between our books that only the other person can link.
+   *
+   * Household book only, because that is the only place a leg can have an
+   * invisible partner. Nothing here changes a figure — it says which part of a
+   * figure is standing in for something the app cannot see, which is the
+   * honest version of a number it cannot get right on its own.
+   */
+  const unexplained = useMemo(
+    () => unexplainedTotals(unexplainedLegs(txns ?? [], flows, books, month)),
+    [txns, flows, books, month],
   )
 
   const words = BOOK_WORDS[book]
@@ -240,6 +254,42 @@ export default function Reports() {
           <p className="mt-1.5 text-xs text-ink-3">
             {monthLabel(month)} is not over, so these are part of a month.
           </p>
+        )}
+
+        {/* The blind spot in the model, said out loud. A leg whose partner is
+            in an account this device is not on cannot be linked from here, so
+            until they link it the figures above are counting a movement of
+            money as spending or as income. */}
+        {book === 'household' && (unexplained.outCount > 0 || unexplained.inCount > 0) && (
+          <div className="mt-3 rounded-xl bg-warning/12 px-3 py-2.5">
+            <p className="text-xs text-ink-2">
+              {unexplained.outCount > 0 && (
+                <>
+                  <span className="font-medium tabular">{money(unexplained.outMinor)}</span> of that spending
+                  looks like money moved to a private account rather than spent
+                  {unexplained.inCount > 0 && ', and '}
+                </>
+              )}
+              {unexplained.inCount > 0 && (
+                <>
+                  <span className="font-medium tabular">{money(unexplained.inMinor)}</span> of what came in
+                  looks like a contribution nobody has linked
+                </>
+              )}
+              .{' '}
+              <span className="text-ink-3">
+                {partner
+                  ? `Only ${partner} can confirm the far side, from their own device.`
+                  : 'Only the person whose account is on the other side can confirm it.'}
+              </span>{' '}
+              <button
+                onClick={() => seeTransactions()}
+                className="underline underline-offset-2 hover:text-ink"
+              >
+                See {unexplained.outCount + unexplained.inCount === 1 ? 'it' : 'them'}
+              </button>
+            </p>
+          </div>
         )}
 
         {book === 'household' && totals.contributions > 0 && (

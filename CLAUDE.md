@@ -315,6 +315,15 @@ the single place a level comes from.
   quietly. `applyCategory` therefore takes a `canEdit` predicate with no default
   and reports what it skipped, so the screen can say "18 updated, 3 are Sam's"
   rather than silently doing less than the button promised.
+- **A leg whose partner is invisible is a guess nobody may make.** My partner's
+  contribution has its far leg in an account I am not on, so until they link it
+  my screen counts money out of the joint account as household spending and
+  money in as household income. `lib/unexplained.ts` finds those rows — from the
+  words the bank used, never from the amount, and never overriding a category
+  somebody has set — and the screens say a sentence about them. It reclassifies
+  nothing: quietly moving money out of "spending" on the strength of the word
+  "TFR" would make the figures wrong in a way nobody could see, which is worse
+  than being visibly approximate.
 - **Transfer pairing is the one matcher with no tolerance.** Every other
   comparison in the app is fuzzy — `payeeSimilar`, the bill amount window, the
   duplicate check. `findTransferCandidates` requires `out === -in` exactly, and
