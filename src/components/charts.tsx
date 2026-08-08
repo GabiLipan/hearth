@@ -174,7 +174,14 @@ export function NetLine({ data, height = 220 }: { data: MonthPoint[]; height?: n
             <ChartTip
               active={active}
               label={String(label ?? '')}
-              rows={(payload ?? []).map((p) => ({ name: 'Net', value: Number(p.value), color: c.series[4] }))}
+              // A negative month is not a small amount of saving, it is
+              // spending more than came in — and calling both of them "net"
+              // is how a chart ends up claiming credit for a bad month.
+              rows={(payload ?? []).map((p) => ({
+                name: Number(p.value) < 0 ? 'Overspent by' : 'Kept',
+                value: Math.abs(Number(p.value)),
+                color: Number(p.value) < 0 ? c.critical : c.series[4],
+              }))}
             />
           )}
         />

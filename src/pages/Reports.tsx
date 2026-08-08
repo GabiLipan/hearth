@@ -17,7 +17,7 @@ import { csvAmount, downloadCSV, toCSV } from '../lib/csv'
 import { unexplainedLegs, unexplainedTotals } from '../lib/unexplained'
 import { useSyncState } from '../hooks/useSync'
 import { nameOf } from '../components/PersonDot'
-import { thisMonthKey, monthLabel } from '../lib/dates'
+import { thisMonthKey, monthLabel, shiftMonth } from '../lib/dates'
 import { OTHER_SLICE_ID } from '../lib/stats'
 import {
   bookBalances,
@@ -125,6 +125,23 @@ export default function Reports() {
     () => sumBookTotals(inView.map((m) => bookTotals(txns ?? [], flows, book, m, books))),
     [txns, flows, book, inView, books],
   )
+
+  /**
+   * The same period a year earlier.
+   *
+   * The comparison a month-on-month figure cannot make: December always costs
+   * more than November, and knowing that this December cost more than LAST
+   * December is the version of that which means something. Undefined where
+   * there was no spending to compare against, so a household with six months
+   * of history is told nothing rather than that everything has doubled.
+   */
+  const lastYear = useMemo(() => {
+    const before = sumBookTotals(
+      inView.map((m) => bookTotals(txns ?? [], flows, book, shiftMonth(m, -12), books)),
+    )
+    if (before.spend === 0) return undefined
+    return { spendMinor: before.spend, deltaMinor: totals.spend - before.spend }
+  }, [txns, flows, book, inView, books, totals.spend])
 
   /**
    * The months the range covers, shared by every series below so they all line
@@ -380,6 +397,19 @@ export default function Reports() {
           </p>
         )}
 
+        {/* Only where there is a real figure behind it. A tenth either way is
+            not a change worth a sentence, and saying so anyway trains people to
+            ignore the line. */}
+        {lastYear && Math.abs(lastYear.deltaMinor) >= Math.max(lastYear.spendMinor * 0.1, 1000) && (
+          <p className="mt-1.5 text-xs text-ink-2">
+            <span className={lastYear.deltaMinor > 0 ? 'font-medium text-critical-text' : 'font-medium text-good-text'}>
+              {money(Math.abs(lastYear.deltaMinor))} {lastYear.deltaMinor > 0 ? 'more' : 'less'}
+            </span>{' '}
+            than {period === 'year' ? Number(year) - 1 : monthLabel(shiftMonth(month, -12))}, when{' '}
+            {book === 'mine' ? 'you spent' : 'the household spent'} {money(lastYear.spendMinor)}.
+          </p>
+        )}
+
         {/* The blind spot in the model, said out loud. A leg whose partner is
             in an account this device is not on cannot be linked from here, so
             until they link it the figures above are counting a movement of
@@ -608,8 +638,11 @@ export default function Reports() {
               <IncomeSpendBars data={series} />
             </Card>
             <Card className="p-5 md:p-4 xl:col-span-2">
+              {/* Not "what we saved": the series contains months that went the
+                  other way, and a title asserting saving over a line that dips
+                  below zero is the chart claiming credit for a bad month. */}
               <h3 className="mb-1 font-semibold md:text-sm">
-                {book === 'household' ? 'What we saved each month' : `${words.net} each month`}
+                {book === 'household' ? 'Kept each month' : `${words.net} each month`}
               </h3>
               <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">{words.netHint}</p>
               <NetLine data={series} />

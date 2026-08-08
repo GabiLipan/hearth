@@ -147,6 +147,16 @@ body {
   padding-top: env(safe-area-inset-top);
 }
 
+/* Recharts positions its tooltip inside the chart container and sets no
+   z-index on it, so anything absolutely positioned AFTER the chart in DOM
+   order paints over the top — which is exactly what the donut's centre figure
+   did, sitting on the tooltip for whichever slice you were pointing at. One
+   rule here rather than a fix per chart: any chart that grows an overlay later
+   would hit the same thing. */
+.recharts-tooltip-wrapper {
+  z-index: 20;
+}
+
 /* ---------- Motion ----------
  * One decelerating curve for everything that arrives, its mirror for everything
  * that leaves, and durations short enough that a tab tapped twice never feels

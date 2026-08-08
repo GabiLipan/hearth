@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight } from 'lucide-react'
+import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, Layers } from 'lucide-react'
 import type { Transaction } from '../lib/db'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
 import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
@@ -325,9 +325,21 @@ export default function Activity() {
           icon={Receipt}
           title={searching ? 'Nothing matches your search' : 'No transactions here'}
           hint={
-            searching || catFilter || accountFilter || monthFilter || book !== 'all'
-              ? 'Try widening the filters above, or switching to Everything.'
-              : 'Add one with the + button, or import a bank statement CSV.'
+            searching && book !== 'all'
+              ? `This searched ${BOOK_LABEL[book].toLowerCase()} only.`
+              : searching || catFilter || accountFilter || monthFilter
+                ? 'Try widening the filters above.'
+                : 'Add one with the + button, or import a bank statement CSV.'
+          }
+          /* A search that found nothing because of the lens is the one empty
+             state with an obvious next move, and making somebody hunt for the
+             switcher to make it is the whole complaint. */
+          action={
+            searching && book !== 'all' ? (
+              <Button variant="subtle" onClick={() => setBook('all')}>
+                <Layers size={15} /> Search everything instead
+              </Button>
+            ) : undefined
           }
         />
       ) : (

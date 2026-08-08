@@ -47,57 +47,65 @@ Two consequences worth remembering:
 
 # Still to do
 
+**Everything below is one of three things**, and the label says which:
+
+- **ready** — no blockers, can be picked up as-is
+- **needs a migration** — SQL applied by hand in the Supabase editor first
+- **wants a design decision** — the shape is not settled; worth talking about
+
+Nothing here is in priority order. Ten items: **2 ready**, **4 needing a
+migration** (all four fit in one — migration 11), and **4 wanting a decision
+from us before there is anything to build**.
+
+## Safety nets — the gaps that lose data
+
+- **needs a migration** · **Deleting an account has no undo.** `delete_account`
+  sets `deleted_at` and it vanishes for everybody, with no bin to recover from.
+  Wants migration 11: a `restore_account` RPC and a "recently deleted" list in
+  Settings.
+- **needs a migration** · **Reclaim an ownerless account from Settings.**
+  `dev-repair-accounts.sql` already does this by hand in the SQL editor; a
+  household admin should be able to do it from the app. Same migration.
+- **wants a design decision** · **Unlinking a transfer leaves both legs
+  uncategorised**, and the old categories are not recoverable. Storing them to
+  put back is easy; whether unlinking SHOULD restore them, or whether that
+  re-creates a wrong answer somebody deliberately cleared, is the question.
+
 ## Transfers, and what the app cannot see
 
 The book model is right whenever a transfer is linked. Everything here is about
 the gap before that happens, or where linking is not possible at all.
 
-- [ ] Let the person who CAN see the far leg be told about it. `lib/unexplained.ts`
-      names the blind spot on my screen; the other half is my device telling
-      theirs "there is an arrival here waiting for you to link it", which needs
-      somewhere shared to put the note
-- [ ] **Recurring transfer routes** — learn "£2,000, my private → joint,
-      monthly" the way a bill is learned
-- [ ] **A household bill paid from a personal card** — a per-transaction "this
-      was household spending, I just paid for it" flag
-- [ ] **Reimbursements between us**
-- [ ] **Explicit per-account book override**, for when derivation from grants is
-      wrong. Needs a migration
+- **needs a migration** · **Tell the person who CAN see the far leg.**
+  `lib/unexplained.ts` names the blind spot on my screen; the other half is my
+  device telling theirs "there is an arrival here waiting for you to link it",
+  which needs somewhere shared to put the note.
+- **needs a migration** · **Explicit per-account book override**, for when
+  derivation from grants is wrong.
+- **ready** · **Recurring transfer routes** — learn "£2,000, my private →
+  joint, monthly" the way a bill is learned.
+- **wants a design decision** · **A household bill paid from a personal card.**
+  Needs a per-transaction "this was household spending, I just paid for it"
+  flag — which is a column, so a migration, but the harder half is what it does
+  to both books once it exists.
+- **wants a design decision** · **Reimbursements between us.** Probably the same
+  mechanism as the above; worth settling them together.
 
-## Reporting and visuals
+## Reporting
 
-### Sharpening what is there
-
-- [ ] "Net each month" only claims to be saving where that is actually true
-- [ ] Same month last year, where there is a year of history
-- [ ] **Custom date range**, not just whole months. Left alone deliberately for
-      now: unlike the year view, an arbitrary start and end cannot reuse the
-      month-keyed aggregates — `bookTotals`, `bookSpendByCategory` and every
-      function in `insights.ts` would have to take a range, and the
-      contribution cut-off (`effectiveMonth`) has no meaning inside a period
-      that does not align to a month. That is a bigger change than the rest of
-      this section put together and wants its own pass
-
-## Everyday screens
-
-
-- [ ] Activity's search runs inside the book, so a payee in the other book
-      returns nothing. The empty state says so, but a "search everything
-      instead" escape from that state would beat making you find the switcher
-
-## Safety nets
-
-- [ ] **Deleting an account is not obviously undoable** — `delete_account` sets
-      `deleted_at` and it vanishes for everybody, with no bin to recover from
-- [ ] **Reclaim an ownerless account from Settings**, without the SQL editor.
-      `dev-repair-accounts.sql` already does it by hand
-- [ ] **Unlinking a transfer leaves both legs uncategorised**, and the old
-      categories are not recoverable
+- **ready** · **Custom date range**, not just whole months or a year. The one
+  substantial piece of work left in reporting: unlike the year view, an
+  arbitrary start and end cannot reuse the month-keyed aggregates —
+  `bookTotals`, `bookSpendByCategory` and every function in `insights.ts` would
+  have to take a range, and the contribution cut-off (`effectiveMonth`, the
+  25th rule) has no meaning inside a period that does not align to a month.
+  Wants its own pass rather than being tacked onto something else.
 
 ## Recorded so it is not forgotten
 
-- [ ] **Multi-currency** for Wise / Revolut. The app is single-currency today and
-      any foreign amount is silently wrong. Out of scope for now
+- **wants a design decision** · **Multi-currency** for Wise / Revolut. The app
+  is single-currency today and any foreign amount is silently wrong. Out of
+  scope until it isn't.
 
 ---
 
@@ -159,9 +167,17 @@ one annual insurance payment become the norm — with months of no spending
 dropped rather than counted as zero. Silent below three months of history, and
 silent within a tenth of typical, because neither is news.
 
+**Reporting, sharpened.** "Kept each month" no longer claims saving over a line
+that dips below zero, and the tooltip names an overspent month as one. The same
+period a year earlier sits beside the figures where there is a year of history
+to compare against. Recharts' tooltip now outranks the donut's centre figure,
+which used to paint over it.
+
 **A year at a time.** Reports switches between a month and a whole year, with
 the aggregates taking a set of months rather than gaining a second code path.
 The year stops at the month we are in rather than pretending the rest happened.
+
+**Activity's search says which book it searched** and offers a way out of it.
 
 **Sticky month headings in Activity**, pinned under the mobile top bar — whose
 height is measured into `--header-h` rather than guessed, since it varies with
