@@ -67,4 +67,13 @@ select '08-profiles.sql',
                 where table_schema = 'public' and table_name = 'household_members'
                   and column_name = 'avatar_url')
    and to_regprocedure('public.set_profile(text,text)') is not null,
-       'household_members.avatar_url and set_profile() exist';
+       'household_members.avatar_url and set_profile() exist'
+
+union all
+-- Until this reads true, an imported statement can never satisfy a bill (the
+-- bill stays overdue until you record a second payment by hand) and two
+-- imported legs of a transfer can never be joined into one.
+select '09-reconcile.sql',
+       to_regprocedure('public.link_bill_payment(uuid,uuid,date)') is not null
+   and to_regprocedure('public.link_transfer(uuid,uuid)') is not null,
+       'link_bill_payment() + link_transfer() exist';
