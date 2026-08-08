@@ -238,6 +238,20 @@ the single place a level comes from.
   `useGrantsFor`/`useGrantsByAccount` return just your own row. Rendered as
   "who can see this" that reads as "only you" on an account three people have
   open. Gate on `canManageAccount` before treating the array as a sharing list.
+- **A grid item's `min-width` is `auto`, which is its CONTENT's width.** So a
+  card holding a `ScrollTable` (or the heatmap, at `min-w-[34rem]`) grows the
+  grid column to fit it, and the `overflow-x-auto` inside never gets the chance
+  to scroll — the card ends up wider than a phone screen. Worse, `main` carries
+  `overflow-x: clip` on mobile, so the excess is silently CUT OFF rather than
+  showing a scrollbar, and the page still measures as fitting. Any grid whose
+  children can contain something wide needs `[&>*]:min-w-0`; the Reports grid
+  does. `minmax(min(100%, 22rem), 1fr)` in the auto-fill grids is the same
+  guard, spelled differently.
+- **A `<tspan>` carrying its own `dy` REPLACES the shift it would have
+  inherited**, rather than adding to it. `<text dy="15"><tspan dy="0">` puts the
+  first line back at the text's `y`, not 15px below it — which in a wrapped
+  chart axis label drew the first line straight through the bars. Put the
+  offset on the first tspan (`dy={i === 0 ? 15 : 12}`), not on the `<text>`.
 - **Do not use CSS `columns` for cards.** Safari ignores `break-inside: avoid`
   in a multi-column layout and cuts a card in half at the column boundary,
   stranding its bottom border at the top of the next column; `column-span: all`

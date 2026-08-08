@@ -41,6 +41,45 @@ import { cx } from './ui'
 
 const PARTIAL_OPACITY = 0.45
 
+/**
+ * An axis label that wraps onto a second line instead of colliding.
+ *
+ * The waterfall's steps are phrases — "Moved to savings", "Left in current" —
+ * and four of them across a phone-width chart run into each other into one
+ * unreadable string. Recharts' own tick has no wrapping, and shortening the
+ * words to fit would take the meaning out of the one chart whose whole point is
+ * the sequence of steps.
+ */
+function WrapTick({
+  x,
+  y,
+  payload,
+  fill,
+}: {
+  // Recharts types these loosely — `x` and `y` are `string | number` on the
+  // props it hands a custom tick, though it only ever passes numbers.
+  x?: string | number
+  y?: string | number
+  payload?: { value?: unknown }
+  fill: string
+}) {
+  const words = String(payload?.value ?? '').split(' ')
+  const lines = words.length < 2 ? words : [words.slice(0, -1).join(' '), words[words.length - 1]]
+  return (
+    // The offset goes on the FIRST tspan, not on the <text>. A tspan carrying
+    // its own `dy` replaces the shift it would have inherited rather than
+    // adding to it, so `<text dy=15><tspan dy=0>` puts the first line back on
+    // the axis line — through the bars.
+    <text x={x} y={y} textAnchor="middle" fill={fill} fontSize={11}>
+      {lines.map((line, i) => (
+        <tspan key={line} x={x} dy={i === 0 ? 15 : 12}>
+          {line}
+        </tspan>
+      ))}
+    </text>
+  )
+}
+
 /** Matches `ChartTip` in charts.tsx — the same panel, wherever a tooltip appears. */
 function Tip({ label, rows }: { label?: string; rows: { name: string; value: string; color?: string }[] }) {
   return (
@@ -96,8 +135,8 @@ export function Waterfall({ steps, height = 260 }: { steps: WaterfallStep[]; hei
           dataKey="label"
           tickLine={false}
           axisLine={{ stroke: c.baseline }}
-          tick={{ fill: c.ink3, fontSize: 11 }}
-          dy={4}
+          tick={(props) => <WrapTick {...props} fill={c.ink3} />}
+          height={46}
           interval={0}
         />
         <YAxis

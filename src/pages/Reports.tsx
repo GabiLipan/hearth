@@ -392,7 +392,14 @@ export default function Reports() {
         )}
       </Card>
 
-      <div className="grid gap-3 md:gap-2.5 xl:grid-cols-2">
+      {/* `[&>*]:min-w-0` is load-bearing, not tidiness. A grid item's default
+          `min-width: auto` is its CONTENT's width, so a card holding a table
+          with `min-width: 460px` — or the heatmap, at 34rem — grows the column
+          to fit it and the `overflow-x-auto` inside never gets the chance to
+          scroll. On a phone that card is then wider than the screen, and
+          because `main` carries `overflow-x: clip` the excess is silently cut
+          off rather than showing a scrollbar. */}
+      <div className="grid gap-3 md:gap-2.5 xl:grid-cols-2 [&>*]:min-w-0">
         <Card className="p-5 md:p-4 xl:col-span-2">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 md:mb-2">
             <h3 className="flex items-center gap-1.5 font-semibold md:text-sm">
