@@ -390,6 +390,29 @@ export function bookTotals(
   return t
 }
 
+/**
+ * Several months as one set of figures — a year, or any run of them.
+ *
+ * Every field of `BookTotals` is a sum over its month except `income` and
+ * `net`, which are derived from the others; adding those directly would be
+ * adding the same money twice, so they are recomputed here from the totals
+ * exactly as `bookTotals` computes them from the rows.
+ */
+export function sumBookTotals(parts: BookTotals[]): BookTotals {
+  const t = { ...EMPTY }
+  for (const p of parts) {
+    t.contributions += p.contributions
+    t.externalIncome += p.externalIncome
+    t.returned += p.returned
+    t.spend += p.spend
+    t.contributed += p.contributed
+    t.withdrawn += p.withdrawn
+  }
+  t.income = t.contributions + t.externalIncome + t.returned
+  t.net = t.income - t.spend - t.contributed - t.withdrawn
+  return t
+}
+
 /** Whether a transaction is spending, for this book. */
 export function isSpend(flow: Flow | undefined): boolean {
   return flow === 'household-spend' || flow === 'personal-spend'
@@ -552,17 +575,19 @@ export function bookSpendByCategory(
   flows: Map<string, Flow>,
   categories: Category[],
   book: BookId,
-  month: string,
+  /** One month, or several — a year view asks the same question of twelve. */
+  month: string | string[],
   books: BookMap,
   drillInto?: string,
 ): { categoryId: string; totalMinor: number }[] {
   const catMap = new Map(categories.map((c) => [c.id, c]))
   const totals = new Map<string, number>()
   const ids = accountsInBook(book, books)
+  const want = new Set(Array.isArray(month) ? month : [month])
 
   for (const t of txns) {
     if (!ids.has(t.accountId)) continue
-    if (!isSpend(flows.get(t.id)) || !t.categoryId || monthKey(t.date) !== month) continue
+    if (!isSpend(flows.get(t.id)) || !t.categoryId || !want.has(monthKey(t.date))) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
 
@@ -597,7 +622,7 @@ export function bookSlices(
   flows: Map<string, Flow>,
   categories: Category[],
   book: BookId,
-  month: string,
+  month: string | string[],
   books: BookMap,
   drillInto?: string,
   maxSlices = 8,
@@ -642,7 +667,7 @@ export function hasBreakdown(
   flows: Map<string, Flow>,
   categories: Category[],
   book: BookId,
-  month: string,
+  month: string | string[],
   books: BookMap,
 ): boolean {
   return bookSpendByCategory(txns, flows, categories, book, month, books, categoryId).length > 1

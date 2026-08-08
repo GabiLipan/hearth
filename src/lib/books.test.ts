@@ -4,6 +4,7 @@ import {
   bookBalances,
   bookSpendByCategory,
   bookTotals,
+  sumBookTotals,
   classifyAccounts,
   classifyFlows,
   contributionSplit,
@@ -439,5 +440,59 @@ describe('what the book held, at the start of a month and now', () => {
     // Salary in, contribution out, personal spending.
     expect(b.nowMinor).toBe(300000 - 200000 - 70000)
     expect(b.startMinor).toBe(0)
+  })
+})
+
+describe('adding several months into one set of figures', () => {
+  it('sums the parts and RECOMPUTES the derived ones', () => {
+    // `income` and `net` are derived from the other fields, so adding them
+    // directly would count the same money twice.
+    const rows = march()
+    const one = bookTotals(rows, classifyFlows(rows, books), 'household', '2026-03', books)
+    const two = sumBookTotals([one, one])
+
+    expect(two.contributions).toBe(one.contributions * 2)
+    expect(two.spend).toBe(one.spend * 2)
+    expect(two.income).toBe(two.contributions + two.externalIncome + two.returned)
+    expect(two.net).toBe(two.income - two.spend - two.contributed - two.withdrawn)
+    expect(two.income).toBe(one.income * 2)
+  })
+
+  it('is all zeroes for no months at all', () => {
+    const empty = sumBookTotals([])
+    expect(empty.income).toBe(0)
+    expect(empty.net).toBe(0)
+    expect(empty.spend).toBe(0)
+  })
+})
+
+describe('asking the same question of several months', () => {
+  const cats: Category[] = [
+    { id: 'home', name: 'Home & utilities', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+    { id: 'shopping', name: 'Shopping', kind: 'expense', sortOrder: 1, updatedAt: 'x' },
+  ]
+  const rows = [
+    txn({ accountId: 'joint', amountMinor: -120000, date: '2026-03-03', categoryId: 'home' }),
+    txn({ accountId: 'joint', amountMinor: -30000, date: '2026-04-03', categoryId: 'home' }),
+    txn({ accountId: 'joint', amountMinor: -5000, date: '2026-04-09', categoryId: 'shopping' }),
+  ]
+  const flows = classifyFlows(rows, books)
+  const totalFor = (m: string | string[]) =>
+    Object.fromEntries(
+      bookSpendByCategory(rows, flows, cats, 'household', m, books).map((r) => [r.categoryId, r.totalMinor]),
+    )
+
+  it('a single key and an array of one are the same question', () => {
+    expect(totalFor(['2026-03'])).toEqual(totalFor('2026-03'))
+    expect(totalFor('2026-03')).toEqual({ home: 120000 })
+  })
+
+  it('adds a category up across every month it is given', () => {
+    expect(totalFor(['2026-03', '2026-04'])).toEqual({ home: 150000, shopping: 5000 })
+  })
+
+  it('ignores months outside the set', () => {
+    expect(totalFor(['2026-04'])).toEqual({ home: 30000, shopping: 5000 })
+    expect(totalFor([])).toEqual({})
   })
 })

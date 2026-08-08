@@ -70,16 +70,17 @@ the gap before that happens, or where linking is not possible at all.
 
 - [ ] "Net each month" only claims to be saving where that is actually true
 - [ ] Same month last year, where there is a year of history
-- [ ] Custom date range, not just whole months
-- [ ] A 12-month / year view with an annual total
-- [ ] Drill into subcategories from **Home** as well as Reports
+- [ ] **Custom date range**, not just whole months. Left alone deliberately for
+      now: unlike the year view, an arbitrary start and end cannot reuse the
+      month-keyed aggregates — `bookTotals`, `bookSpendByCategory` and every
+      function in `insights.ts` would have to take a range, and the
+      contribution cut-off (`effectiveMonth`) has no meaning inside a period
+      that does not align to a month. That is a bigger change than the rest of
+      this section put together and wants its own pass
 
 ## Everyday screens
 
 
-- [ ] A month heading in Activity that sticks to the top while you scroll its
-      rows. Wants care: `main` carries `overflow-x: clip` on mobile and the
-      header above it is already sticky
 - [ ] Activity's search runs inside the book, so a payee in the other book
       returns nothing. The empty state says so, but a "search everything
       instead" escape from that state would beat making you find the switcher
@@ -157,6 +158,16 @@ table, measured against the median of the months before it — the mean would le
 one annual insurance payment become the norm — with months of no spending
 dropped rather than counted as zero. Silent below three months of history, and
 silent within a tenth of typical, because neither is news.
+
+**A year at a time.** Reports switches between a month and a whole year, with
+the aggregates taking a set of months rather than gaining a second code path.
+The year stops at the month we are in rather than pretending the rest happened.
+
+**Sticky month headings in Activity**, pinned under the mobile top bar — whose
+height is measured into `--header-h` rather than guessed, since it varies with
+the safe-area inset.
+
+**Drilling into subcategories from Home**, the same breadcrumb Reports has.
 
 **Restoring somebody else's backup** no longer produces a pile of dead letters.
 Personal categories, budgets and goals owned by another person are left where

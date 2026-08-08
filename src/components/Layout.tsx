@@ -58,6 +58,33 @@ export function Layout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const { pathname } = useLocation()
   const title = TITLES[pathname] ?? 'Hearth'
+  /**
+   * The mobile top bar's height, published as `--header-h`.
+   *
+   * Anything else that wants to stick below it — the month headings in Activity
+   * — needs a number, and there isn't one to hard-code: the bar is a fixed row
+   * plus `env(safe-area-inset-top)`, which differs between a notched phone, a
+   * flat one, and the same phone in a browser tab with its own chrome. Measured
+   * rather than assumed, and re-measured on rotation, because a stale value
+   * leaves the heading either overlapping the bar or floating below it.
+   *
+   * Zero on desktop, where the bar is `md:hidden` and there is nothing to clear.
+   */
+  const headerRef = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const el = headerRef.current
+    if (!el) return
+    const write = () =>
+      document.documentElement.style.setProperty('--header-h', `${el.offsetHeight}px`)
+    const ro = new ResizeObserver(write)
+    ro.observe(el)
+    write()
+    return () => {
+      ro.disconnect()
+      document.documentElement.style.removeProperty('--header-h')
+    }
+  }, [])
+
   // Zero unless iOS has anchored `bottom: 0` above the bottom of the screen.
   const { below } = useViewportInset()
   const toScreenBottom = below ? { transform: `translateY(${below}px)` } : undefined
@@ -149,7 +176,7 @@ export function Layout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Mobile top bar */}
-      <header className="pt-safe sticky top-0 z-30 border-b border-hairline bg-page/80 backdrop-blur-md md:hidden">
+      <header ref={headerRef} className="pt-safe sticky top-0 z-30 border-b border-hairline bg-page/80 backdrop-blur-md md:hidden">
         <div className="flex h-13 items-center justify-between px-4 py-2.5">
           <h1 className="text-xl font-bold tracking-tight">{title}</h1>
           <NavLink

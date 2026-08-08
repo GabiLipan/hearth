@@ -336,7 +336,7 @@ export default function Activity() {
           <div className="space-y-5 md:hidden">
             {rows.map(({ month, items }) => (
               <div key={month}>
-                <MonthHeading month={month} stats={months.get(month)} money={money} />
+                <MonthHeading month={month} stats={months.get(month)} money={money} sticky />
                 <div className="space-y-4">
                   {byDay(items).map(([date, list]) => (
                     <div key={date}>
@@ -533,16 +533,45 @@ function MonthHeading({
   stats,
   money,
   dense,
+  sticky,
 }: {
   month: string
   stats?: { count: number; spendMinor: number }
   money: (minor: number, opts?: { sign?: boolean }) => string
   dense?: boolean
+  /**
+   * Follow the scroll, under the mobile top bar.
+   *
+   * `--header-h` is measured by Layout rather than guessed: the bar is a fixed
+   * row plus the safe-area inset, which is a different number on a notched
+   * phone, a flat one, and a browser tab. Sticking to a hard-coded offset
+   * leaves the heading either overlapping the bar or floating below it.
+   *
+   * Sticky works here despite `main` carrying `overflow-x: clip` on mobile:
+   * `clip` is the one overflow value that does NOT force the other axis to
+   * become a scroll container, so the vertical axis stays `visible` and the
+   * nearest scroller is still the viewport. Any other value there — `hidden`,
+   * `auto` — and this silently stops moving.
+   *
+   * Phone only. On desktop every row already carries its full date, so there
+   * is nothing to lose track of, and the table's own sticky first column would
+   * have to be reasoned about alongside it.
+   */
+  sticky?: boolean
 }) {
   return (
     <div
       data-month={month}
-      className={cx('flex items-baseline justify-between gap-3', dense ? '' : 'mb-2 px-1')}
+      style={sticky ? { top: 'var(--header-h, 0px)' } : undefined}
+      className={cx(
+        'flex items-baseline justify-between gap-3',
+        dense ? '' : 'mb-2 px-1',
+        // An opaque background, for the same reason `table.pinned` needs one:
+        // the rows scrolling underneath are otherwise plainly readable through
+        // it. The negative margin plus padding lets that background reach the
+        // full width of the list rather than stopping at the text.
+        sticky && 'sticky z-20 -mx-1 bg-page/95 px-2 py-1.5 backdrop-blur-sm',
+      )}
     >
       <h2 className={cx('font-semibold', dense ? 'text-xs uppercase tracking-wide text-ink-2' : 'text-base')}>
         {monthLabel(month)}

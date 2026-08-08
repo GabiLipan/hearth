@@ -24,6 +24,7 @@ import {
   bookSeries,
   bookSlices,
   bookTotals,
+  sumBookTotals,
   contributionSplit,
   hasBreakdown,
   BOOK_WORDS,
@@ -58,6 +59,17 @@ export default function Reports() {
   const { money } = useApp()
   const [month, setMonth] = useState(thisMonthKey())
   const [range, setRange] = useState<'6' | '12'>('6')
+  /**
+   * A month at a time, or a whole year.
+   *
+   * The year view asks the same questions of twelve months at once — which is
+   * why the aggregates take a set of months rather than gaining a second code
+   * path. The only figure that is genuinely different is the total, and
+   * `sumBookTotals` recomputes `income` and `net` from the parts rather than
+   * adding them, since both are derived and adding them would count the same
+   * money twice.
+   */
+  const [period, setPeriod] = useState<'month' | 'year'>('month')
   const [view, setView] = useState<'charts' | 'table'>('charts')
   const [book, setBook] = useBook()
   /** The category being drilled into, or null for the top level. */
@@ -88,17 +100,30 @@ export default function Reports() {
     return others.length === 1 ? nameOf(others[0]) : null
   }, [memberMap, userId])
 
+  /**
+   * The months in view. One under `month`; under `year`, that year up to
+   * December — or up to the month we are in, because the rest has not happened
+   * and a year total that silently includes nothing for it is not a year total,
+   * it is this year so far pretending otherwise.
+   */
+  const year = month.slice(0, 4)
+  const inView = useMemo(() => {
+    if (period === 'month') return [month]
+    const last = year === thisMonthKey().slice(0, 4) ? Number(thisMonthKey().slice(5, 7)) : 12
+    return Array.from({ length: last }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
+  }, [period, month, year])
+
   const slices = useMemo(
-    () => bookSlices(txns ?? [], flows, categories, book, month, books, drill ?? undefined),
-    [txns, flows, categories, book, month, books, drill],
+    () => bookSlices(txns ?? [], flows, categories, book, inView, books, drill ?? undefined),
+    [txns, flows, categories, book, inView, books, drill],
   )
   const series = useMemo(
     () => bookSeries(txns ?? [], flows, book, Number(range), books, month),
     [txns, flows, book, range, books, month],
   )
   const totals = useMemo(
-    () => bookTotals(txns ?? [], flows, book, month, books),
-    [txns, flows, book, month, books],
+    () => sumBookTotals(inView.map((m) => bookTotals(txns ?? [], flows, book, m, books))),
+    [txns, flows, book, inView, books],
   )
 
   /**
@@ -151,14 +176,15 @@ export default function Reports() {
    */
   const balances = useMemo(
     () =>
-      bookBalances(accounts, txns ?? [], book, books, month, (id) =>
+      // The start of the PERIOD, which under a year view is its January.
+      bookBalances(accounts, txns ?? [], book, books, inView[0], (id) =>
         canSeeTransactionsAt(levelOn(id, levels)),
       ),
     // `levels` is a fresh Map every render, so it is deliberately not a
     // dependency: the inputs that change the answer are the accounts and grants
     // it is derived from, and `accounts` is one of them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [accounts, txns, book, books, month],
+    [accounts, txns, book, books, inView],
   )
 
   /**
@@ -170,14 +196,19 @@ export default function Reports() {
    * honest version of a number it cannot get right on its own.
    */
   const unexplained = useMemo(
-    () => unexplainedTotals(unexplainedLegs(txns ?? [], flows, books, month)),
-    [txns, flows, books, month],
+    () => unexplainedTotals(inView.flatMap((m) => unexplainedLegs(txns ?? [], flows, books, m))),
+    [txns, flows, books, inView],
   )
 
+  /** What the figures on this page cover, in words. */
+  const periodLabel = period === 'year' ? year : monthLabel(month)
   const words = BOOK_WORDS[book]
   const drillName = drill ? (catMap.get(drill)?.name ?? 'Category') : null
-  /** The month we are in is a part-month, and every comparison has to say so. */
-  const partial = month === thisMonthKey()
+  /**
+   * The period we are in has not finished — a part-month, or a year still
+   * running. Both need saying for the same reason.
+   */
+  const partial = inView.includes(thisMonthKey())
 
   /**
    * The table on screen, as a file.
@@ -189,7 +220,7 @@ export default function Reports() {
   const exportCategories = () => {
     const rows: (string | number)[][] = [['Category', 'Spent', 'Typical', 'vs typical', 'Share']]
     for (const s of slices) {
-      const d = drill ? undefined : deltas.get(s.categoryId)
+      const d = drill || period === 'year' ? undefined : deltas.get(s.categoryId)
       rows.push([
         s.name,
         csvAmount(s.totalMinor),
@@ -198,7 +229,7 @@ export default function Reports() {
         `${Math.round(s.fraction * 100)}%`,
       ])
     }
-    downloadCSV(`hearth-${book}-${month}${drill ? `-${drillName}` : ''}`, toCSV(rows))
+    downloadCSV(`hearth-${book}-${period === 'year' ? year : month}${drill ? `-${drillName}` : ''}`, toCSV(rows))
   }
 
   const exportMonths = () => {
@@ -231,7 +262,7 @@ export default function Reports() {
 
   const canDrill = (categoryId: string) =>
     categoryId !== OTHER_SLICE_ID &&
-    hasBreakdown(categoryId, txns ?? [], flows, categories, book, month, books)
+    hasBreakdown(categoryId, txns ?? [], flows, categories, book, inView, books)
 
   /**
    * Out of a figure and into the rows behind it.
@@ -244,7 +275,10 @@ export default function Reports() {
    */
   const navigate = useNavigate()
   const seeTransactions = (categoryId?: string) => {
-    const q = new URLSearchParams({ month, book })
+    // Activity filters by a single month, so a year view sends the category and
+    // the book and leaves the list running — which is what you want from a
+    // year's figure anyway.
+    const q = new URLSearchParams(period === 'year' ? { book } : { month, book })
     if (categoryId && categoryId !== OTHER_SLICE_ID) q.set('category', categoryId)
     navigate(`/activity?${q}`)
   }
@@ -275,7 +309,32 @@ export default function Reports() {
             { value: '12', label: '12 mo' },
           ]}
         />
-        <MonthStepper month={month} onChange={changeMonth} label={monthLabel} canGoForward={month < thisMonthKey()} />
+        <Segmented
+          value={period}
+          onChange={(p) => {
+            setDrill(null)
+            setPeriod(p)
+          }}
+          className="w-36"
+          options={[
+            { value: 'month', label: 'Month' },
+            { value: 'year', label: 'Year' },
+          ]}
+        />
+        {/* One stepper, stepping whichever unit is being shown. A year is held
+            as its January, so everything downstream still receives a month key
+            and nothing else has to know which mode this is. */}
+        {period === 'month' ? (
+          <MonthStepper month={month} onChange={changeMonth} label={monthLabel} canGoForward={month < thisMonthKey()} />
+        ) : (
+          <MonthStepper
+            month={month}
+            onChange={changeMonth}
+            label={(k) => k.slice(0, 4)}
+            step={12}
+            canGoForward={year < thisMonthKey().slice(0, 4)}
+          />
+        )}
       </Toolbar>
 
       {/* The month in figures, in this book's own words. On the household book
@@ -310,14 +369,14 @@ export default function Reports() {
         {partial && balances && (
           <p className="mt-1.5 text-xs text-ink-2">
             <span className="font-medium tabular">{money(balances.startMinor)}</span> at the start of{' '}
-            {monthLabel(month)},{' '}
+            {periodLabel},{' '}
             <span className="font-medium tabular">{money(balances.nowMinor)}</span> now
-            <span className="text-ink-3"> — the month is not over.</span>
+            <span className="text-ink-3"> — the {period === 'year' ? 'year' : 'month'} is not over.</span>
           </p>
         )}
         {partial && !balances && (
           <p className="mt-1.5 text-xs text-ink-3">
-            {monthLabel(month)} is not over, so these are part of a month.
+            {periodLabel} is not over, so these are part of a {period === 'year' ? 'year' : 'month'}.
           </p>
         )}
 
@@ -411,7 +470,7 @@ export default function Reports() {
                   <ChevronLeft size={14} /> All
                 </button>
               )}
-              {drill ? drillName : `${words.spend}`} · {monthLabel(month)}
+              {drill ? drillName : `${words.spend}`} · {periodLabel}
             </h3>
             <div className="flex items-center gap-2">
               {!drill && slices.length > 0 && (
@@ -431,7 +490,7 @@ export default function Reports() {
           </div>
           {slices.length === 0 ? (
             <p className="py-8 text-center text-sm text-ink-3">
-              No {book === 'mine' ? 'personal' : 'household'} spending recorded in {monthLabel(month)}.
+              No {book === 'mine' ? 'personal' : 'household'} spending recorded in {periodLabel}.
             </p>
           ) : view === 'charts' ? (
             <>
@@ -494,7 +553,7 @@ export default function Reports() {
                           is the level the median was taken at. */}
                       <td className={cx(table.cell, 'text-right tabular')}>
                         {(() => {
-                          const d = drill ? undefined : deltas.get(s.categoryId)
+                          const d = drill || period === 'year' ? undefined : deltas.get(s.categoryId)
                           if (!d || d.basis < 3) return <span className="text-ink-3">—</span>
                           // Within a tenth of typical is not news.
                           if (Math.abs(d.deltaMinor) < Math.max(d.typicalMinor * 0.1, 500)) {
@@ -562,7 +621,7 @@ export default function Reports() {
                 in it. */}
             {book === 'household' && waterfall.some((s) => s.deltaMinor !== 0) && (
               <Card className="p-5 md:p-4 xl:col-span-2">
-                <h3 className="mb-1 font-semibold md:text-sm">Where it went · {monthLabel(month)}</h3>
+                <h3 className="mb-1 font-semibold md:text-sm">Where it went · {periodLabel}</h3>
                 <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
                   Paid in, then out again, in the order it happened. The last bar is what is still sitting
                   in the current account.
@@ -610,7 +669,7 @@ export default function Reports() {
 
             {payees.length > 0 && (
               <Card className="p-5 md:p-4">
-                <h3 className="mb-1 font-semibold md:text-sm">Top payees · {monthLabel(month)}</h3>
+                <h3 className="mb-1 font-semibold md:text-sm">Top payees · {periodLabel}</h3>
                 <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
                   Under the category level. Shops the app treats as the same merchant are one line.
                 </p>
@@ -632,7 +691,7 @@ export default function Reports() {
               </Card>
             )}
 
-            {pacePoints.some((p) => p.thisMonthMinor || p.lastMonthMinor) && (
+            {period === 'month' && pacePoints.some((p) => p.thisMonthMinor || p.lastMonthMinor) && (
               <Card className="p-5 md:p-4 xl:col-span-2">
                 <h3 className="mb-1 font-semibold md:text-sm">Pace</h3>
                 <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">

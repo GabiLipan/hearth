@@ -729,23 +729,30 @@ export function MonthStepper({
   onChange,
   label,
   canGoForward = true,
+  step: months = 1,
 }: {
   month: string
   onChange: (next: string) => void
   /** Formats the month key for display. */
   label: (key: string) => string
   canGoForward?: boolean
+  /**
+   * How many months a press moves. 12 makes this a year stepper without a
+   * second component: the value stays a month key, so everything downstream is
+   * unchanged and only the label and the stride differ.
+   */
+  step?: number
 }) {
   const step = (delta: number) => {
     const [y, m] = month.split('-').map(Number)
-    const d = new Date(y, m - 1 + delta, 1)
+    const d = new Date(y, m - 1 + delta * months, 1)
     onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
   return (
     <div className="flex h-11 items-center rounded-xl bg-surface-2 desktop:h-9 md:rounded-lg">
       <button
         className="grid h-full w-9 place-items-center rounded-l-xl text-ink-2 hover:text-ink desktop:w-7 md:rounded-l-lg"
-        aria-label="Previous month"
+        aria-label={months === 12 ? 'Previous year' : 'Previous month'}
         onClick={() => step(-1)}
       >
         <ChevronLeft size={17} />
@@ -753,7 +760,7 @@ export function MonthStepper({
       <span className="w-32 text-center text-sm font-semibold md:w-28">{label(month)}</span>
       <button
         className="grid h-full w-9 place-items-center rounded-r-xl text-ink-2 hover:text-ink disabled:opacity-30 desktop:w-7 md:rounded-r-lg"
-        aria-label="Next month"
+        aria-label={months === 12 ? 'Next year' : 'Next month'}
         disabled={!canGoForward}
         onClick={() => step(1)}
       >

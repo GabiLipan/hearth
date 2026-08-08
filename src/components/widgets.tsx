@@ -1,14 +1,15 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Eye } from 'lucide-react'
+import { ArrowRight, ChevronLeft, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
 import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
-import { monthlySpendByCategory, monthsEndingAt } from '../lib/stats'
+import { monthlySpendByCategory, monthsEndingAt, OTHER_SLICE_ID } from '../lib/stats'
 import {
   bookSeries,
   bookSlices,
   bookTotals,
+  hasBreakdown,
   BOOK_WORDS,
   type BookId,
   type BookMap,
@@ -251,16 +252,59 @@ export function AccountsWidget({ data }: { data: HomeData }) {
 /* ---------- Where it went ---------- */
 export function DonutWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
+  /** The category being looked inside, or null for the top level. */
+  const [drill, setDrill] = useState<string | null>(null)
+
   const slices = useMemo(
-    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, undefined, 6),
-    [data.txns, data.flows, data.categories, data.book, data.books],
+    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, drill ?? undefined, 6),
+    [data.txns, data.flows, data.categories, data.book, data.books, drill],
   )
+  // Changing book empties the breadcrumb: it would otherwise point at a
+  // category that is no longer on this screen.
+  useEffect(() => setDrill(null), [data.book])
+
+  const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
+  const canDrill = (categoryId: string) =>
+    categoryId !== OTHER_SLICE_ID &&
+    hasBreakdown(categoryId, data.txns, data.flows, data.categories, data.book, month(), data.books)
+
   const spent = slices.reduce((s, x) => s + x.totalMinor, 0)
-  if (slices.length === 0) return null
+  if (slices.length === 0 && !drill) return null
+
   return (
     <Card className="p-4 md:p-3">
-      <h3 className="mb-2 font-semibold md:mb-1.5 md:text-sm">Where it went</h3>
-      <CategoryDonut slices={slices} height={180} centerLabel={{ title: 'spent', value: money(spent, { compact: true }) }} />
+      <h3 className="mb-2 flex items-center gap-1 font-semibold md:mb-1.5 md:text-sm">
+        {drill && (
+          <button
+            onClick={() => setDrill(null)}
+            className="flex items-center gap-0.5 rounded-full px-1 py-0.5 text-ink-3 transition hover:bg-surface-2 hover:text-ink"
+          >
+            <ChevronLeft size={14} /> All
+          </button>
+        )}
+        {drill ? (catMap.get(drill)?.name ?? 'Category') : 'Where it went'}
+      </h3>
+      <CategoryDonut
+        slices={slices}
+        height={180}
+        centerLabel={{ title: drill ? 'in here' : 'spent', value: money(spent, { compact: true }) }}
+      />
+      {/* The donut itself is not clickable, so the way in is a row of buttons
+          under it — the same arrangement Reports uses, and the same reasons:
+          a keyboard path, and a target big enough for a thumb. */}
+      {!drill && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {slices.filter((s) => canDrill(s.categoryId)).map((s) => (
+            <button
+              key={s.categoryId}
+              onClick={() => setDrill(s.categoryId)}
+              className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-xs font-medium text-ink-2 transition hover:text-ink"
+            >
+              <CategoryIcon icon={s.icon} size={12} /> {s.name}
+            </button>
+          ))}
+        </div>
+      )}
     </Card>
   )
 }
