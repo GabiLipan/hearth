@@ -73,7 +73,30 @@ union all
 -- Until this reads true, an imported statement can never satisfy a bill (the
 -- bill stays overdue until you record a second payment by hand) and two
 -- imported legs of a transfer can never be joined into one.
+-- Deliberately NOT evidenced by `link_transfer(uuid,uuid)`: migration 10 drops
+-- that signature and replaces it with a three-argument one, so testing for it
+-- would report 09 as missing on an up-to-date project.
 select '09-reconcile.sql',
        to_regprocedure('public.link_bill_payment(uuid,uuid,date)') is not null
-   and to_regprocedure('public.link_transfer(uuid,uuid)') is not null,
-       'link_bill_payment() + link_transfer() exist';
+   and to_regprocedure('public.unlink_bill_payment(uuid)') is not null,
+       'link_bill_payment() + unlink_bill_payment() exist'
+
+union all
+-- Until this reads true, a goal can only be fed by a transfer the app itself
+-- recorded — the joint → savings movement that arrived in a CSV cannot be
+-- pointed at the house deposit.
+select '10-goal-transfers.sql',
+       to_regprocedure('public.set_transfer_goal(uuid,uuid)') is not null
+   and to_regprocedure('public.link_transfer(uuid,uuid,uuid)') is not null,
+       'set_transfer_goal() + three-argument link_transfer() exist'
+
+union all
+-- Not a migration: a state you can only reach by re-running 09 AFTER 10, which
+-- re-creates the two-argument link_transfer beside the three-argument one.
+-- PostgREST cannot then resolve the call — supabase-js drops `undefined`
+-- arguments, so the client asks for a signature that is now ambiguous and gets
+-- "could not find the function in the schema cache". Re-run 10 to clear it.
+select 'no duplicate link_transfer',
+       (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.proname = 'link_transfer') <= 1,
+       'exactly one link_transfer signature — re-run 10 if this is false';

@@ -260,11 +260,36 @@ export async function detectTransfers(books?: BookMap): Promise<TransferCandidat
  * of the transfer path: both legs have to change together or neither does, and
  * the outbox has no way to express that.
  */
-export async function linkTransfer(outId: string, inId: string) {
-  return rpc<string>('link_transfer', { p_out_id: outId, p_in_id: inId })
+export async function linkTransfer(outId: string, inId: string, goalId?: string) {
+  // `p_goal_id` is always sent, explicitly null when there is none. An omitted
+  // argument is not the same as a null one: supabase-js drops `undefined`, and
+  // PostgREST then resolves a different (now non-existent) overload and answers
+  // "could not find the function in the schema cache".
+  return rpc<string>('link_transfer', { p_out_id: outId, p_in_id: inId, p_goal_id: goalId ?? null })
 }
 
-/** Split one back into two ordinary transactions. Both are left uncategorised. */
+/**
+ * Which goal this movement of money was for, or null for none.
+ *
+ * Separate from `linkTransfer` because linking mostly happens automatically —
+ * `TransferReview` pairs a cross-book transfer without asking — so by the time
+ * anybody looks at the row it is already linked, and a goal that could only be
+ * chosen at link time could never be chosen at all.
+ *
+ * Returns the id of the leg now carrying the tag (the incoming one), or null
+ * when it was cleared. The server writes it, so the local row does not change
+ * until the next pull: callers that show goal progress should `syncNow()`.
+ */
+export async function setTransferGoal(transferId: string, goalId: string | null) {
+  return rpc<string | null>('set_transfer_goal', { p_transfer_id: transferId, p_goal_id: goalId })
+}
+
+/**
+ * Split one back into two ordinary transactions. Both are left uncategorised,
+ * and any goal the transfer was funding is released — a tagged credit that is
+ * no longer part of a transfer would go on counting towards the pot as if the
+ * money had simply arrived.
+ */
 export async function unlinkTransfer(transferId: string) {
   return rpc<number>('unlink_transfer', { p_transfer_id: transferId })
 }

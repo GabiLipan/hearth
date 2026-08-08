@@ -7,22 +7,28 @@ the app.
 
 ## Applying it
 
-In the Supabase SQL editor, run in order:
+In the Supabase SQL editor, run the numbered files in order — `01-schema.sql`
+through to `10-goal-transfers.sql`. There is no migrations table, so if you are
+unsure what a project has already had, run `00-which-migrations-applied.sql`
+first: it is read-only and reports a row per migration.
 
-1. `01-schema.sql` — tables, triggers, indexes, realtime publication
-2. `02-rls.sql` — row level security policies
-3. `03-rpc.sql` — the functions clients call
+Every file is re-runnable, with one ordering trap: `10` replaces `09`'s
+two-argument `link_transfer` with a three-argument one, so re-running `09`
+afterwards puts the old signature back beside the new and PostgREST can no
+longer resolve the call. Re-run `10` to clear it. The detector has a row for
+that too.
 
 Then, to prove it works, sign up two accounts and run `99-rls-tests.sql`. It
 runs inside a transaction and rolls back, so it is safe to re-run and leaves
-nothing behind. Every row of the output must read `ok = true`.
+nothing behind. Every row of the output must read `ok = true`. The other test
+files (`99b` … `99f`) are the same shape.
 
 ## Running it locally
 
 You do not need Docker or a system Postgres. From a scratch directory:
 
 ```bash
-npm install embedded-postgres pg
+npm install @electric-sql/pglite
 ```
 
 `supabase/local/` holds a shim that fakes the pieces Supabase provides —
@@ -31,8 +37,16 @@ the `auth` schema, `auth.uid()`, the `anon`/`authenticated` roles, the
 `local/00-shim.sql` first and `local/98-grants.sql` last:
 
 ```
-local/00-shim.sql → 01-schema.sql → 02-rls.sql → 03-rpc.sql → local/98-grants.sql → 99-rls-tests.sql
+local/00-shim.sql → 01 … 10 → local/98-grants.sql → 99*-tests.sql
 ```
+
+`pgcrypto` needs an explicit import:
+`PGlite.create({ extensions: { pgcrypto } })` from
+`@electric-sql/pglite/contrib/pgcrypto`.
+
+Read the **last result set that has rows**, not the last one. Every test file
+ends with `rollback`, which returns none, so taking `results[results.length - 1]`
+reports zero checks and zero failures — a green run that asserted nothing.
 
 Never run anything in `local/` against the real project.
 

@@ -54,8 +54,17 @@ read-only detector that reports which are present — run it when unsure.
 | `07-permissions.sql` | `household_members`, `account_grants`, per-level RLS, the departure cascade |
 | `08-profiles.sql` | display names backfilled and editable, optional avatars, role change stops bumping the epoch |
 | `09-reconcile.sql` | linking rows that already exist: a transaction to a bill occurrence, two transactions into one transfer, and both undos |
+| `10-goal-transfers.sql` | a transfer that already exists can fund a goal — `link_transfer` gains `p_goal_id`, `set_transfer_goal` tags one afterwards, `unlink_transfer` releases it |
 
-All are re-runnable. `05` refuses to install if `04` is missing — necessary,
+All are re-runnable, with **one ordering trap**: `10` drops the two-argument
+`link_transfer` and replaces it with a three-argument one, and `09` is still
+re-runnable, so running `09` *after* `10` puts the old signature back beside
+the new. PostgREST then cannot resolve the call — supabase-js drops `undefined`
+arguments — and every transfer link dead-letters with "could not find the
+function … in the schema cache". Re-run `10` to clear it;
+`00-which-migrations-applied.sql` has a row that detects exactly this.
+
+`05` refuses to install if `04` is missing — necessary,
 because **plpgsql bodies are only syntax-checked at creation time**, so a
 migration referencing a missing table installs "successfully" and fails at
 runtime. Write that guard into any future migration that builds on an earlier one.
@@ -331,5 +340,9 @@ the single place a level comes from.
   created — are left alone. `link_bill_payment` would handle them correctly (it
   only advances `next_due` when the occurrence is at or past it), but nothing
   offers them.
-- Unlinking a transfer leaves both legs uncategorised: linking clears
-  `category_id` on both, and the previous values are not recoverable.
+- Unlinking a transfer leaves both legs uncategorised, and now also releases any
+  goal it was funding: linking clears `category_id` on both and unlinking clears
+  `goal_id`, and neither previous value is recoverable. Releasing the goal is
+  deliberate — `goalProgress` sums `goal_id` rather than transfers, so a tag left
+  on a leg that is no longer part of one would keep the pot claiming money the
+  app no longer believes was moved into it.

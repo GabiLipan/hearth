@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
-import { ScanLine, ArrowLeftRight, CalendarClock } from 'lucide-react'
+import { ScanLine, ArrowLeftRight, CalendarClock, PiggyBank } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
-import { useAccounts, useAccountMap, useBills, useCategories, useMyLevels, useGrantsFor, useMemberMap } from '../lib/cache'
-import { findTransferCandidates, linkTransfer, unlinkTransfer } from '../lib/transfers'
+import { useAccounts, useAccountMap, useBills, useCategories, useGoals, useMyLevels, useGrantsFor, useMemberMap } from '../lib/cache'
+import { findTransferCandidates, linkTransfer, setTransferGoal, unlinkTransfer } from '../lib/transfers'
 import { unlinkBillPayment } from '../lib/bills'
 import { syncNow } from '../lib/session'
 import { scanReceipt } from '../lib/receipt'
@@ -398,6 +398,65 @@ export function TransactionForm({
 }
 
 /**
+ * Which goal this transfer was paying into.
+ *
+ * The one place a *reconciled* transfer can be pointed at a pot. Money moved
+ * from inside Hearth has always been able to name a goal, because
+ * `create_transfer` takes one; money that arrived in a CSV and was paired
+ * afterwards — which is nearly all of it, since the reviewer pairs cross-book
+ * transfers on its own — had no way to say so at all.
+ *
+ * The value is held locally as well as read from the row: the tag is written by
+ * an RPC, so the cached transaction keeps its old `goalId` until the next pull
+ * lands, and without this the control would snap back a moment after being
+ * used.
+ */
+function GoalTag({ txn }: { txn: Transaction }) {
+  const goals = useGoals()
+  const [chosen, setChosen] = useState<string>(txn.goalId ?? '')
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  if (goals.length === 0) return null
+
+  async function choose(next: string) {
+    const was = chosen
+    setChosen(next)
+    setBusy(true)
+    setFailed(false)
+    try {
+      await setTransferGoal(txn.transferId!, next || null)
+      await syncNow()
+    } catch {
+      setChosen(was)
+      setFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-hairline pt-2.5">
+      <PiggyBank size={16} className="shrink-0 text-ink-3" />
+      <span className="text-sm text-ink-2">Paying into</span>
+      {/* `Select` carries `w-full`, so the width has to go on a wrapper — a
+          class passed to it loses to the base class whatever the order. */}
+      <div className="min-w-0 flex-1 basis-40">
+        <Select value={chosen} disabled={busy} onChange={(e) => void choose(e.target.value)}>
+          <option value="">No goal</option>
+          {goals.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+      {failed && <p className="basis-full text-xs text-critical-text">That didn’t save — you need a connection for this.</p>}
+    </div>
+  )
+}
+
+/**
  * What else this transaction is part of, and how to change your mind.
  *
  * Three states, and only ever one of them at a time — the server refuses to let
@@ -468,19 +527,26 @@ function Linkage({ txn, onDone }: { txn: Transaction; onDone: () => void }) {
 
   if (txn.transferId) {
     return (
-      <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface-2 px-4 py-3">
-        <ArrowLeftRight size={16} className="shrink-0 text-ink-3" />
-        <p className="min-w-0 flex-1 text-sm">
-          One side of a transfer between your accounts, so it counts as neither spending nor income.
-        </p>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          onClick={() => void run(() => unlinkTransfer(txn.transferId!))}
-        >
-          Not a transfer
-        </Button>
+      <div className="space-y-2.5 rounded-xl bg-surface-2 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <ArrowLeftRight size={16} className="shrink-0 text-ink-3" />
+          <p className="min-w-0 flex-1 text-sm">
+            One side of a transfer between your accounts, so it counts as neither spending nor income.
+          </p>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => void run(() => unlinkTransfer(txn.transferId!))}
+          >
+            Not a transfer
+          </Button>
+        </div>
+        {/* Only on the arriving leg. A goal is money that landed somewhere, the
+            tag lives on the incoming side, and the server refuses a transfer
+            with no incoming leg it can see — so offering this on the outgoing
+            half would be offering a control that always fails. */}
+        {txn.amountMinor > 0 && <GoalTag txn={txn} />}
       </div>
     )
   }

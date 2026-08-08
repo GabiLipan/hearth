@@ -4,7 +4,7 @@ import type { Goal } from '../lib/db'
 import { create, update, remove } from '../lib/data'
 import { goalProgress, transfer } from '../lib/goals'
 import { syncNow } from '../lib/session'
-import { useAccounts, useAllTransactions, useGoals, useMyLevels } from '../lib/cache'
+import { useAccounts, useAllTransactions, useBook, useGoals, useMyLevels } from '../lib/cache'
 import { canAddTransactions, levelOn } from '../lib/accounts'
 import { fmtFullDate, todayISO } from '../lib/dates'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -15,6 +15,7 @@ import {
   Card, Sheet, Button, Field, TextInput, Select, Empty, Progress, Toolbar, cx,
 } from '../components/ui'
 import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
+import { BookSwitcher } from '../components/BookSwitcher'
 
 /**
  * Pots you are saving towards.
@@ -29,6 +30,7 @@ export default function Goals() {
   const { userId } = useSyncState()
   const goals = useGoals()
   const txns = useAllTransactions() ?? []
+  const [book, setBook] = useBook()
   const [editing, setEditing] = useState<Goal | 'new' | null>(null)
   /**
    * Bumped every time the form is opened, and used as its key.
@@ -46,9 +48,24 @@ export default function Goals() {
   }
   const [funding, setFunding] = useState<Goal | null>(null)
 
+  /**
+   * A goal is the household's or it is mine — `owner_id` already says which,
+   * and the server already refuses to show me anybody else's — so the book is
+   * read off the goal itself rather than off the account holding the money.
+   *
+   * That is deliberately not the rule bills and transactions use, where the
+   * account decides. A saving pot is an intention, and where the money happens
+   * to sit is a detail of it: our house deposit can perfectly well live in an
+   * account only one of us is on, and it is still ours.
+   */
+  const inBook = useMemo(
+    () => goals.filter((g) => (book === 'household' ? !g.ownerId : book === 'mine' ? g.ownerId === userId : true)),
+    [goals, book, userId],
+  )
+
   const rows = useMemo(
-    () => goals.map((goal) => ({ goal, progress: goalProgress(goal, txns) })),
-    [goals, txns],
+    () => inBook.map((goal) => ({ goal, progress: goalProgress(goal, txns) })),
+    [inBook, txns],
   )
 
   return (
@@ -62,11 +79,21 @@ export default function Goals() {
         </Button>
       </Toolbar>
 
+      <Toolbar>
+        <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto" />
+      </Toolbar>
+
       {rows.length === 0 ? (
         <Empty
           icon={PiggyBank}
-          title="No goals yet"
-          hint="A holiday, a new boiler, a rainy-day fund — set a target and watch it fill up."
+          title={book === 'household' ? 'No shared goals yet' : book === 'mine' ? 'No goals of your own yet' : 'No goals yet'}
+          hint={
+            goals.length > 0
+              ? book === 'household'
+                ? 'The goals you have are your own — switch to Mine, or leave “Keep this to myself” unticked when you add one.'
+                : 'The goals you have are the household’s — switch to Our household.'
+              : 'A holiday, a new boiler, a rainy-day fund — set a target and watch it fill up.'
+          }
           action={
             <Button onClick={() => openForm('new')}>
               <Plus size={16} /> Add your first goal
@@ -131,6 +158,11 @@ export default function Goals() {
         open={editing !== null}
         onClose={() => setEditing(null)}
         userId={userId}
+        // A goal added while looking at Mine starts as mine. Nothing is
+        // decided by it — the tick box is right there — but adding a personal
+        // goal from the personal view and having it appear in neither list is
+        // the sort of thing that reads as the feature being broken.
+        defaultPersonal={book === 'mine'}
       />
       <FundGoal goal={funding} open={funding !== null} onClose={() => setFunding(null)} />
     </div>
@@ -138,12 +170,14 @@ export default function Goals() {
 }
 
 function GoalForm({
-  goal, open, onClose, userId,
+  goal, open, onClose, userId, defaultPersonal,
 }: {
   goal?: Goal
   open: boolean
   onClose: () => void
   userId?: string
+  /** What a NEW goal starts as. An existing one is whatever it already is. */
+  defaultPersonal?: boolean
 }) {
   const { currency } = useApp()
   // This picker was never filtered, which made it the one place a goal could be
@@ -160,7 +194,7 @@ function GoalForm({
   const [target, setTarget] = useState(goal ? String(goal.targetMinor / 100) : '')
   const [targetDate, setTargetDate] = useState(goal?.targetDate ?? '')
   const [accountId, setAccountId] = useState<string | undefined>(goal?.accountId)
-  const [personal, setPersonal] = useState(!!goal?.ownerId)
+  const [personal, setPersonal] = useState(goal ? !!goal.ownerId : !!defaultPersonal)
 
   const minor = parseAmount(target)
   const canSave = name.trim().length > 0 && minor !== null && minor > 0

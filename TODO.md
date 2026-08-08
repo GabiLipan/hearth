@@ -69,9 +69,16 @@ Two consequences worth remembering:
       configuring; the monthly total is now what *that* book costs to run,
       rather than rent and a music subscription added together. Under
       `Everything` the list is split under headings instead of filtered
-- [ ] Goals marked household or personal, and shown in the matching book
-- [ ] Migration 10: let `link_transfer` tag a goal, so a *reconciled* joint →
-      savings transfer can fund a goal (today only `create_transfer` can)
+- [x] Goals marked household or personal, and shown in the matching book. The
+      book comes off the goal's own `owner_id`, not off the account holding the
+      money — a saving pot is an intention, and our house deposit sitting in an
+      account only one of us is on is still ours
+- [x] **Migration 10** — `link_transfer` now takes a goal, and
+      `set_transfer_goal` tags one afterwards, which is the case that actually
+      matters: the reviewer pairs cross-book transfers on its own, so by the
+      time anybody looks at the row it is already linked. `unlink_transfer`
+      releases the goal too. **Apply `supabase/10-goal-transfers.sql` by hand in
+      the SQL editor** — until then the goal picker on a transfer fails
 
 ## Phase 3 — Transfers under book accounting
 
