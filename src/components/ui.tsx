@@ -250,28 +250,75 @@ export function Segmented<T extends string>({
   className?: string
 }) {
   const selected = Math.max(0, options.findIndex((o) => o.value === value))
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [thumb, setThumb] = useState<{ left: number; width: number } | null>(null)
+
+  /**
+   * Options are sized to their content, not to an equal share.
+   *
+   * Equal shares are cheaper — the thumb is then pure arithmetic and needs no
+   * measurement — but they make the LONGEST label decide the width of the whole
+   * control. "Our household · Mine · Everything" then needs room for three
+   * "Our household"s, and what does not fit gets clipped mid-word, which looks
+   * like a rendering fault rather than a space problem. `flex: 1 1 auto` starts
+   * from each label's own width and shares the slack, so everything fits and a
+   * long option is simply wider than a short one.
+   *
+   * The cost is that the thumb has to be measured. Two things follow, both of
+   * which have bitten this codebase before:
+   *
+   *   - it is read from live geometry rather than remembered, so a resize, a
+   *     font finally loading, or the labels swapping at a breakpoint all put it
+   *     back in the right place;
+   *   - it does not animate until it has been measured once, or the first paint
+   *     would slide it in from the left edge of a control nobody has touched.
+   */
+  useLayoutEffect(() => {
+    const track = trackRef.current
+    if (!track) return
+
+    const measure = () => {
+      const el = track.querySelectorAll<HTMLElement>('[role="tab"]')[selected]
+      if (!el) return
+      setThumb({ left: el.offsetLeft, width: el.offsetWidth })
+    }
+    measure()
+
+    // The track resizing covers a window resize and a breakpoint change; the
+    // buttons resizing covers a web font arriving after first paint, which
+    // changes their widths without changing the track's.
+    const ro = new ResizeObserver(measure)
+    ro.observe(track)
+    for (const el of track.querySelectorAll('[role="tab"]')) ro.observe(el)
+    return () => ro.disconnect()
+  }, [selected, options.length])
+
   return (
     <div
+      ref={trackRef}
       className={cx(
         'relative flex rounded-xl bg-surface-2 p-1 [--seg-pad:0.25rem] md:rounded-lg md:p-0.5 md:[--seg-pad:0.125rem]',
         className,
       )}
       role="tablist"
     >
-      {/* The selection slides between options instead of blinking from one to
-          the next. Every option is `flex-1`, so where the thumb belongs is
-          arithmetic — nothing has to be measured, and it is right on the first
-          frame rather than after a layout effect. */}
       <span
         aria-hidden
         className={cx(
           'absolute inset-y-1 rounded-lg bg-surface shadow-sm ring-1 ring-hairline md:inset-y-0.5 md:rounded-md',
-          'transition-[left] duration-200 ease-out motion-reduce:transition-none',
+          thumb && 'transition-[left,width] duration-200 ease-out motion-reduce:transition-none',
         )}
-        style={{
-          width: `calc((100% - var(--seg-pad) * 2) / ${options.length})`,
-          left: `calc(var(--seg-pad) + (100% - var(--seg-pad) * 2) * ${selected} / ${options.length})`,
-        }}
+        style={
+          thumb
+            ? { left: thumb.left, width: thumb.width }
+            : // Before the first measurement, an equal share is the best guess
+              // and is exactly right whenever the labels happen to be the same
+              // length. It never animates from here.
+              {
+                left: `calc(var(--seg-pad) + (100% - var(--seg-pad) * 2) * ${selected} / ${options.length})`,
+                width: `calc((100% - var(--seg-pad) * 2) / ${options.length})`,
+              }
+        }
       />
       {options.map((o) => (
         <button
@@ -284,7 +331,10 @@ export function Segmented<T extends string>({
             // sliding thumb is positioned arithmetically from an equal share of
             // the width, so a two-line option makes the control taller than the
             // thumb and the selection stops covering what it selected.
-            'relative min-w-0 flex-1 truncate whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:rounded-md md:px-2.5 desktop:py-1',
+            // `flex-auto` (1 1 auto), not `flex-1` (1 1 0%): width starts from
+            // the label and the slack is shared, so a long option is wider than
+            // a short one instead of every option being as wide as the longest.
+            'relative min-w-0 flex-auto truncate whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:rounded-md md:px-2.5 desktop:py-1',
             value === o.value ? 'text-ink' : 'text-ink-3 hover:text-ink-2',
           )}
         >

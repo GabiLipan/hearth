@@ -302,3 +302,68 @@ describe('spending by category, per book', () => {
     expect(inside.reduce((s, r) => s + r.totalMinor, 0)).toBe(125000)
   })
 })
+
+describe('money moved at the end of one month to be spent in the next', () => {
+  // How we actually do it: both salaries land near the end of July, we move
+  // most of each to the joint account on the 31st, and August's mortgage,
+  // groceries and bills come out of that. Left on its own date, August reads
+  // "paid in £0.57, spent £3,142" for most of the month.
+  const july = [
+    txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-07-28', categoryId: 'salary' }),
+    txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-31', transferId: 'julyMine' }),
+    txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-31', transferId: 'julyMine' }),
+    txn({ accountId: 'joint', amountMinor: 180000, date: '2026-07-31', transferId: 'julyHers' }),
+  ]
+  const august = [
+    txn({ accountId: 'joint', amountMinor: -120000, date: '2026-08-03', categoryId: 'home' }),
+    txn({ accountId: 'joint', amountMinor: -60000, date: '2026-08-12', categoryId: 'groceries' }),
+    txn({ accountId: 'joint', amountMinor: 57, date: '2026-08-31', categoryId: 'interest' }),
+  ]
+  const txns = [...july, ...august]
+  const flows = classifyFlows(txns, books)
+
+  it('counts the contribution towards the month it was for', () => {
+    const aug = bookTotals(txns, flows, 'household', '2026-08', books)
+
+    expect(aug.contributions).toBe(380000)
+    expect(aug.spend).toBe(180000)
+    // Interest paid into the joint account is real outside income and stays
+    // exactly where it landed.
+    expect(aug.externalIncome).toBe(57)
+    expect(aug.net).toBe(380000 + 57 - 180000)
+  })
+
+  it('does not leave it counted in July as well', () => {
+    const jul = bookTotals(txns, flows, 'household', '2026-07', books)
+
+    expect(jul.contributions).toBe(0)
+    expect(jul.income).toBe(0)
+  })
+
+  it('moves both legs together, so my book agrees about when it happened', () => {
+    // The same event must not land in different months on either side of it.
+    expect(bookTotals(txns, flows, 'mine', '2026-07', books).contributed).toBe(0)
+    expect(bookTotals(txns, flows, 'mine', '2026-08', books).contributed).toBe(200000)
+    // My salary keeps its real date — only the contribution shifts.
+    expect(bookTotals(txns, flows, 'mine', '2026-07', books).externalIncome).toBe(300000)
+  })
+
+  it('leaves a contribution made early in the month where it is', () => {
+    // Somebody topping the joint account up on the 8th is funding this month,
+    // not next. Only the end-of-month advance shifts.
+    const early = [txn({ accountId: 'joint', amountMinor: 50000, date: '2026-08-08', transferId: 'topup' })]
+    const f = classifyFlows(early, books)
+
+    expect(bookTotals(early, f, 'household', '2026-08', books).contributions).toBe(50000)
+    expect(bookTotals(early, f, 'household', '2026-09', books).contributions).toBe(0)
+  })
+
+  it('does not shift a withdrawal, which is not an advance on anything', () => {
+    const out = txn({ accountId: 'joint', amountMinor: -25000, date: '2026-08-30', transferId: 'back' })
+    const back = txn({ accountId: 'myPrivate', amountMinor: 25000, date: '2026-08-30', transferId: 'back' })
+    const f = classifyFlows([out, back], books)
+
+    expect(bookTotals([out, back], f, 'household', '2026-08', books).withdrawn).toBe(25000)
+    expect(bookTotals([out, back], f, 'household', '2026-09', books).withdrawn).toBe(0)
+  })
+})

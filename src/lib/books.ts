@@ -251,6 +251,49 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
   return out
 }
 
+/* ---------- which month a contribution belongs to ---------- */
+
+/**
+ * Contributions on or after this day of the month count towards the NEXT month.
+ *
+ * We fund the joint account when we are paid, at the end of one month, and
+ * spend it during the next. Every calendar month does therefore contain one
+ * contribution and one month of spending — nothing is missing — but they are
+ * the wrong pair: August's spending is funded by the money that arrived on 31
+ * July, while August's own arrival pays for September.
+ *
+ * Left alone, that is visible twice. The monthly income-versus-spending chart
+ * compares spending against money it did not spend; and for most of the month
+ * the household reads as though it has spent thousands against nothing, because
+ * its income has not turned up yet and will not until the 31st.
+ *
+ * Shifting the contribution is the smallest fix that addresses both. Spending
+ * keeps its real date, so statements still reconcile and nothing else in the
+ * app moves; only the money that was always *for* the following month is
+ * counted there.
+ */
+export const CONTRIBUTION_CUTOFF_DAY = 25
+
+/**
+ * The month a transaction counts towards, which is not always the month it
+ * happened in.
+ *
+ * Applied to both legs of a contribution, so my book and the household's agree
+ * about when it happened — the same event must not land in different months on
+ * either side of it. Each month still contains exactly one salary and exactly
+ * one contribution; the pairing is simply corrected by one.
+ *
+ * NOT applied to withdrawals. Money coming back out of the household is a
+ * response to something, not a regular advance, so there is no next month it is
+ * obviously "for".
+ */
+export function effectiveMonth(t: Transaction, flow: Flow | undefined): string {
+  if (flow !== 'contribution') return monthKey(t.date)
+  const day = Number(t.date.slice(8, 10))
+  if (day < CONTRIBUTION_CUTOFF_DAY) return monthKey(t.date)
+  return shiftMonth(monthKey(t.date), 1)
+}
+
 /* ---------- aggregates ---------- */
 
 export interface BookTotals {
@@ -308,9 +351,11 @@ export function bookTotals(
 
   for (const row of txns) {
     if (!ids.has(row.accountId)) continue
-    if (monthKey(row.date) !== month) continue
     const flow = flows.get(row.id)
     if (!flow || flow === 'internal' || flow === 'ignored') continue
+    // Not `monthKey(row.date)`: a contribution counts towards the month it was
+    // FOR, which for money moved at the end of one month is the next one.
+    if (effectiveMonth(row, flow) !== month) continue
     // Under `all`, my private account and the joint account are one pool, so a
     // contribution is internal again and both its legs are present. Counting it
     // would be exactly the double count the books exist to prevent.

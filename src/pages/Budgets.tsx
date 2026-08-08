@@ -176,7 +176,7 @@ export default function Budgets() {
     <div>
       <Toolbar className="justify-center md:justify-start">
         <MonthStepper month={month} onChange={setMonth} label={monthLabel} canGoForward={!isCurrent} />
-        {userId && <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto md:min-w-[22rem]" />}
+        {userId && <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto" />}
         {budgeted.length > 0 && (
           <div className="hidden min-w-64 flex-1 items-center gap-2.5 md:flex">
             <span className="text-sm text-ink-2 tabular">
