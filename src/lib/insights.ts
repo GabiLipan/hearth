@@ -469,3 +469,88 @@ export function pace(
   }
   return out
 }
+
+/* ---------- 8. Is this month unusual? ---------- */
+
+export interface CategoryDelta {
+  categoryId: string
+  /** What this month came to. Positive. */
+  thisMonthMinor: number
+  /** The median of the months before it that had any spending. Positive. */
+  typicalMinor: number
+  /** Signed: above typical is positive. */
+  deltaMinor: number
+  /** How many past months the median rests on — below three it is not a claim. */
+  basis: number
+}
+
+/**
+ * How this month compares with what a category normally costs.
+ *
+ * The median rather than the mean, and months with NO spending are dropped
+ * rather than counted as zero — the same rule `typicalRange` uses, for the same
+ * reason. One £900 annual insurance payment would otherwise drag the mean up
+ * for the rest of the year, and a category you did not touch in March says
+ * nothing about what is normal for it.
+ *
+ * `basis` is reported rather than hidden behind a threshold, so the caller can
+ * decide what is worth saying out loud. Two past months is not a typical
+ * anything, and "£120 above typical" on that evidence is a confident number
+ * about nothing.
+ */
+export function categoryDeltas(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  categories: Category[],
+  book: BookId,
+  books: BookMap,
+  months: string[],
+  month: string,
+): Map<string, CategoryDelta> {
+  const ids = accountsInBook(book, books)
+  const catMap = new Map(categories.map((c) => [c.id, c]))
+  // Only the months BEFORE the one being looked at: comparing August against a
+  // window that includes August pulls the typical figure towards it.
+  const past = months.filter((m) => m < month)
+  const at = new Map(past.map((m, i) => [m, i]))
+
+  const history = new Map<string, number[]>()
+  const current = new Map<string, number>()
+
+  for (const t of txns) {
+    if (!ids.has(t.accountId) || !t.categoryId) continue
+    const flow = flows.get(t.id)
+    if (!isSpend(flow)) continue
+    const cat = catMap.get(t.categoryId)
+    if (!cat || cat.kind !== 'expense') continue
+    const key = budgetCategoryId(cat)!
+    const when = effectiveMonth(t, flow)
+
+    if (when === month) {
+      current.set(key, (current.get(key) ?? 0) - t.amountMinor)
+      continue
+    }
+    const i = at.get(when)
+    if (i === undefined) continue
+    const row = history.get(key) ?? past.map(() => 0)
+    row[i] -= t.amountMinor
+    history.set(key, row)
+  }
+
+  const out = new Map<string, CategoryDelta>()
+  for (const [categoryId, thisMonthMinor] of current) {
+    const spent = (history.get(categoryId) ?? []).filter((v) => v > 0).sort((a, b) => a - b)
+    if (spent.length === 0) continue
+    const mid = Math.floor(spent.length / 2)
+    const typicalMinor =
+      spent.length % 2 === 1 ? spent[mid] : Math.round((spent[mid - 1] + spent[mid]) / 2)
+    out.set(categoryId, {
+      categoryId,
+      thisMonthMinor,
+      typicalMinor,
+      deltaMinor: thisMonthMinor - typicalMinor,
+      basis: spent.length,
+    })
+  }
+  return out
+}

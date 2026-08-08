@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Account, AccountGrant, Category, Transaction } from './db'
 import { classifyAccounts, classifyFlows, type BookMap } from './books'
 import {
+  categoryDeltas,
   categoryHeatmap,
   fixedVsVariable,
   householdWaterfall,
@@ -284,5 +285,55 @@ describe('the pace line', () => {
     const rows = [txn({ accountId: 'joint', amountMinor: -10000, date: '2026-03-28', categoryId: 'food' })]
     const points = pace(rows, flowsOf(rows), 'household', books, '2026-03')
     expect(points[30].thisMonthMinor).toBe(10000)
+  })
+})
+
+describe('how this month compares with normal', () => {
+  const months = ['2026-01', '2026-02', '2026-03', '2026-04']
+
+  const groceries = (m: string, minor: number) =>
+    txn({ accountId: 'joint', amountMinor: -minor, date: `${m}-10`, categoryId: 'food' })
+
+  it('measures against the median of the months before it', () => {
+    const rows = [groceries('2026-01', 40000), groceries('2026-02', 50000), groceries('2026-03', 45000), groceries('2026-04', 62000)]
+    const d = categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04')!.get('food')!
+
+    expect(d.typicalMinor).toBe(45000)
+    expect(d.thisMonthMinor).toBe(62000)
+    expect(d.deltaMinor).toBe(17000)
+    expect(d.basis).toBe(3)
+  })
+
+  it('uses the median, so one annual bill does not become the norm', () => {
+    // A mean would put "typical" at £262 and call every ordinary month a saving.
+    const rows = [groceries('2026-01', 10000), groceries('2026-02', 10000), groceries('2026-03', 90000), groceries('2026-04', 11000)]
+    const d = categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04')!.get('food')!
+
+    expect(d.typicalMinor).toBe(10000)
+    expect(d.deltaMinor).toBe(1000)
+  })
+
+  it('drops months with no spending rather than counting them as zero', () => {
+    // A category you did not touch says nothing about what is normal for it.
+    const rows = [groceries('2026-01', 40000), groceries('2026-04', 44000)]
+    const d = categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04')!.get('food')!
+
+    expect(d.typicalMinor).toBe(40000)
+    expect(d.basis).toBe(1)
+  })
+
+  it('never counts the month being looked at towards its own typical', () => {
+    const rows = [groceries('2026-04', 90000)]
+    expect(categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04').get('food')).toBeUndefined()
+  })
+
+  it('rolls a subcategory up to its parent, like everything else here', () => {
+    const rows = [
+      txn({ accountId: 'joint', amountMinor: -20000, date: '2026-01-05', categoryId: 'insurance' }),
+      txn({ accountId: 'joint', amountMinor: -30000, date: '2026-04-05', categoryId: 'home' }),
+    ]
+    const d = categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04')!.get('home')!
+    expect(d.typicalMinor).toBe(20000)
+    expect(d.deltaMinor).toBe(10000)
   })
 })

@@ -69,7 +69,6 @@ the gap before that happens, or where linking is not possible at all.
 ### Sharpening what is there
 
 - [ ] "Net each month" only claims to be saving where that is actually true
-- [ ] Month-on-month delta per category — "groceries £120 above typical"
 - [ ] Same month last year, where there is a year of history
 - [ ] Custom date range, not just whole months
 - [ ] A 12-month / year view with an annual total
@@ -156,6 +155,12 @@ bar IS the salary. Committed vs chosen. Share kept, as a rate with a zero line.
 Top payees, grouped by the app's own definition of "same merchant". Category by
 month as a heatmap for spotting drift. And pace: spend-to-date against the same
 point last month, the one comparison a part-finished month can honestly make.
+
+**Month-on-month delta per category.** A "vs typical" column in the report
+table, measured against the median of the months before it — the mean would let
+one annual insurance payment become the norm — with months of no spending
+dropped rather than counted as zero. Silent below three months of history, and
+silent within a tenth of typical, because neither is news.
 
 **CSV import.** Handles a statement with separate money-out and money-in
 columns, both positive — the commonest UK export, and the layout is now always

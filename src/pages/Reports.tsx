@@ -44,6 +44,7 @@ import {
   Waterfall,
 } from '../components/insights'
 import {
+  categoryDeltas,
   categoryHeatmap,
   fixedVsVariable,
   householdWaterfall,
@@ -134,6 +135,10 @@ export default function Reports() {
     () => pace(txns ?? [], flows, book, books, month),
     [txns, flows, book, books, month],
   )
+  const deltas = useMemo(
+    () => categoryDeltas(txns ?? [], flows, categories, book, books, monthKeys, month),
+    [txns, flows, categories, book, books, monthKeys, month],
+  )
 
   /**
    * What the book's accounts held on the 1st, and what they hold now.
@@ -182,9 +187,16 @@ export default function Reports() {
    * file, which no spreadsheet can read as either.
    */
   const exportCategories = () => {
-    const rows: (string | number)[][] = [['Category', 'Spent', 'Share']]
+    const rows: (string | number)[][] = [['Category', 'Spent', 'Typical', 'vs typical', 'Share']]
     for (const s of slices) {
-      rows.push([s.name, csvAmount(s.totalMinor), `${Math.round(s.fraction * 100)}%`])
+      const d = drill ? undefined : deltas.get(s.categoryId)
+      rows.push([
+        s.name,
+        csvAmount(s.totalMinor),
+        d && d.basis >= 3 ? csvAmount(d.typicalMinor) : '',
+        d && d.basis >= 3 ? csvAmount(d.deltaMinor) : '',
+        `${Math.round(s.fraction * 100)}%`,
+      ])
     }
     downloadCSV(`hearth-${book}-${month}${drill ? `-${drillName}` : ''}`, toCSV(rows))
   }
@@ -437,11 +449,12 @@ export default function Reports() {
               )}
             </>
           ) : (
-            <ScrollTable minWidth={360}>
+            <ScrollTable minWidth={460}>
               <thead>
                 <tr className={table.head}>
                   <th className={cx(table.th, table.pinned)}>Category</th>
                   <th className={cx(table.th, 'text-right')}>Spent</th>
+                  <th className={cx(table.th, 'text-right')}>vs typical</th>
                   <th className={cx(table.th, 'text-right')}>Share</th>
                   <th className={cx(table.th, 'w-9')}>
                     <span className="sr-only">Transactions</span>
@@ -467,6 +480,29 @@ export default function Reports() {
                         </span>
                       </td>
                       <td className={cx(table.cell, 'text-right tabular')}>{money(s.totalMinor)}</td>
+                      {/* Only where there is enough history to mean anything.
+                          Three past months is the floor: "£120 above typical"
+                          on two months' evidence is a confident number about
+                          nothing. Only the parent rows carry it, because that
+                          is the level the median was taken at. */}
+                      <td className={cx(table.cell, 'text-right tabular')}>
+                        {(() => {
+                          const d = drill ? undefined : deltas.get(s.categoryId)
+                          if (!d || d.basis < 3) return <span className="text-ink-3">—</span>
+                          // Within a tenth of typical is not news.
+                          if (Math.abs(d.deltaMinor) < Math.max(d.typicalMinor * 0.1, 500)) {
+                            return <span className="text-ink-3">typical</span>
+                          }
+                          return (
+                            <span
+                              className={d.deltaMinor > 0 ? 'text-critical-text' : 'text-good-text'}
+                              title={`Usually about ${money(d.typicalMinor)} over ${d.basis} month${d.basis === 1 ? '' : 's'}`}
+                            >
+                              {money(d.deltaMinor, { sign: true })}
+                            </span>
+                          )
+                        })()}
+                      </td>
                       <td className={cx(table.cell, 'text-right text-ink-3 tabular')}>{Math.round(s.fraction * 100)}%</td>
                       {/* Its own control rather than the row's click, because
                           the row already means "drill into this" wherever there
