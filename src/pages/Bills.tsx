@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Plus, Check, SkipForward, Wand2, CalendarClock, Link2 } from 'lucide-react'
 import type { Bill, BillFreq } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
-import { useAccounts, useAllTransactions, useBills, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
+import { useAccounts, useAllTransactions, useBills, useBook, useBooks, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
 import { canAddTransactions, levelOn } from '../lib/accounts'
+import { accountsInBook, BOOK_LABEL, type BookId, type BookMap } from '../lib/books'
 import { syncNow } from '../lib/session'
 import { daysUntil, fmtDay, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from '../lib/dates'
 import {
@@ -21,6 +22,7 @@ import { parseAmount, currencySymbol } from '../lib/money'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, Toolbar, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
+import { BookSwitcher } from '../components/BookSwitcher'
 
 /** Secondary bill lists fill the viewport in columns rather than stacking. */
 const SIDE_GRID = 'grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(min(100%,20rem),1fr))] md:gap-1.5'
@@ -41,10 +43,33 @@ function DueChip({ dateISO }: { dateISO: string }) {
   )
 }
 
+/**
+ * The bills cut into books, for the `Everything` view.
+ *
+ * Anything on an account in neither book — one somebody has shared with me —
+ * gets its own section rather than being folded into either, for the same
+ * reason `classifyAccounts` keeps `others` separate: it is not the household's
+ * and it is not mine.
+ *
+ * A heading is only worth showing where there is something to tell apart, so a
+ * lone section comes back unlabelled.
+ */
+function splitByBook(bills: Bill[], book: BookId, books: BookMap): { key: string; label?: string; bills: Bill[] }[] {
+  if (book !== 'all') return [{ key: book, bills }]
+  const parts = [
+    { key: 'household', label: BOOK_LABEL.household, bills: bills.filter((b) => books.household.has(b.accountId)) },
+    { key: 'mine', label: BOOK_LABEL.mine, bills: bills.filter((b) => books.mine.has(b.accountId)) },
+    { key: 'others', label: 'Shared with me', bills: bills.filter((b) => books.others.has(b.accountId)) },
+  ].filter((p) => p.bills.length > 0)
+  return parts.length > 1 ? parts : parts.map((p) => ({ ...p, label: undefined }))
+}
+
 export default function Bills() {
   const { money } = useApp()
   const bills = useBills()
   const catMap = useCategoryMap()
+  const books = useBooks()
+  const [book, setBook] = useBook()
   const [editing, setEditing] = useState<Bill | 'new' | null>(null)
   /**
    * Bumped every time the form is opened, and used as its key.
@@ -94,11 +119,14 @@ export default function Bills() {
     }
   }
 
-  async function reconcileAll() {
+  async function reconcileAll(inView: BillMatch[]) {
     // Oldest first, which detectBillPayments already guarantees: each link walks
-    // `next_due` forward from where the last one left it.
-    const list = [...matches]
-    setMatches([])
+    // `next_due` forward from where the last one left it. Only what is on
+    // screen: "Record all" under one book must not quietly settle bills in
+    // another that this view never showed.
+    const list = [...inView]
+    const ids = new Set(list.map((m) => m.txn.id))
+    setMatches((all) => all.filter((m) => !ids.has(m.txn.id)))
     for (const m of list) {
       try {
         await linkBillPayment(m.bill.id, m.txn.id, m.dueOn)
@@ -115,15 +143,54 @@ export default function Bills() {
     await dismissBillMatch(m)
   }
 
-  const active = bills.filter((b) => b.active).sort((a, b) => a.nextDue.localeCompare(b.nextDue))
-  const paused = bills.filter((b) => !b.active)
+  /**
+   * Which book a bill belongs to is decided by the account it leaves — rent
+   * from the joint account is the household's, a subscription from my own is
+   * mine. Nothing to configure, and nothing that can disagree with the
+   * permissions: the same bargain `classifyAccounts` makes.
+   *
+   * A book's bills are not a subset of "all the bills" in any useful sense. The
+   * monthly total under `Our household` is what the household costs to run, and
+   * folding my music subscription into it makes that figure answer nobody's
+   * question.
+   */
+  const inBook = useMemo(() => accountsInBook(book, books), [book, books])
+  const inThisBook = useMemo(() => bills.filter((b) => inBook.has(b.accountId)), [bills, inBook])
+
+  const active = inThisBook.filter((b) => b.active).sort((a, b) => a.nextDue.localeCompare(b.nextDue))
+  const paused = inThisBook.filter((b) => !b.active)
   const monthlyTotal = active.reduce((s, b) => s + monthlyEquivalent(-b.amountMinor, b.freq), 0)
+
+  /**
+   * Under one book the list is simply that book's bills. Under `Everything` it
+   * is split, because a flat list of the lot is what this page did before —
+   * rent and a music subscription in one column with one total under them,
+   * which is two different questions added together.
+   */
+  const sections = useMemo(() => splitByBook(active, book, books), [active, book, books])
+
+  /**
+   * The two derived lists follow the same lens.
+   *
+   * "N of these look already paid" has to mean the bills actually on screen, or
+   * the banner is pointing at rows that are not there — and a suggestion to
+   * track a personal subscription does not belong under the household's costs.
+   * Neither is hidden for good: `Everything` shows the lot.
+   */
+  const bookMatches = useMemo(() => matches.filter((m) => inBook.has(m.bill.accountId)), [matches, inBook])
+  const bookSuggestions = useMemo(() => suggestions.filter((s) => inBook.has(s.accountId)), [suggestions, inBook])
 
   return (
     <div>
       <Toolbar className="justify-between">
         <div className="min-w-0 md:flex md:items-baseline md:gap-2">
-          <p className="text-sm text-ink-3 md:order-2">Recurring bills · monthly equivalent</p>
+          <p className="text-sm text-ink-3 md:order-2">
+            {book === 'household'
+              ? 'What the household costs · monthly equivalent'
+              : book === 'mine'
+                ? 'My own bills · monthly equivalent'
+                : 'Recurring bills · monthly equivalent'}
+          </p>
           <p className="text-3xl font-bold tracking-tight tabular md:order-1 md:text-xl">
             {money(Math.round(monthlyTotal))}
           </p>
@@ -133,31 +200,37 @@ export default function Bills() {
         </Button>
       </Toolbar>
 
+      {/* A bill belongs to the account it leaves, so the lens that splits the
+          reports splits these too. */}
+      <Toolbar>
+        <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto" />
+      </Toolbar>
+
       {/* Placed above the bills, because it is the answer to the question the
           bills below are provoking: "why does this say overdue when I paid it?"
           Reading the explanation after the complaint is the wrong order. */}
-      {matches.length > 0 && (
+      {bookMatches.length > 0 && (
         <Card className="mb-3 overflow-hidden md:mb-2.5">
           <div className="flex flex-wrap items-center gap-2 border-b border-hairline bg-good/8 px-4 py-2.5 md:px-3 md:py-2">
             <Check size={16} className="shrink-0 text-good-text" />
             <p className="min-w-0 flex-1 text-sm">
               <span className="font-medium">
-                {matches.length === 1
+                {bookMatches.length === 1
                   ? 'One of these looks already paid'
-                  : `${matches.length} of these look already paid`}
+                  : `${bookMatches.length} of these look already paid`}
               </span>
               <span className="text-ink-3">
                 {' '}— payments already in your account, not yet recorded against the bill.
               </span>
             </p>
-            {matches.length > 1 && (
-              <Button size="sm" variant="subtle" className="shrink-0" onClick={reconcileAll}>
+            {bookMatches.length > 1 && (
+              <Button size="sm" variant="subtle" className="shrink-0" onClick={() => void reconcileAll(bookMatches)}>
                 <Link2 size={14} /> Record all
               </Button>
             )}
           </div>
           <ul className="divide-y divide-hairline">
-            {matches.map((m) => (
+            {bookMatches.map((m) => (
               <li
                 key={m.txn.id}
                 className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:px-3 desktop:py-2.5"
@@ -201,8 +274,12 @@ export default function Bills() {
       {active.length === 0 && paused.length === 0 ? (
         <Empty
           icon={CalendarClock}
-          title="No recurring bills yet"
-          hint="Add rent, utilities and subscriptions — Hearth tracks due dates and can record them automatically."
+          title={book === 'all' ? 'No recurring bills yet' : `Nothing in ${BOOK_LABEL[book].toLowerCase()} yet`}
+          hint={
+            book !== 'all' && bills.length > 0
+              ? 'There are bills on other accounts — switch to Everything to see them.'
+              : 'Add rent, utilities and subscriptions — Hearth tracks due dates and can record them automatically.'
+          }
           action={
             <Button onClick={() => openForm('new')}>
               <Plus size={16} /> Add your first bill
@@ -211,49 +288,60 @@ export default function Bills() {
         />
       ) : (
         <>
-          {/* Phone: a stacked, thumb-friendly list. */}
-          <Card className="md:hidden">
-            <ul className="divide-y divide-hairline">
-              {active.map((b) => (
-                <li key={b.id} className="flex items-center gap-3 px-4 py-3">
-                  <button onClick={() => openForm(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                    <CategoryDot category={b.categoryId ? catMap.get(b.categoryId) : undefined} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{b.name}</p>
-                      <p className="text-sm text-ink-3">
-                        {FREQ_LABEL[b.freq]}
-                        {b.autoPost ? ' · auto-recorded' : ''}
-                      </p>
-                    </div>
-                  </button>
-                  <div className="flex shrink-0 flex-col items-end gap-1.5">
-                    <span className="font-semibold tabular">{money(b.amountMinor)}</span>
-                    <DueChip dateISO={b.nextDue} />
-                  </div>
-                  {!b.autoPost && (
-                    <div className="flex shrink-0 flex-col gap-1.5">
-                      <button
-                        onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO()).then(() => syncNow())}
-                        title="Mark paid"
-                        aria-label={`Mark ${b.name} paid`}
-                        className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20"
-                      >
-                        <Check size={15} />
-                      </button>
-                      <button
-                        onClick={() => void skipBill(b).then(() => syncNow())}
-                        title="Skip this one"
-                        aria-label={`Skip ${b.name}`}
-                        className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink"
-                      >
-                        <SkipForward size={15} />
-                      </button>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </Card>
+          {/* Phone: a stacked, thumb-friendly list, one card per book. */}
+          <div className="space-y-4 md:hidden">
+            {sections.map((section) => (
+              <div key={section.key}>
+                {section.label && (
+                  <p className="mb-1.5 px-1 text-sm font-semibold uppercase tracking-wide text-ink-3">{section.label}</p>
+                )}
+                <Card>
+                  <ul className="divide-y divide-hairline">
+                    {section.bills.map((b) => (
+                      <li key={b.id} className="flex items-center gap-3 px-4 py-3">
+                        <button onClick={() => openForm(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                          <CategoryDot category={b.categoryId ? catMap.get(b.categoryId) : undefined} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{b.name}</p>
+                            <p className="text-sm text-ink-3">
+                              {FREQ_LABEL[b.freq]}
+                              {b.autoPost ? ' · auto-recorded' : ''}
+                            </p>
+                          </div>
+                        </button>
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          <span className="font-semibold tabular">{money(b.amountMinor)}</span>
+                          <DueChip dateISO={b.nextDue} />
+                        </div>
+                        {!b.autoPost && (
+                          <div className="flex shrink-0 flex-col gap-1.5">
+                            <button
+                              onClick={() =>
+                                void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO()).then(() => syncNow())
+                              }
+                              title="Mark paid"
+                              aria-label={`Mark ${b.name} paid`}
+                              className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20"
+                            >
+                              <Check size={15} />
+                            </button>
+                            <button
+                              onClick={() => void skipBill(b).then(() => syncNow())}
+                              title="Skip this one"
+                              aria-label={`Skip ${b.name}`}
+                              className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink"
+                            >
+                              <SkipForward size={15} />
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              </div>
+            ))}
+          </div>
 
           {/* Desktop: the same bills as a table — every attribute gets a column
               instead of being stacked into a two-line row. */}
@@ -272,63 +360,92 @@ export default function Bills() {
                 </tr>
               </thead>
               <tbody>
-                {active.map((b) => {
-                  const cat = b.categoryId ? catMap.get(b.categoryId) : undefined
-                  return (
-                    <tr key={b.id} className={table.row}>
-                      <td className={cx(table.cell, 'pl-3 pr-3', table.pinned)}>
-                        <button onClick={() => openForm(b)} className="block w-full truncate text-left font-medium hover:text-accent">
-                          {b.name}
-                        </button>
-                      </td>
-                      <td className={cx(table.cell, 'pr-3')}>
-                        <span className="flex items-center gap-1.5 truncate text-ink-2">
-                          <span className="shrink-0" style={{ color: cat ? `var(--series-${cat.slot})` : 'var(--ink-3)' }}>
-                            <CategoryIcon icon={cat?.icon} size={14} />
-                          </span>
-                          <span className="truncate">{cat?.name ?? '—'}</span>
-                        </span>
-                      </td>
-                      <td className={cx(table.cell, 'whitespace-nowrap pr-3 text-ink-3')}>
-                        {FREQ_LABEL[b.freq]}
-                        {b.autoPost ? ' · auto' : ''}
-                      </td>
-                      <td className={cx(table.cell, 'pr-3')}>
-                        <DueChip dateISO={b.nextDue} />
-                      </td>
-                      <td className={cx(table.cell, 'pr-3 text-right font-semibold tabular')}>{money(b.amountMinor)}</td>
-                      <td className={cx(table.cell, 'pr-3')}>
-                        {!b.autoPost && (
-                          <div className="flex justify-end gap-1">
+                {sections.map((section) => (
+                  <Fragment key={section.key}>
+                    {/* One table rather than one per book: separate tables would
+                        each work out their own column widths, and the names and
+                        amounts would stop lining up down the page. */}
+                    {section.label && (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className="border-b border-hairline bg-surface-2/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-2"
+                        >
+                          {section.label}
+                        </td>
+                      </tr>
+                    )}
+                    {section.bills.map((b) => {
+                      const cat = b.categoryId ? catMap.get(b.categoryId) : undefined
+                      return (
+                        <tr key={b.id} className={table.row}>
+                          <td className={cx(table.cell, 'pl-3 pr-3', table.pinned)}>
                             <button
-                              onClick={() => void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO()).then(() => syncNow())}
-                              title="Mark paid"
-                              aria-label={`Mark ${b.name} paid`}
-                              className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20 desktop:size-7"
+                              onClick={() => openForm(b)}
+                              className="block w-full truncate text-left font-medium hover:text-accent"
                             >
-                              <Check size={14} />
+                              {b.name}
                             </button>
-                            <button
-                              onClick={() => void skipBill(b).then(() => syncNow())}
-                              title="Skip this one"
-                              aria-label={`Skip ${b.name}`}
-                              className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink desktop:size-7"
-                            >
-                              <SkipForward size={14} />
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
+                          </td>
+                          <td className={cx(table.cell, 'pr-3')}>
+                            <span className="flex items-center gap-1.5 truncate text-ink-2">
+                              <span
+                                className="shrink-0"
+                                style={{ color: cat ? `var(--series-${cat.slot})` : 'var(--ink-3)' }}
+                              >
+                                <CategoryIcon icon={cat?.icon} size={14} />
+                              </span>
+                              <span className="truncate">{cat?.name ?? '—'}</span>
+                            </span>
+                          </td>
+                          <td className={cx(table.cell, 'whitespace-nowrap pr-3 text-ink-3')}>
+                            {FREQ_LABEL[b.freq]}
+                            {b.autoPost ? ' · auto' : ''}
+                          </td>
+                          <td className={cx(table.cell, 'pr-3')}>
+                            <DueChip dateISO={b.nextDue} />
+                          </td>
+                          <td className={cx(table.cell, 'pr-3 text-right font-semibold tabular')}>
+                            {money(b.amountMinor)}
+                          </td>
+                          <td className={cx(table.cell, 'pr-3')}>
+                            {!b.autoPost && (
+                              <div className="flex justify-end gap-1">
+                                <button
+                                  onClick={() =>
+                                    void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO()).then(() =>
+                                      syncNow(),
+                                    )
+                                  }
+                                  title="Mark paid"
+                                  aria-label={`Mark ${b.name} paid`}
+                                  className="grid size-8 place-items-center rounded-full bg-good/12 text-good-text hover:bg-good/20 desktop:size-7"
+                                >
+                                  <Check size={14} />
+                                </button>
+                                <button
+                                  onClick={() => void skipBill(b).then(() => syncNow())}
+                                  title="Skip this one"
+                                  aria-label={`Skip ${b.name}`}
+                                  className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-3 hover:text-ink desktop:size-7"
+                                >
+                                  <SkipForward size={14} />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </ScrollTable>
           </Card>
         </>
       )}
 
-      {suggestions.length > 0 && (
+      {bookSuggestions.length > 0 && (
         <>
           <p className="mb-2 mt-6 flex items-center gap-1.5 px-1 text-sm font-semibold uppercase tracking-wide text-ink-3 md:mb-1.5 md:mt-5 md:text-xs">
             <Wand2 size={14} /> Looks recurring
@@ -336,7 +453,7 @@ export default function Bills() {
           {/* Auto-filling track: these pack into columns on a wide screen
               instead of each taking a full row. */}
           <div className={SIDE_GRID}>
-            {suggestions.map((s) => (
+            {bookSuggestions.map((s) => (
               <div
                 key={s.payee}
                 className="flex items-center gap-3 rounded-2xl bg-surface px-4 py-3 ring-1 ring-hairline md:gap-2 md:rounded-xl desktop:px-2.5 desktop:py-2"

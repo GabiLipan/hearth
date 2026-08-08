@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { classifyAccounts, classifyFlows, type BookId, type BookMap, type Flow } from './books'
 import {
   db,
@@ -239,14 +239,25 @@ const BOOK_KEY = 'book'
  */
 export function useBook(): [BookId, (next: BookId) => void] {
   const [book, setBook] = useState<BookId>('household')
+  /**
+   * Whether this page has already said which book it wants.
+   *
+   * The stored value arrives asynchronously, so anything choosing a book while
+   * the page is mounting — a drill-through from Reports carrying `?book=` — is
+   * otherwise overwritten a tick later by whatever was on the device before.
+   * An explicit choice always wins over the one being loaded.
+   */
+  const chosen = useRef(false)
 
   useEffect(() => {
     void getSetting(BOOK_KEY).then((raw) => {
+      if (chosen.current) return
       if (raw === 'household' || raw === 'mine' || raw === 'all') setBook(raw)
     })
   }, [])
 
   const choose = useCallback((next: BookId) => {
+    chosen.current = true
     setBook(next)
     void setSetting(BOOK_KEY, next)
   }, [])

@@ -1,13 +1,16 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X } from 'lucide-react'
 import type { Transaction } from '../lib/db'
-import { useAccountMap, useAccounts, useAllTransactions, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
+import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
 import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { accountsInBook, BOOK_LABEL, type BookId } from '../lib/books'
 import { fullName, isTopLevel } from '../lib/categories'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Empty, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
+import { BookSwitcher } from '../components/BookSwitcher'
 import { TransactionForm } from '../components/TransactionForm'
 import { ImportWizard } from '../components/ImportWizard'
 import { TransferReview } from '../components/TransferReview'
@@ -36,10 +39,17 @@ const SCROLL_OFFSET = 76
 
 export default function Activity() {
   const { money } = useApp()
+  const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [catFilter, setCatFilter] = useState<string | null>(null)
-  /** null = every account this device can see; a set = just those. */
+  /** null = every account in the current book; a set = just those. */
   const [accountFilter, setAccountFilter] = useState<Set<string> | null>(null)
+  /**
+   * One month only, or the whole history. Empty by default — the point of the
+   * list is that it runs — and set by a drill-through from Reports, where the
+   * question genuinely is "which rows make up that figure".
+   */
+  const [monthFilter, setMonthFilter] = useState<string | null>(null)
   const [limit, setLimit] = useState(PAGE)
   const [editing, setEditing] = useState<Transaction | undefined>()
   const [importOpen, setImportOpen] = useState(false)
@@ -50,24 +60,55 @@ export default function Activity() {
   const allAccounts = useAccounts()
   const levels = useMyLevels()
   const txns = useAllTransactions()
+  const books = useBooks()
+  const [book, setBook] = useBook()
   const searching = query.trim().length > 0
 
-  // Only accounts whose transactions we are allowed to read — the rest have no
-  // rows here to filter, so offering them would be offering an empty answer.
+  /**
+   * Arriving from a report slice: the same category, month and book that
+   * produced the figure clicked on.
+   *
+   * Read once and cleared from the URL, so that a later change to any of these
+   * filters is not silently undone by a param nobody can see. `book` goes
+   * through the shared setting the switcher writes, which is what makes the
+   * lens survive the navigation rather than being a fourth hidden filter.
+   */
+  useEffect(() => {
+    if ([...params.keys()].length === 0) return
+    const category = params.get('category')
+    const month = params.get('month')
+    const from = params.get('book')
+    if (category) setCatFilter(category)
+    if (month) setMonthFilter(month)
+    if (from === 'household' || from === 'mine' || from === 'all') setBook(from as BookId)
+    setParams({}, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Only accounts whose transactions we are allowed to read, and only those in
+  // the book being looked at. The rest have no rows to filter here, so offering
+  // them would be offering an empty answer.
+  const inBook = useMemo(() => accountsInBook(book, books), [book, books])
   const accounts = useMemo(
-    () => allAccounts.filter((a) => canSeeTransactionsAt(levelOn(a.id, levels))),
-    [allAccounts, levels],
+    () => allAccounts.filter((a) => inBook.has(a.id) && canSeeTransactionsAt(levelOn(a.id, levels))),
+    [allAccounts, inBook, levels],
   )
+
+  // An account filter written under one book means nothing under another.
+  useEffect(() => setAccountFilter(null), [book])
 
   const parents = useMemo(() => categories.filter(isTopLevel), [categories])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
+    const visible = new Set(accounts.map((a) => a.id))
     const list = (txns ?? []).filter((t) => {
+      if (!visible.has(t.accountId)) return false
       if (accountFilter && !accountFilter.has(t.accountId)) return false
+      if (monthFilter && monthKey(t.date) !== monthFilter) return false
       if (catFilter !== null) {
         // The chips are top-level, so a subcategory counts towards its parent —
-        // the same rule budgets use.
+        // the same rule budgets use, and the rule the report slices are built on.
         const cat = t.categoryId ? catMap.get(t.categoryId) : undefined
         if (!cat || (cat.id !== catFilter && cat.parentId !== catFilter)) return false
       }
@@ -75,7 +116,7 @@ export default function Activity() {
       return true
     })
     return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-  }, [txns, catFilter, catMap, accountFilter, query])
+  }, [txns, catFilter, catMap, accountFilter, monthFilter, accounts, query])
 
   /** Where each month starts in `filtered`, and what it came to. */
   const months = useMemo(() => {
@@ -92,7 +133,7 @@ export default function Activity() {
 
   // A changed filter means a different list; keeping the old depth would leave
   // hundreds of rows rendered for a search that matches four.
-  const filterKey = `${query}|${catFilter}|${accountFilter ? [...accountFilter].sort().join(',') : 'all'}`
+  const filterKey = `${query}|${catFilter}|${monthFilter}|${book}|${accountFilter ? [...accountFilter].sort().join(',') : 'all'}`
   useEffect(() => {
     setLimit(PAGE)
     window.scrollTo({ top: 0 })
@@ -180,18 +221,28 @@ export default function Activity() {
   return (
     <div>
       <Toolbar>
+        {/* Same lens as Reports, Home and Budgets. Activity is a ledger rather
+            than an account of what happened, so `all` is a perfectly ordinary
+            answer here — but "show me the joint account's rows" is the question
+            behind most trips to this page. */}
+        <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto" />
+
+        {/* Not "all transactions" any more: a search runs inside the book and
+            the filters on screen, and saying otherwise would make an empty
+            result look like a missing row rather than a narrow lens. */}
         <div className="relative min-w-0 flex-1 basis-52 md:max-w-72 md:flex-none">
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
           <TextInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search all transactions"
+            placeholder="Search transactions"
             className="pl-9! md:pl-8!"
           />
         </div>
 
         <AccountFilter accounts={accounts} value={accountFilter} onChange={setAccountFilter} />
-        <MonthJump current={atMonth} months={months} onPick={jumpTo} />
+        {/* Nowhere to jump to inside a single month. */}
+        {!monthFilter && <MonthJump current={atMonth} months={months} onPick={jumpTo} />}
 
         <Button variant="subtle" onClick={() => setImportOpen(true)}>
           <Upload size={15} /> Import CSV
@@ -206,6 +257,31 @@ export default function Activity() {
       {/* Above the list, so both legs of a proposed pair are visible while you
           decide. It renders nothing at all when there is nothing to ask. */}
       <TransferReview />
+
+      {/* What a drill-through narrowed the list to, and the way back out of it.
+          A filter this strong has to be visible: without the banner the page
+          simply looks like a history that stops. */}
+      {monthFilter && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-accent/8 px-4 py-2.5 ring-1 ring-accent/20 md:mb-2.5 md:py-2">
+          <p className="min-w-0 flex-1 text-sm">
+            <span className="font-medium">{monthLabel(monthFilter)} only</span>
+            <span className="text-ink-3">
+              {' · '}
+              {catFilter ? (catMap.get(catFilter)?.name ?? 'one category') : 'every category'}
+              {book !== 'all' && ` · ${BOOK_LABEL[book]}`}
+            </span>
+          </p>
+          <button
+            onClick={() => {
+              setMonthFilter(null)
+              setCatFilter(null)
+            }}
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-ink-2 ring-1 ring-hairline transition hover:text-ink"
+          >
+            <X size={12} /> Show everything
+          </button>
+        </div>
+      )}
 
       {/* Category filter chips — top-level only, matching the picker. */}
       <div className="no-scrollbar -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 py-1 md:mx-0 md:mb-2 md:flex-wrap md:gap-1.5 md:overflow-visible md:px-0">
@@ -246,10 +322,10 @@ export default function Activity() {
       {txns === undefined ? null : filtered.length === 0 ? (
         <Empty
           icon={Receipt}
-          title={searching ? 'Nothing matches your search' : 'No transactions yet'}
+          title={searching ? 'Nothing matches your search' : 'No transactions here'}
           hint={
-            searching || catFilter || accountFilter
-              ? 'Try widening the filters above.'
+            searching || catFilter || accountFilter || monthFilter || book !== 'all'
+              ? 'Try widening the filters above, or switching to Everything.'
               : 'Add one with the + button, or import a bank statement CSV.'
           }
         />

@@ -64,8 +64,11 @@ Two consequences worth remembering:
 - [x] Personal budgets measure my private accounts only — they used to filter on
       who *recorded* the transaction, which is a different question and got both
       cases wrong
-- [ ] Bills grouped by book — household bills from joint, personal subscriptions
-      from mine
+- [x] Bills grouped by book — household bills from joint, personal subscriptions
+      from mine. A bill belongs to the account it leaves, so nothing needed
+      configuring; the monthly total is now what *that* book costs to run,
+      rather than rent and a music subscription added together. Under
+      `Everything` the list is split under headings instead of filtered
 - [ ] Goals marked household or personal, and shown in the matching book
 - [ ] Migration 10: let `link_transfer` tag a goal, so a *reconciled* joint →
       savings transfer can fund a goal (today only `create_transfer` can)
@@ -89,8 +92,11 @@ Two consequences worth remembering:
 ### Drill-down and navigation
 - [x] Drill into a category's **subcategories** from the donut or the table,
       with a breadcrumb back out (Reports; Home still to do)
-- [ ] Click through from any slice to Activity, filtered to that category,
-      month and book
+- [x] Click through from any slice to Activity, filtered to that category,
+      month and book. Activity gained the book switcher every other page has,
+      plus a month filter it otherwise never uses — shown as a banner with one
+      tap out of it, because a filter that strong has to be visible or the page
+      just looks like a history that stops
 - [ ] Custom date range, not just whole months
 - [ ] A 12-month / year view with an annual total
 
@@ -176,12 +182,13 @@ imported row is read and fixed, so it is the one place worth making fast.
 
 Still open from the same pass:
 
-- [ ] Click a category slice in Reports through to Activity, now that Activity
-      can express "this category, this account, that month" (Phase 4 has the
-      other half of this)
 - [ ] A month heading that sticks to the top while you scroll its rows. Wants
       care: `main` carries `overflow-x: clip` on mobile and the header above it
       is already sticky
+- [ ] Activity's search runs inside the book, so a payee in the other book
+      returns nothing. The empty state says so, but a "search everything
+      instead" escape from that state would be better than making you find the
+      switcher
 
 ## Phase 7 — Carried over from the last round
 

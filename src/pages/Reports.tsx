@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Table2, ChartPie, ChevronLeft } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Table2, ChartPie, ChevronLeft, Receipt } from 'lucide-react'
 import {
   useAllTransactions,
   useBook,
@@ -90,6 +91,22 @@ export default function Reports() {
   const canDrill = (categoryId: string) =>
     categoryId !== OTHER_SLICE_ID &&
     hasBreakdown(categoryId, txns ?? [], flows, categories, book, month, books)
+
+  /**
+   * Out of a figure and into the rows behind it.
+   *
+   * Every slice here is spending in one book, in one month, under one category,
+   * and Activity can now say exactly that — so the answer to "what is that
+   * £412?" is a navigation rather than a reconstruction by hand. "Other" is the
+   * tail of small categories folded together and is not a category at all, so
+   * it goes without one and lands on the whole month.
+   */
+  const navigate = useNavigate()
+  const seeTransactions = (categoryId?: string) => {
+    const q = new URLSearchParams({ month, book })
+    if (categoryId && categoryId !== OTHER_SLICE_ID) q.set('category', categoryId)
+    navigate(`/activity?${q}`)
+  }
 
   if (txns && txns.length === 0) {
     return <Empty icon={ChartPie} title="Nothing to report yet" hint="Add or import some transactions and your charts will appear here." />
@@ -195,9 +212,16 @@ export default function Reports() {
               )}
               {drill ? drillName : `${words.spend}`} · {monthLabel(month)}
             </h3>
-            {!drill && slices.length > 0 && (
-              <span className="text-xs text-ink-3">Tap a category to see what is inside it</span>
-            )}
+            <div className="flex items-center gap-2">
+              {!drill && slices.length > 0 && (
+                <span className="hidden text-xs text-ink-3 sm:inline">Tap a category to see what is inside it</span>
+              )}
+              {slices.length > 0 && (
+                <Button size="sm" variant="subtle" onClick={() => seeTransactions(drill ?? undefined)}>
+                  <Receipt size={13} /> See transactions
+                </Button>
+              )}
+            </div>
           </div>
           {slices.length === 0 ? (
             <p className="py-8 text-center text-sm text-ink-3">
@@ -232,6 +256,9 @@ export default function Reports() {
                   <th className={cx(table.th, table.pinned)}>Category</th>
                   <th className={cx(table.th, 'text-right')}>Spent</th>
                   <th className={cx(table.th, 'text-right')}>Share</th>
+                  <th className={cx(table.th, 'w-9')}>
+                    <span className="sr-only">Transactions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -254,6 +281,23 @@ export default function Reports() {
                       </td>
                       <td className={cx(table.cell, 'text-right tabular')}>{money(s.totalMinor)}</td>
                       <td className={cx(table.cell, 'text-right text-ink-3 tabular')}>{Math.round(s.fraction * 100)}%</td>
+                      {/* Its own control rather than the row's click, because
+                          the row already means "drill into this" wherever there
+                          is anything inside it. `stopPropagation` so the two do
+                          not both fire on the categories that have both. */}
+                      <td className={cx(table.cell, 'pl-2 text-right')}>
+                        <button
+                          aria-label={`See ${s.name} transactions`}
+                          title={`See ${s.name} transactions in ${monthLabel(month)}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            seeTransactions(s.categoryId)
+                          }}
+                          className="grid size-7 place-items-center rounded-lg text-ink-3 transition hover:bg-surface-2 hover:text-ink"
+                        >
+                          <Receipt size={14} />
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
