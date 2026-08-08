@@ -10,12 +10,13 @@ the work, grouped by what it needs before it can start. What has shipped is not
 here at all: it is in the git log, where it cannot rot, and a plan made mostly
 of finished work stops being read.
 
-Right now: **nothing waiting on us.** Every open question has been answered —
-they are recorded below, because the reasoning is worth keeping. What is left is
-**2 pieces of work**: one ready, one needing a migration of its own.
+Right now: **nothing waiting on us**, and **3 pieces of work left** — two of
+them needing nothing at all.
 
-**`supabase/13-paid-for-household.sql` needs applying by hand**, like the
-others. Until then the tick box on a transaction saves nothing.
+**Two migrations need applying by hand**, like the others:
+`supabase/13-paid-for-household.sql` and `supabase/14-book-override.sql`.
+Until then the tick box on a transaction and the book picker on an account both
+save nothing.
 
 ---
 
@@ -78,26 +79,27 @@ it is written down so nobody rediscovers it as a bug.
 
 # Waiting on code
 
-## Ready — nothing blocking this
+Three items. Two need nothing at all; the third needs a migration of its own.
+
+## Ready
 
 **Recurring transfer routes.** Learn "£2,000, my private → joint, monthly" the
 way a bill is learned, so payday stops needing confirmation every month.
 
-## Needing a migration of their own
+**Reimbursements between us.** The mechanism from migration 13 exists — one
+person can already pay for the household out of their own pocket and have it
+land in the right books. What is left is the other direction: paying somebody
+back, a figure for what is outstanding between us, and a way to mark it
+settled. No new column; it is a view over what has been paid for and not yet
+returned.
+
+## Needs a migration of its own
 
 **Tell the person who CAN see the far leg.** `lib/unexplained.ts` names the
 blind spot on my screen — money moved that only my partner can confirm. The
-other half is my device telling theirs "there is an arrival here waiting for you
-to link it", which needs somewhere shared to put the note.
-
-**Explicit per-account book override**, for the cases where deriving the book
-from grants gets it wrong. A column on `accounts` and a policy that lets an
-owner set it.
-
-**Reimbursements between us.** The mechanism from migration 13 exists now; what
-is left is the other direction — paying somebody back, and seeing what is
-outstanding between us. Wants no new column, only a view of what has been paid
-for and not settled.
+other half is my device telling theirs "there is an arrival here waiting for
+you to link it", and a note that crosses between us needs somewhere shared to
+live.
 
 ---
 

@@ -126,6 +126,26 @@ export function classifyAccounts(
   const others = new Set<string>()
 
   for (const a of accounts) {
+    /**
+     * Said outright, and it wins.
+     *
+     * Deriving from grants is the rule and this is the escape hatch for the
+     * cases where the rule is wrong — a joint account we treat as one person's,
+     * or my own account that is really the household's float. Checked first so
+     * the override is not something the derivation can quietly outvote.
+     *
+     * It changes nobody's ACCESS: the grants are untouched, and this only
+     * decides which of your own totals the account lands in.
+     */
+    if (a.bookOverride === 'household') {
+      household.add(a.id)
+      continue
+    }
+    if (a.bookOverride === 'mine') {
+      mine.add(a.id)
+      continue
+    }
+
     const grants = grantsByAccount.get(a.id) ?? []
     const onIt = new Set(grants.filter((g) => atLeast(g.level, 'view')).map((g) => g.userId))
     // A freshly created account has no grant yet — the server writes the

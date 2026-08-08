@@ -1353,6 +1353,8 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
   const { userId } = useSyncState()
   const [name, setName] = useState(account?.name ?? '')
   const [kind, setKind] = useState<Account['kind']>(account?.kind ?? 'current')
+  /** '' means derive from who is on the account, which is the normal case. */
+  const [book, setBook] = useState<'' | 'household' | 'mine'>(account?.bookOverride ?? '')
   const [sharing, setSharing] = useState(false)
   const [opening, setOpening] = useState(
     account?.openingBalanceMinor ? String(account.openingBalanceMinor / 100) : '',
@@ -1376,7 +1378,12 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
     if (!canSave) return
     const openingMinor = parseAmount(opening) ?? 0
     if (account?.id) {
-      await update('accounts', account.id, { name: name.trim(), kind, openingBalanceMinor: openingMinor })
+      await update('accounts', account.id, {
+        name: name.trim(),
+        kind,
+        openingBalanceMinor: openingMinor,
+        bookOverride: book || undefined,
+      })
     } else {
       // Nothing about sharing is decided here. Creating an account makes you
       // its owner (a server trigger writes the grant), and who else can see it
@@ -1463,6 +1470,20 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         <Field label={`Opening balance (${currencySymbol(currency)}, optional)`} hint="The balance before the first transaction recorded in Hearth.">
           <TextInput value={opening} onChange={(e) => setOpening(e.target.value)} inputMode="decimal" placeholder="0.00" />
         </Field>
+        {/* Only when editing. A brand new account has no grants yet, so there is
+            nothing to derive from and nothing to override. */}
+        {account && (
+          <Field
+            label="Which book"
+            hint="Normally worked out from who is on the account. Change it where that is wrong — an account only you can see that is really the household's float, say."
+          >
+            <Select value={book} onChange={(e) => setBook(e.target.value as '' | 'household' | 'mine')}>
+              <option value="">Work it out from who is on it</option>
+              <option value="household">Our household</option>
+              <option value="mine">Mine</option>
+            </Select>
+          </Field>
+        )}
         {account && (
           <button
             type="button"

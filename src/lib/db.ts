@@ -156,6 +156,11 @@ export interface Account {
   /** @deprecated 07 — ownership is an `owner` grant in account_grants. */
   ownerId?: string
   openingBalanceMinor: number
+  /**
+   * Which book this account is in, when deriving it from grants gets it wrong.
+   * Undefined — the normal case — means derive. See `classifyAccounts`.
+   */
+  bookOverride?: 'household' | 'mine'
   sortOrder: number
   createdBy?: string
   updatedAt: string

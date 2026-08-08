@@ -659,3 +659,42 @@ describe('paying for the household out of my own pocket', () => {
     expect(t.spend).toBe(9000)
   })
 })
+
+describe('saying which book an account is in', () => {
+  const withOverride = (id: string, book: 'household' | 'mine') =>
+    accounts.map((a) => (a.id === id ? { ...a, bookOverride: book } : a))
+
+  it('wins over what the grants would have said', () => {
+    // A joint account both of us are on, which we treat as one person's.
+    const b = classifyAccounts(withOverride('joint', 'mine'), grantsByAccount, ME)
+    expect(b.mine.has('joint')).toBe(true)
+    expect(b.household.has('joint')).toBe(false)
+  })
+
+  it('works the other way too', () => {
+    // My own account, which is really the household's float.
+    const b = classifyAccounts(withOverride('myPrivate', 'household'), grantsByAccount, ME)
+    expect(b.household.has('myPrivate')).toBe(true)
+    expect(b.mine.has('myPrivate')).toBe(false)
+  })
+
+  it('rescues an account that derivation put in neither book', () => {
+    // Somebody else's, shared with me at `balance` — I can see the total and
+    // nothing else. Below `view`, so it counts as one person on it and I am not
+    // the owner: `others`, which is in no book of mine at all.
+    const shared = [...accounts, account('withMum')]
+    const grants = new Map(grantsByAccount)
+    grants.set('withMum', [grant('withMum', 'mum'), grant('withMum', ME, 'balance')])
+
+    expect(classifyAccounts(shared, grants, ME).others.has('withMum')).toBe(true)
+
+    const overridden = shared.map((a) => (a.id === 'withMum' ? { ...a, bookOverride: 'mine' as const } : a))
+    const b = classifyAccounts(overridden, grants, ME)
+    expect(b.mine.has('withMum')).toBe(true)
+    expect(b.others.has('withMum')).toBe(false)
+  })
+
+  it('leaves everything alone when it is not set', () => {
+    expect(classifyAccounts(accounts, grantsByAccount, ME)).toEqual(books)
+  })
+})
