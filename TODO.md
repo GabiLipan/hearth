@@ -4,15 +4,18 @@ The plan for reshaping Hearth around how we actually move money: salaries land i
 private accounts, most of each salary moves to the joint account, the household
 spends from there, and some personal spending stays behind.
 
-**How to read this.** Two sections. **Waiting on us** is decisions — nothing can
-be built until we answer them. **Waiting on code** is work, each item labelled
-`ready` or `migration 11` so you can see at a glance what is actually pickable
-up. What has already shipped is not here at all: it is in the git log, where it
-cannot rot, and a plan made mostly of finished work stops being read.
+**How to read this.** **Decided** is the answers we have already given, kept
+because the reasoning behind a rule outlives the rule. **Waiting on code** is
+the work, grouped by what it needs before it can start. What has shipped is not
+here at all: it is in the git log, where it cannot rot, and a plan made mostly
+of finished work stops being read.
 
-Right now: **6 decisions waiting on us**, and **3 pieces of work** — 1 ready, 2
-needing schema changes of their own. Migration 11 is written and waiting to be
-applied.
+Right now: **nothing waiting on us.** Every open question has been answered —
+they are recorded below, because the reasoning is worth keeping. What is left is
+**3 pieces of work**: one ready, two needing a migration of their own.
+
+**`supabase/12-transfer-categories.sql` needs applying by hand**, like the
+others. Until then unlinking a transfer still loses the categories.
 
 ---
 
@@ -41,41 +44,37 @@ Two consequences worth remembering:
 
 ---
 
-# Waiting on us
+# Decided
 
-Six questions. None of them has code waiting behind it that I can write first —
-answering them *is* the blocker.
+Answered 8 August 2026. Recorded here because the reasoning behind a rule is
+worth more than the rule, and none of this is derivable from the code.
 
-**1. Is joint savings inside the household book?**
-It is today, which is what makes "net" literally equal "saved". The alternative
-is giving it its own book. Currently assumed, not decided.
+**Joint savings is inside the household book.** Confirmed. This is what makes
+"net" literally equal "saved" — every account is inside the book, so nothing
+leaves it except by being spent.
 
-**2. Do credit cards follow the normal rule?**
-Assumed yes: a card only one of us holds is personal, a joint one is the
-household's. A personal card paid off from joint is then a household → personal
-flow rather than household spending. Say if that is wrong.
+**Credit cards follow the normal rule.** Confirmed. A card only one of us holds
+is personal; a joint one is the household's. A personal card paid off from joint
+is a household → personal flow, not household spending.
 
-**3. Should unlinking a transfer put the categories back?**
-Linking clears `category_id` on both legs and the old values are gone. Storing
-them to restore is easy — the question is whether restoring is *right*, or
-whether it re-creates an answer somebody deliberately cleared.
+**Unlinking a transfer puts the categories back.** Confirmed, and done —
+migration 12 keeps them in `transactions.prior_category_id` between the two
+operations. A category set while the transfer was linked wins over the
+remembered one, since it is the newer answer.
 
-**4. A household bill paid from a personal card.**
-Needs a per-transaction "this was household spending, I just paid for it" flag.
-The column is the easy half; what it does to both books is the question. Does it
-move the spending into the household book and leave a debt in mine? Or stay
-where it is and only annotate?
+**A household bill paid from a personal card moves the spending into the
+household book and leaves a debt in the personal one.** In Gabi's words: it is
+almost exactly as if the money had gone from the personal account into the joint
+one and then been spent from there. So one flagged row is two events — a
+contribution out of my book, and household spending in theirs — which is the
+same "counted once on each side" rule that already governs a transfer crossing
+between books.
 
-**5. Reimbursements between us.**
-Almost certainly the same mechanism as (4) — worth settling the two together
-rather than building one and retrofitting the other.
+**Reimbursements between us use the same mechanism**, and are built with it
+rather than after it.
 
-**6. Multi-currency, for Wise and Revolut.**
-The app is single-currency and any foreign amount is silently wrong today. Not
-"out of scope" so much as "not decided": a real answer means a rate source and a
-decision about which day's rate a transaction is worth.
-
----
+**Multi-currency is out of scope for now.** Foreign amounts stay silently wrong;
+it is written down so nobody rediscovers it as a bug.
 
 # Waiting on code
 
@@ -84,16 +83,7 @@ decision about which day's rate a transaction is worth.
 **Recurring transfer routes.** Learn "£2,000, my private → joint, monthly" the
 way a bill is learned, so payday stops needing confirmation every month.
 
-## Waiting to be applied
-
-**`supabase/11-account-recovery.sql`. Run it by hand in the Supabase SQL
-editor.** Until then the "Recoverable" section in Settings stays empty and its
-RPCs fail. Undo for a deleted account and reclaiming an ownerless one are both
-written and covered by `99g-recovery-tests.sql`.
-
-## Needing a schema change of their own
-
-Neither of these is part of migration 11 — each wants its own.
+## Needing a migration of their own
 
 **Tell the person who CAN see the far leg.** `lib/unexplained.ts` names the
 blind spot on my screen — money moved that only my partner can confirm. The
@@ -103,6 +93,14 @@ to link it", which needs somewhere shared to put the note.
 **Explicit per-account book override**, for the cases where deriving the book
 from grants gets it wrong. A column on `accounts` and a policy that lets an
 owner set it.
+
+**Paying for the household from a personal account**, and reimbursements with
+it. Now specified (see Decided): a flagged row counts as a contribution out of
+my book and as household spending in theirs. The awkward part is not the column
+but `bookTotals`, which selects rows by ACCOUNT — deliberately, since that is
+what stops a contribution being counted into both books twice. This one row has
+to be an exception to that rule, and the exception has to be written so it
+cannot widen.
 
 ---
 

@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `11`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `12`, then `local/98-grants.sql`, then `exec`
 a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -56,6 +56,7 @@ read-only detector that reports which are present — run it when unsure.
 | `09-reconcile.sql` | linking rows that already exist: a transaction to a bill occurrence, two transactions into one transfer, and both undos |
 | `10-goal-transfers.sql` | a transfer that already exists can fund a goal — `link_transfer` gains `p_goal_id`, `set_transfer_goal` tags one afterwards, `unlink_transfer` releases it |
 | `11-account-recovery.sql` | `restore_account` undoes a delete, `deleted_accounts` is the bin, `claim_account` lets an admin take an ownerless account and `unowned_accounts` is how they find one |
+| `12-transfer-categories.sql` | `transactions.prior_category_id`, so unlinking a transfer gives each leg back the category linking took off it |
 
 All are re-runnable, with **one ordering trap**: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
@@ -365,9 +366,10 @@ the single place a level comes from.
 - No end-to-end test covers two users at once; the two-person cases are asserted
   in `supabase/99c-ownership-tests.sql` and `99e-reconcile-tests.sql` at the SQL
   layer only.
-- Unlinking a transfer leaves both legs uncategorised, and now also releases any
-  goal it was funding: linking clears `category_id` on both and unlinking clears
-  `goal_id`, and neither previous value is recoverable. Releasing the goal is
-  deliberate — `goalProgress` sums `goal_id` rather than transfers, so a tag left
-  on a leg that is no longer part of one would keep the pot claiming money the
-  app no longer believes was moved into it.
+- Unlinking a transfer releases any goal it was funding, and that value is not
+  recoverable. Deliberate: `goalProgress` sums `goal_id` rather than transfers,
+  so a tag left on a leg that is no longer part of one would keep the pot
+  claiming money the app no longer believes was moved into it. The categories
+  ARE recoverable as of migration 12 — `prior_category_id` holds them between
+  link and unlink, and a newer answer set while linked wins over the remembered
+  one.

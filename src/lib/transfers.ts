@@ -285,10 +285,13 @@ export async function setTransferGoal(transferId: string, goalId: string | null)
 }
 
 /**
- * Split one back into two ordinary transactions. Both are left uncategorised,
- * and any goal the transfer was funding is released — a tagged credit that is
- * no longer part of a transfer would go on counting towards the pot as if the
- * money had simply arrived.
+ * Split one back into two ordinary transactions.
+ *
+ * Each leg gets back the category linking took off it, unless somebody
+ * categorised it while it was linked — a newer answer wins over a remembered
+ * one. Any goal the transfer was funding is released, because a tagged credit
+ * that is no longer part of a transfer would go on counting towards the pot as
+ * if the money had simply arrived.
  */
 export async function unlinkTransfer(transferId: string) {
   return rpc<number>('unlink_transfer', { p_transfer_id: transferId })

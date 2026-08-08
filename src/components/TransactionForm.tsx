@@ -463,7 +463,9 @@ function GoalTag({ txn }: { txn: Transaction }) {
  * a row be both a bill payment and a transfer:
  *
  *   - recorded against a bill  → release it, freeing that occurrence
- *   - one leg of a transfer    → split it back into two ordinary transactions
+ *   - one leg of a transfer    → split it back into two ordinary transactions,
+ *                                each getting back the category linking took
+ *                                off it (migration 12)
  *   - neither                  → pair it with its other half by hand
  *
  * The manual pairing is what makes "Never" a usable answer to the transfer

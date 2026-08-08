@@ -39,6 +39,12 @@ export interface Transaction {
   transferId?: string
   /** Money paid into a savings goal — set on the incoming leg. */
   goalId?: string
+  /**
+   * What this leg was filed under before `link_transfer` cleared it, so
+   * "Not a transfer" can put it back. Server-owned: only the link/unlink RPCs
+   * write it, and it is not in `mapping.ts`'s writable allow-list.
+   */
+  priorCategoryId?: string
   date: string // yyyy-MM-dd (server column `occurred_on`)
   payee: string
   note?: string
