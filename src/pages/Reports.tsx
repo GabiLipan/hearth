@@ -34,6 +34,24 @@ import { Card, Segmented, Empty, Toolbar, MonthStepper, Button, table, ScrollTab
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { CategoryDonut, SpendBars, IncomeSpendBars, NetLine } from '../components/charts'
+import {
+  CategoryHeatmap,
+  FixedVariableBars,
+  PaceLine,
+  SalaryStack,
+  SavingsRateLine,
+  TopPayees,
+  Waterfall,
+} from '../components/insights'
+import {
+  categoryHeatmap,
+  fixedVsVariable,
+  householdWaterfall,
+  pace,
+  salaryBars,
+  savingsRate,
+  topPayees,
+} from '../lib/insights'
 
 export default function Reports() {
   const { money } = useApp()
@@ -45,6 +63,8 @@ export default function Reports() {
   const [drill, setDrill] = useState<string | null>(null)
 
   const txns = useAllTransactions()
+  const accounts = useAccounts()
+  const levels = useMyLevels()
   const categories = useCategories()
   const catMap = useCategoryMap()
   const books = useBooks()
@@ -81,6 +101,41 @@ export default function Reports() {
   )
 
   /**
+   * The months the range covers, shared by every series below so they all line
+   * up along the same axis.
+   */
+  const monthKeys = useMemo(() => series.map((p) => p.key), [series])
+
+  const waterfall = useMemo(
+    () => householdWaterfall(txns ?? [], flows, books, accounts, month),
+    [txns, flows, books, accounts, month],
+  )
+  const salary = useMemo(
+    () => salaryBars(txns ?? [], flows, books, monthKeys),
+    [txns, flows, books, monthKeys],
+  )
+  const committed = useMemo(
+    () => fixedVsVariable(txns ?? [], flows, book, books, monthKeys),
+    [txns, flows, book, books, monthKeys],
+  )
+  const kept = useMemo(
+    () => savingsRate(txns ?? [], flows, book, books, monthKeys),
+    [txns, flows, book, books, monthKeys],
+  )
+  const payees = useMemo(
+    () => topPayees(txns ?? [], flows, categories, book, books, month),
+    [txns, flows, categories, book, books, month],
+  )
+  const heatmap = useMemo(
+    () => categoryHeatmap(txns ?? [], flows, categories, book, books, monthKeys),
+    [txns, flows, categories, book, books, monthKeys],
+  )
+  const pacePoints = useMemo(
+    () => pace(txns ?? [], flows, book, books, month),
+    [txns, flows, book, books, month],
+  )
+
+  /**
    * What the book's accounts held on the 1st, and what they hold now.
    *
    * The figure a part-finished month actually needs. On the 8th, "Paid in
@@ -89,8 +144,6 @@ export default function Reports() {
    * useful. Undefined when any account in the book is one this device may only
    * see the total of — see `bookBalances`.
    */
-  const accounts = useAccounts()
-  const levels = useMyLevels()
   const balances = useMemo(
     () =>
       bookBalances(accounts, txns ?? [], book, books, month, (id) =>
@@ -459,6 +512,93 @@ export default function Reports() {
               <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">{words.netHint}</p>
               <NetLine data={series} />
             </Card>
+
+            {/* The household's month as one path, not three figures to subtract
+                in your head. Household only: the steps ARE the household model,
+                and "moved to savings" means nothing in a book with one account
+                in it. */}
+            {book === 'household' && waterfall.some((s) => s.deltaMinor !== 0) && (
+              <Card className="p-5 md:p-4 xl:col-span-2">
+                <h3 className="mb-1 font-semibold md:text-sm">Where it went · {monthLabel(month)}</h3>
+                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
+                  Paid in, then out again, in the order it happened. The last bar is what is still sitting
+                  in the current account.
+                </p>
+                <Waterfall steps={waterfall} />
+              </Card>
+            )}
+
+            {/* The mirror of it, and the reason the personal book exists: the
+                bar is the salary, and the question is what share of it went
+                where. */}
+            {book === 'mine' && salary.some((b) => b.earnedMinor > 0) && (
+              <Card className="p-5 md:p-4 xl:col-span-2">
+                <h3 className="mb-1 font-semibold md:text-sm">What each salary turned into</h3>
+                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
+                  Each bar is one month's earnings, split into what went to the household, what you spent on
+                  yourself, and what stayed put.
+                </p>
+                <SalaryStack data={salary} />
+              </Card>
+            )}
+
+            {committed.some((m) => m.fixedMinor + m.variableMinor > 0) && (
+              <Card className="p-5 md:p-4">
+                <h3 className="mb-1 font-semibold md:text-sm">Committed vs chosen</h3>
+                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
+                  How much of the spending is bills you track. Anything not tracked as a bill counts as
+                  chosen, so this is only as good as your bill list.
+                </p>
+                <FixedVariableBars data={committed} />
+              </Card>
+            )}
+
+            {kept.some((m) => m.rate !== null) && (
+              <Card className="p-5 md:p-4">
+                <h3 className="mb-1 font-semibold md:text-sm">Share kept</h3>
+                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
+                  {book === 'mine'
+                    ? 'What was left with you, as a share of what you earned. Money moved to the household is not spending, but it is not kept either.'
+                    : 'What did not go out again, as a share of what came in. Below the line, more went out than in.'}
+                </p>
+                <SavingsRateLine data={kept} />
+              </Card>
+            )}
+
+            {payees.length > 0 && (
+              <Card className="p-5 md:p-4">
+                <h3 className="mb-1 font-semibold md:text-sm">Top payees · {monthLabel(month)}</h3>
+                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
+                  Under the category level. Shops the app treats as the same merchant are one line.
+                </p>
+                <TopPayees rows={payees} />
+              </Card>
+            )}
+
+            {/* Deliberately the widest thing on the page. The point of it is
+                reading ALONG a row for drift, which needs the months to be far
+                enough apart to tell apart. */}
+            {heatmap.rows.length > 0 && (
+              <Card className="p-5 md:p-4 xl:col-span-2">
+                <h3 className="mb-1 font-semibold md:text-sm">Category by month</h3>
+                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
+                  Read along a row to see a category creeping up. Shading compares every cell against the
+                  biggest one, so the rows are comparable with each other.
+                </p>
+                <CategoryHeatmap grid={heatmap} />
+              </Card>
+            )}
+
+            {pacePoints.some((p) => p.thisMonthMinor || p.lastMonthMinor) && (
+              <Card className="p-5 md:p-4 xl:col-span-2">
+                <h3 className="mb-1 font-semibold md:text-sm">Pace</h3>
+                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
+                  Spending so far against the same point the month before — the one comparison a
+                  part-finished month can honestly make.
+                </p>
+                <PaceLine points={pacePoints} month={month} />
+              </Card>
+            )}
           </>
         ) : (
           <Card className="p-5 md:p-4 xl:col-span-2">

@@ -66,18 +66,6 @@ the gap before that happens, or where linking is not possible at all.
 
 ## Reporting and visuals
 
-### New views — *mock these side by side before building any of them*
-
-- [ ] **Household waterfall** — contributions in → spending → to savings → left
-      in current, as one figure per step
-- [ ] **Personal stacked bar** — `contributed | personal spend | left over` =
-      salary, one bar per month
-- [ ] **Fixed vs variable** — tracked bills against everything else
-- [ ] **Savings rate** — percentage put away, and its trend
-- [ ] **Top payees** — where the money actually goes, under the category level
-- [ ] **Category heatmap** — months across, categories down, for spotting drift
-- [ ] **Pace line** — spend-to-date against the same point last month
-
 ### Sharpening what is there
 
 - [ ] "Net each month" only claims to be saving where that is actually true
@@ -157,6 +145,14 @@ and Reports says so under the figures, with the row marked in Activity. It reads
 the words the bank used and nothing else: no amount heuristic, and a category is
 taken as the answer. Nothing is reclassified, because guessing here would make
 the figures wrong in a way nobody could see.
+
+**Seven report views** (`lib/insights.ts`, `components/insights.tsx`). Household
+waterfall — paid in → spent → moved to savings → left in current, as one path
+rather than three figures to subtract. What each salary turned into, where the
+bar IS the salary. Committed vs chosen. Share kept, as a rate with a zero line.
+Top payees, grouped by the app's own definition of "same merchant". Category by
+month as a heatmap for spotting drift. And pace: spend-to-date against the same
+point last month, the one comparison a part-finished month can honestly make.
 
 **Bills.** Reconciliation walks both ways from `nextDue`, so a year of history
 imported after a bill was created is offered rather than ignored.
