@@ -188,6 +188,24 @@ export function TransactionForm({
   const books = useBooks()
   const offerHousehold = kind === 'expense' && !!accountId && !books.household.has(accountId)
 
+  /**
+   * How wide the amount field is, and how big its number.
+   *
+   * Grows first, then shrinks the type once growing would push it past the
+   * sheet. `ch` is exact here rather than approximate: the field is `tabular`,
+   * so every digit is the width of a zero. The separator and the point are
+   * narrower, which only ever leaves a little slack.
+   *
+   * The steps are deliberately coarse. A size that changed on every keystroke
+   * would wobble while you type, and the point is to stop the number being cut
+   * off, not to fill the width exactly.
+   */
+  const amountSize = useMemo(() => {
+    const len = Math.max(amount.length, 1)
+    const rem = len <= 7 ? 3 : len <= 9 ? 2.5 : len <= 11 ? 2 : 1.625
+    return { fontSize: `${rem}rem`, width: `${Math.max(4, len + 1)}ch` }
+  }, [amount])
+
   const amountMinor = parseAmount(amount)
   const canSave = amountMinor !== null && amountMinor > 0 && payee.trim() && categoryId !== undefined && accountId !== undefined
 
@@ -291,8 +309,16 @@ export function TransactionForm({
           ]}
         />
 
+        {/* The field is sized to the number, not to a guess about it. A fixed
+            width clipped anything past six figures, which is not an unusual
+            amount to type — a house deposit, a car, a year of rent. */}
         <div className="flex items-center justify-center gap-1 py-2">
-          <span className="text-3xl font-semibold text-ink-3">{currencySymbol(currency)}</span>
+          <span
+            className="font-semibold text-ink-3 transition-[font-size] duration-150"
+            style={{ fontSize: `calc(${amountSize.fontSize} * 0.62)` }}
+          >
+            {currencySymbol(currency)}
+          </span>
           <input
             ref={amountRef}
             value={amount}
@@ -300,7 +326,8 @@ export function TransactionForm({
             inputMode="decimal"
             placeholder="0"
             aria-label="Amount"
-            className="w-44 bg-transparent text-center text-5xl font-bold tracking-tight outline-none placeholder:text-ink-3/40 tabular"
+            style={amountSize}
+            className="min-w-0 max-w-full bg-transparent text-center font-bold tracking-tight outline-none transition-[font-size,width] duration-150 placeholder:text-ink-3/40 tabular"
           />
         </div>
 
