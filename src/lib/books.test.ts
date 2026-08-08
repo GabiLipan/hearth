@@ -5,6 +5,8 @@ import {
   bookSpendByCategory,
   bookTotals,
   sumBookTotals,
+  bookTotalsInRange,
+  bookSpendByCategoryInRange,
   classifyAccounts,
   classifyFlows,
   contributionSplit,
@@ -494,5 +496,68 @@ describe('asking the same question of several months', () => {
   it('ignores months outside the set', () => {
     expect(totalFor(['2026-04'])).toEqual({ home: 30000, shopping: 5000 })
     expect(totalFor([])).toEqual({})
+  })
+})
+
+describe('an arbitrary run of days', () => {
+  const cats: Category[] = [
+    { id: 'home', name: 'Home & utilities', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+    { id: 'shopping', name: 'Shopping', kind: 'expense', sortOrder: 1, updatedAt: 'x' },
+  ]
+
+  it('counts both ends of the range', () => {
+    const rows = [
+      txn({ accountId: 'joint', amountMinor: -1000, date: '2026-03-09', categoryId: 'home' }),
+      txn({ accountId: 'joint', amountMinor: -2000, date: '2026-03-10', categoryId: 'home' }),
+      txn({ accountId: 'joint', amountMinor: -4000, date: '2026-03-20', categoryId: 'home' }),
+      txn({ accountId: 'joint', amountMinor: -8000, date: '2026-03-21', categoryId: 'home' }),
+    ]
+    const t = bookTotalsInRange(rows, classifyFlows(rows, books), 'household', books, '2026-03-10', '2026-03-20')
+    expect(t.spend).toBe(6000)
+  })
+
+  it('spans months without caring where they end', () => {
+    const rows = [
+      txn({ accountId: 'joint', amountMinor: -1000, date: '2026-03-28', categoryId: 'home' }),
+      txn({ accountId: 'joint', amountMinor: -2000, date: '2026-04-03', categoryId: 'shopping' }),
+    ]
+    const flows = classifyFlows(rows, books)
+    expect(bookTotalsInRange(rows, flows, 'household', books, '2026-03-25', '2026-04-05').spend).toBe(3000)
+
+    const byCat = bookSpendByCategoryInRange(rows, flows, cats, 'household', books, '2026-03-25', '2026-04-05')
+    expect(Object.fromEntries(byCat.map((r) => [r.categoryId, r.totalMinor]))).toEqual({
+      home: 1000,
+      shopping: 2000,
+    })
+  })
+
+  it('counts a contribution on the day it moved, NOT the month it is for', () => {
+    /**
+     * The deliberate difference from `bookTotals`. The 25th cut-off moves a
+     * contribution into the month it funds, and a fortnight in the middle of
+     * March cannot answer "which month is this for" — so a range counts the day
+     * the money actually moved, and the screen says so.
+     */
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-28', transferId: 'x' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-28', transferId: 'x' }),
+    ]
+    const flows = classifyFlows(rows, books)
+
+    // bookTotals shifts it into April; the range does not.
+    expect(bookTotals(rows, flows, 'household', '2026-04', books).contributions).toBe(200000)
+    expect(bookTotalsInRange(rows, flows, 'household', books, '2026-03-01', '2026-03-31').contributions).toBe(200000)
+    expect(bookTotalsInRange(rows, flows, 'household', books, '2026-04-01', '2026-04-30').contributions).toBe(0)
+  })
+
+  it('leaves a joint-to-savings transfer out, the way every other total does', () => {
+    const rows = march()
+    const t = bookTotalsInRange(rows, classifyFlows(rows, books), 'household', books, '2026-03-01', '2026-03-31')
+    // Mortgage 1,200 + groceries 600 + utilities 250 + other home 350, and
+    // nothing at all for the £1,000 moved from joint current to joint savings.
+    expect(t.spend).toBe(240000)
+    // Same answer as the month version, which is the point: a range that
+    // happens to be a whole month must not disagree with `bookTotals`.
+    expect(t.spend).toBe(bookTotals(rows, classifyFlows(rows, books), 'household', '2026-03', books).spend)
   })
 })

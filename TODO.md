@@ -10,8 +10,9 @@ be built until we answer them. **Waiting on code** is work, each item labelled
 up. What has already shipped is not here at all: it is in the git log, where it
 cannot rot, and a plan made mostly of finished work stops being read.
 
-Right now: **6 decisions waiting on us**, and **4 pieces of work** — 2 ready, 2
-behind migration 11 (which is written and waiting to be applied).
+Right now: **6 decisions waiting on us**, and **3 pieces of work** — 1 ready, 2
+needing schema changes of their own. Migration 11 is written and waiting to be
+applied.
 
 ---
 
@@ -78,27 +79,21 @@ decision about which day's rate a transaction is worth.
 
 # Waiting on code
 
-## Ready — nothing blocking these
-
-**Custom date range in Reports.** Not just whole months or a year. The one
-substantial piece left in reporting: unlike the year view, an arbitrary start and
-end cannot reuse the month-keyed aggregates. `bookTotals`,
-`bookSpendByCategory` and every function in `insights.ts` would have to take a
-range, and the contribution cut-off (`effectiveMonth`, the 25th rule) has no
-meaning inside a period that does not align to a month. Wants its own pass.
+## Ready — nothing blocking this
 
 **Recurring transfer routes.** Learn "£2,000, my private → joint, monthly" the
 way a bill is learned, so payday stops needing confirmation every month.
 
-## Migration 11 — WRITTEN, waiting to be applied
+## Waiting to be applied
 
-`supabase/11-account-recovery.sql`. **Run it by hand in the Supabase SQL
+**`supabase/11-account-recovery.sql`. Run it by hand in the Supabase SQL
 editor.** Until then the "Recoverable" section in Settings stays empty and its
-two RPCs fail. Undo for a deleted account and reclaiming an ownerless one are
-both done and covered by `99g-recovery-tests.sql`.
+RPCs fail. Undo for a deleted account and reclaiming an ownerless one are both
+written and covered by `99g-recovery-tests.sql`.
 
-The two below still need building on top of it, and are what is left of that
-group:
+## Needing a schema change of their own
+
+Neither of these is part of migration 11 — each wants its own.
 
 **Tell the person who CAN see the far leg.** `lib/unexplained.ts` names the
 blind spot on my screen — money moved that only my partner can confirm. The
@@ -106,7 +101,8 @@ other half is my device telling theirs "there is an arrival here waiting for you
 to link it", which needs somewhere shared to put the note.
 
 **Explicit per-account book override**, for the cases where deriving the book
-from grants gets it wrong.
+from grants gets it wrong. A column on `accounts` and a policy that lets an
+owner set it.
 
 ---
 

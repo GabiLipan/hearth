@@ -17,13 +17,15 @@ import { csvAmount, downloadCSV, toCSV } from '../lib/csv'
 import { unexplainedLegs, unexplainedTotals } from '../lib/unexplained'
 import { useSyncState } from '../hooks/useSync'
 import { nameOf } from '../components/PersonDot'
-import { thisMonthKey, monthLabel, shiftMonth } from '../lib/dates'
+import { thisMonthKey, monthLabel, shiftMonth, todayISO, fmtFullDate } from '../lib/dates'
 import { OTHER_SLICE_ID } from '../lib/stats'
 import {
   bookBalances,
   bookSeries,
   bookSlices,
   bookTotals,
+  bookTotalsInRange,
+  rangeSlices,
   sumBookTotals,
   contributionSplit,
   hasBreakdown,
@@ -31,7 +33,7 @@ import {
   type BookId,
 } from '../lib/books'
 import { useApp } from '../state/AppContext'
-import { Card, Segmented, Empty, Toolbar, MonthStepper, Button, table, ScrollTable, cx } from '../components/ui'
+import { Card, Segmented, Empty, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { CategoryDonut, SpendBars, IncomeSpendBars, NetLine } from '../components/charts'
@@ -69,7 +71,14 @@ export default function Reports() {
    * adding them, since both are derived and adding them would count the same
    * money twice.
    */
-  const [period, setPeriod] = useState<'month' | 'year'>('month')
+  const [period, setPeriod] = useState<'month' | 'year' | 'custom'>('month')
+  /**
+   * A range drawn by hand. Held as two dates rather than derived, and defaulted
+   * to the month in view so switching to it starts somewhere recognisable
+   * rather than on an empty pair of inputs.
+   */
+  const [from, setFrom] = useState(() => `${thisMonthKey()}-01`)
+  const [to, setTo] = useState(() => todayISO())
   const [view, setView] = useState<'charts' | 'table'>('charts')
   const [book, setBook] = useBook()
   /** The category being drilled into, or null for the top level. */
@@ -114,16 +123,22 @@ export default function Reports() {
   }, [period, month, year])
 
   const slices = useMemo(
-    () => bookSlices(txns ?? [], flows, categories, book, inView, books, drill ?? undefined),
-    [txns, flows, categories, book, inView, books, drill],
+    () =>
+      period === 'custom'
+        ? rangeSlices(txns ?? [], flows, categories, book, books, from, to, drill ?? undefined)
+        : bookSlices(txns ?? [], flows, categories, book, inView, books, drill ?? undefined),
+    [txns, flows, categories, book, inView, books, drill, period, from, to],
   )
   const series = useMemo(
     () => bookSeries(txns ?? [], flows, book, Number(range), books, month),
     [txns, flows, book, range, books, month],
   )
   const totals = useMemo(
-    () => sumBookTotals(inView.map((m) => bookTotals(txns ?? [], flows, book, m, books))),
-    [txns, flows, book, inView, books],
+    () =>
+      period === 'custom'
+        ? bookTotalsInRange(txns ?? [], flows, book, books, from, to)
+        : sumBookTotals(inView.map((m) => bookTotals(txns ?? [], flows, book, m, books))),
+    [txns, flows, book, inView, books, period, from, to],
   )
 
   /**
@@ -194,14 +209,14 @@ export default function Reports() {
   const balances = useMemo(
     () =>
       // The start of the PERIOD, which under a year view is its January.
-      bookBalances(accounts, txns ?? [], book, books, inView[0], (id) =>
+      bookBalances(accounts, txns ?? [], book, books, period === 'custom' ? from.slice(0, 7) : inView[0], (id) =>
         canSeeTransactionsAt(levelOn(id, levels)),
       ),
     // `levels` is a fresh Map every render, so it is deliberately not a
     // dependency: the inputs that change the answer are the accounts and grants
     // it is derived from, and `accounts` is one of them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [accounts, txns, book, books, inView],
+    [accounts, txns, book, books, inView, period, from],
   )
 
   /**
@@ -218,14 +233,15 @@ export default function Reports() {
   )
 
   /** What the figures on this page cover, in words. */
-  const periodLabel = period === 'year' ? year : monthLabel(month)
+  const periodLabel =
+    period === 'year' ? year : period === 'custom' ? `${fmtFullDate(from)} – ${fmtFullDate(to)}` : monthLabel(month)
   const words = BOOK_WORDS[book]
   const drillName = drill ? (catMap.get(drill)?.name ?? 'Category') : null
   /**
    * The period we are in has not finished — a part-month, or a year still
    * running. Both need saying for the same reason.
    */
-  const partial = inView.includes(thisMonthKey())
+  const partial = period === 'custom' ? to >= todayISO() : inView.includes(thisMonthKey())
 
   /**
    * The table on screen, as a file.
@@ -237,7 +253,7 @@ export default function Reports() {
   const exportCategories = () => {
     const rows: (string | number)[][] = [['Category', 'Spent', 'Typical', 'vs typical', 'Share']]
     for (const s of slices) {
-      const d = drill || period === 'year' ? undefined : deltas.get(s.categoryId)
+      const d = drill || period !== 'month' ? undefined : deltas.get(s.categoryId)
       rows.push([
         s.name,
         csvAmount(s.totalMinor),
@@ -246,7 +262,8 @@ export default function Reports() {
         `${Math.round(s.fraction * 100)}%`,
       ])
     }
-    downloadCSV(`hearth-${book}-${period === 'year' ? year : month}${drill ? `-${drillName}` : ''}`, toCSV(rows))
+    const stamp = period === 'custom' ? `${from}-to-${to}` : period === 'year' ? year : month
+    downloadCSV(`hearth-${book}-${stamp}${drill ? `-${drillName}` : ''}`, toCSV(rows))
   }
 
   const exportMonths = () => {
@@ -295,7 +312,7 @@ export default function Reports() {
     // Activity filters by a single month, so a year view sends the category and
     // the book and leaves the list running — which is what you want from a
     // year's figure anyway.
-    const q = new URLSearchParams(period === 'year' ? { book } : { month, book })
+    const q = new URLSearchParams(period === 'month' ? { month, book } : { book })
     if (categoryId && categoryId !== OTHER_SLICE_ID) q.set('category', categoryId)
     navigate(`/activity?${q}`)
   }
@@ -332,16 +349,38 @@ export default function Reports() {
             setDrill(null)
             setPeriod(p)
           }}
-          className="w-36"
+          className="w-52"
           options={[
             { value: 'month', label: 'Month' },
             { value: 'year', label: 'Year' },
+            { value: 'custom', label: 'Range' },
           ]}
         />
         {/* One stepper, stepping whichever unit is being shown. A year is held
             as its January, so everything downstream still receives a month key
             and nothing else has to know which mode this is. */}
-        {period === 'month' ? (
+        {period === 'custom' ? (
+          <div className="flex items-center gap-1.5">
+            <TextInput
+              type="date"
+              value={from}
+              max={to}
+              aria-label="From"
+              onChange={(e) => setFrom(e.target.value)}
+              className="w-40"
+            />
+            <span className="text-sm text-ink-3">to</span>
+            <TextInput
+              type="date"
+              value={to}
+              min={from}
+              max={todayISO()}
+              aria-label="To"
+              onChange={(e) => setTo(e.target.value)}
+              className="w-40"
+            />
+          </div>
+        ) : period === 'month' ? (
           <MonthStepper month={month} onChange={changeMonth} label={monthLabel} canGoForward={month < thisMonthKey()} />
         ) : (
           <MonthStepper
@@ -388,19 +427,31 @@ export default function Reports() {
             <span className="font-medium tabular">{money(balances.startMinor)}</span> at the start of{' '}
             {periodLabel},{' '}
             <span className="font-medium tabular">{money(balances.nowMinor)}</span> now
-            <span className="text-ink-3"> — the {period === 'year' ? 'year' : 'month'} is not over.</span>
+            <span className="text-ink-3">
+              {' '}— the {period === 'year' ? 'year' : period === 'custom' ? 'range runs to today, so it' : 'month'}{' '}
+              is not over.
+            </span>
           </p>
         )}
         {partial && !balances && (
           <p className="mt-1.5 text-xs text-ink-3">
-            {periodLabel} is not over, so these are part of a {period === 'year' ? 'year' : 'month'}.
+            {periodLabel} runs to today, so these figures are still moving.
           </p>
         )}
 
         {/* Only where there is a real figure behind it. A tenth either way is
             not a change worth a sentence, and saying so anyway trains people to
             ignore the line. */}
-        {lastYear && Math.abs(lastYear.deltaMinor) >= Math.max(lastYear.spendMinor * 0.1, 1000) && (
+        {period === 'custom' && (
+          /* The one place a range behaves differently, so it is stated rather
+             than left to be discovered. See `bookTotalsInRange`. */
+          <p className="mt-1.5 text-xs text-ink-3">
+            A range counts money on the day it moved. Contributions are not shifted into the month they fund,
+            the way they are under Month and Year.
+          </p>
+        )}
+
+        {period !== 'custom' && lastYear && Math.abs(lastYear.deltaMinor) >= Math.max(lastYear.spendMinor * 0.1, 1000) && (
           <p className="mt-1.5 text-xs text-ink-2">
             <span className={lastYear.deltaMinor > 0 ? 'font-medium text-critical-text' : 'font-medium text-good-text'}>
               {money(Math.abs(lastYear.deltaMinor))} {lastYear.deltaMinor > 0 ? 'more' : 'less'}
@@ -583,7 +634,7 @@ export default function Reports() {
                           is the level the median was taken at. */}
                       <td className={cx(table.cell, 'text-right tabular')}>
                         {(() => {
-                          const d = drill || period === 'year' ? undefined : deltas.get(s.categoryId)
+                          const d = drill || period !== 'month' ? undefined : deltas.get(s.categoryId)
                           if (!d || d.basis < 3) return <span className="text-ink-3">—</span>
                           // Within a tenth of typical is not news.
                           if (Math.abs(d.deltaMinor) < Math.max(d.typicalMinor * 0.1, 500)) {
@@ -625,7 +676,17 @@ export default function Reports() {
           )}
         </Card>
 
-        {view === 'charts' ? (
+        {view === 'charts' && period === 'custom' ? (
+          /* A range has no months in it, so every series below is a question it
+             cannot answer. Said once, here, rather than leaving eight empty
+             cards or — worse — eight cards quietly showing the wrong period. */
+          <Card className="p-5 md:p-4 xl:col-span-2">
+            <p className="text-sm text-ink-3">
+              The monthly charts are hidden for a custom range: a waterfall, a trend and a pace line are all
+              questions about months, and this period is not made of them. Switch to Month or Year for those.
+            </p>
+          </Card>
+        ) : view === 'charts' ? (
           <>
             <Card className="p-5 md:p-4">
               <h3 className="mb-3 font-semibold md:mb-2 md:text-sm">{words.spend} each month</h3>

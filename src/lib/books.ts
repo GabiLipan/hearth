@@ -391,6 +391,98 @@ export function bookTotals(
 }
 
 /**
+ * The same figures over an arbitrary run of days.
+ *
+ * Deliberately NOT built out of `bookTotals`. A range that does not align to a
+ * month cannot use `effectiveMonth`: the 25th cut-off exists to move a
+ * contribution into the month it is FOR, and "the month it is for" is a
+ * question a fortnight in the middle of March cannot answer. So this counts
+ * money on the day it actually moved, and the screen says so — the alternative
+ * is a shifted contribution silently landing inside or outside a range the
+ * person drew by hand, which is the sort of wrongness nobody can see.
+ *
+ * Everything else is `bookTotals` unchanged, including the rule that rows are
+ * selected by ACCOUNT rather than by flow.
+ */
+export function bookTotalsInRange(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  book: BookId,
+  books: BookMap,
+  /** Both inclusive, `yyyy-MM-dd`. */
+  from: string,
+  to: string,
+): BookTotals {
+  const t = { ...EMPTY }
+  const ids = accountsInBook(book, books)
+
+  for (const row of txns) {
+    if (!ids.has(row.accountId)) continue
+    if (row.date < from || row.date > to) continue
+    const flow = flows.get(row.id)
+    if (!flow || flow === 'internal' || flow === 'ignored') continue
+    if (book === 'all' && (flow === 'contribution' || flow === 'withdrawal')) continue
+
+    switch (flow) {
+      case 'contribution':
+        if (row.amountMinor > 0) t.contributions += row.amountMinor
+        else t.contributed -= row.amountMinor
+        break
+      case 'withdrawal':
+        if (row.amountMinor > 0) t.returned += row.amountMinor
+        else t.withdrawn -= row.amountMinor
+        break
+      case 'external-income':
+      case 'personal-income':
+        t.externalIncome += row.amountMinor
+        break
+      case 'household-spend':
+      case 'personal-spend':
+        t.spend -= row.amountMinor
+        break
+    }
+  }
+  t.income = t.contributions + t.externalIncome + t.returned
+  t.net = t.income - t.spend - t.contributed - t.withdrawn
+  return t
+}
+
+/** Spend per category over a run of days. The range twin of `bookSpendByCategory`. */
+export function bookSpendByCategoryInRange(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  categories: Category[],
+  book: BookId,
+  books: BookMap,
+  from: string,
+  to: string,
+  drillInto?: string,
+): { categoryId: string; totalMinor: number }[] {
+  const catMap = new Map(categories.map((c) => [c.id, c]))
+  const totals = new Map<string, number>()
+  const ids = accountsInBook(book, books)
+
+  for (const t of txns) {
+    if (!ids.has(t.accountId)) continue
+    if (t.date < from || t.date > to) continue
+    if (!isSpend(flows.get(t.id)) || !t.categoryId) continue
+    const cat = catMap.get(t.categoryId)
+    if (!cat || cat.kind !== 'expense') continue
+
+    if (drillInto) {
+      if (budgetCategoryId(cat) !== drillInto) continue
+      totals.set(cat.id, (totals.get(cat.id) ?? 0) - t.amountMinor)
+    } else {
+      const key = budgetCategoryId(cat)!
+      totals.set(key, (totals.get(key) ?? 0) - t.amountMinor)
+    }
+  }
+  return [...totals.entries()]
+    .map(([categoryId, totalMinor]) => ({ categoryId, totalMinor }))
+    .sort((a, b) => b.totalMinor - a.totalMinor)
+}
+
+/**
  * Several months as one set of figures — a year, or any run of them.
  *
  * Every field of `BookTotals` is a sum over its month except `income` and
@@ -627,8 +719,50 @@ export function bookSlices(
   drillInto?: string,
   maxSlices = 8,
 ): CategorySlice[] {
+  return toSlices(
+    bookSpendByCategory(txns, flows, categories, book, month, books, drillInto),
+    categories,
+    drillInto,
+    maxSlices,
+  )
+}
+
+/** The same, for a run of days. See `bookTotalsInRange` for why ranges are separate. */
+export function rangeSlices(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  categories: Category[],
+  book: BookId,
+  books: BookMap,
+  from: string,
+  to: string,
+  drillInto?: string,
+  maxSlices = 8,
+): CategorySlice[] {
+  return toSlices(
+    bookSpendByCategoryInRange(txns, flows, categories, book, books, from, to, drillInto),
+    categories,
+    drillInto,
+    maxSlices,
+  )
+}
+
+/**
+ * Category totals, shaped for the donut: names, colours and shares resolved.
+ *
+ * Shared by the month and range versions rather than written twice — the two
+ * differ in which rows they count, and not at all in what a slice looks like.
+ * The small tail folds into "Other" at the TOP level only: inside a drill-down
+ * every child is worth seeing, and folding there would produce an "Other"
+ * inside "Home & utilities" that nobody could click into.
+ */
+function toSlices(
+  rows: { categoryId: string; totalMinor: number }[],
+  categories: Category[],
+  drillInto: string | undefined,
+  maxSlices: number,
+): CategorySlice[] {
   const catMap = new Map(categories.map((c) => [c.id, c]))
-  const rows = bookSpendByCategory(txns, flows, categories, book, month, books, drillInto)
   const grand = rows.reduce((s, r) => s + r.totalMinor, 0)
   if (grand === 0) return []
 
