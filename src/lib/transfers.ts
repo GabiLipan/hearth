@@ -1,5 +1,6 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns'
 import { db, getSetting, setSetting, type Transaction } from './db'
+import type { BookMap } from './books'
 import { rpc } from './api'
 import { normalizePayee } from './rules'
 
@@ -87,6 +88,23 @@ export interface TransferCandidate {
    * answer. Ambiguous pairs are still offered, but never linked automatically.
    */
   unambiguous: boolean
+  /**
+   * Ambiguous at the level of rows, but not at the level of books — every
+   * reading produces identical figures, so there is nothing to get wrong.
+   *
+   * This is what makes payday work. We are both paid at the end of the month
+   * and we both move a round sum into the joint account, so my one outgoing leg
+   * matches two identical arrivals and `unambiguous` is false forever. But the
+   * question "which £2,000 was mine" has no consequence: whichever arrival is
+   * chosen, my leg is a contribution of £2,000 and the household received
+   * £3,800 in total. The one left over counts as outside income rather than as
+   * a contribution, and the household's income is the sum either way.
+   *
+   * See `isBookSafe` for exactly when that holds — it does NOT hold in the
+   * mirror image, and getting that backwards would silently turn somebody's
+   * transfer into personal spending.
+   */
+  bookSafe: boolean
   /** The payee text names the other account, or says "transfer" outright. */
   namedTransfer: boolean
 }
@@ -118,7 +136,7 @@ function eligible(t: Transaction): boolean {
  */
 export function findTransferCandidates(
   txns: Transaction[],
-  opts: { dismissed?: Set<string>; maxDaysApart?: number } = {},
+  opts: { dismissed?: Set<string>; maxDaysApart?: number; books?: BookMap } = {},
 ): TransferCandidate[] {
   const dismissed = opts.dismissed ?? new Set<string>()
   const maxDays = opts.maxDaysApart ?? MAX_DAYS_APART
@@ -155,7 +173,8 @@ export function findTransferCandidates(
         out,
         in: inc,
         daysApart,
-        unambiguous: true, // provisional; resolved below
+        unambiguous: true, // provisional; both resolved below
+        bookSafe: false,
         namedTransfer: TRANSFER_WORDS.test(text),
       })
       outDegree.set(out.id, (outDegree.get(out.id) ?? 0) + 1)
@@ -163,10 +182,22 @@ export function findTransferCandidates(
     }
   }
 
+  // Which outgoing legs each arrival could belong to — needed to tell the safe
+  // ambiguity from the dangerous one.
+  const partnersOfOut = new Map<string, Transaction[]>()
+  for (const c of links) {
+    const list = partnersOfOut.get(c.out.id)
+    if (list) list.push(c.in)
+    else partnersOfOut.set(c.out.id, [c.in])
+  }
+
   return links
     .map((c) => ({
       ...c,
       unambiguous: outDegree.get(c.out.id) === 1 && inDegree.get(c.in.id) === 1,
+      bookSafe: opts.books
+        ? isBookSafe(c, partnersOfOut.get(c.out.id) ?? [], inDegree.get(c.in.id) ?? 1, opts.books)
+        : false,
     }))
     .sort(
       (a, b) =>
@@ -176,12 +207,50 @@ export function findTransferCandidates(
     )
 }
 
+/**
+ * Is this pair safe to link without asking, despite there being more than one
+ * reading of it?
+ *
+ * Safe when BOTH hold:
+ *
+ *   1. Nothing else competes for this arrival (`inDegree === 1`). This is the
+ *      half that is easy to get backwards. One outgoing leg matching two
+ *      arrivals is safe: pick either, and the arrival left over counts as
+ *      outside income, which adds into the household's income exactly as a
+ *      contribution would. TWO outgoing legs matching one arrival is not: pick
+ *      either, and the outgoing leg left over is stranded as personal SPENDING,
+ *      which is a different number and a wrong one.
+ *
+ *   2. Every arrival this leg could pair with sits in the same book, so the
+ *      flow the pair produces cannot depend on which was chosen.
+ *
+ * A pair that does not cross books is left alone: linking two of my own
+ * accounts together changes no total, so guessing buys nothing.
+ */
+function isBookSafe(
+  c: TransferCandidate,
+  partners: Transaction[],
+  inDegree: number,
+  books: BookMap,
+): boolean {
+  if (inDegree !== 1) return false
+
+  const bookOf = (t: Transaction) =>
+    books.household.has(t.accountId) ? 'household' : books.mine.has(t.accountId) ? 'mine' : 'other'
+
+  const here = bookOf(c.out)
+  const there = bookOf(c.in)
+  if (here === 'other' || there === 'other' || here === there) return false
+
+  return partners.every((p) => bookOf(p) === there)
+}
+
 /** The same, read from the cache and with dismissals applied. */
-export async function detectTransfers(): Promise<TransferCandidate[]> {
+export async function detectTransfers(books?: BookMap): Promise<TransferCandidate[]> {
   const mode = await getTransferMode()
   if (mode === 'manual') return []
   const [txns, dismissed] = await Promise.all([db.transactions.toArray(), dismissedPairs()])
-  return findTransferCandidates(txns, { dismissed })
+  return findTransferCandidates(txns, { dismissed, books })
 }
 
 /* ---------- acting on it ---------- */
@@ -214,7 +283,7 @@ export async function unlinkTransfer(transferId: string) {
 export async function autoLinkTransfers(
   candidates: TransferCandidate[],
 ): Promise<{ linked: number; left: number }> {
-  const clear = candidates.filter((c) => c.unambiguous)
+  const clear = candidates.filter((c) => c.unambiguous || c.bookSafe)
   let linked = 0
   for (const c of clear) {
     try {

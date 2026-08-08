@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, ArrowLeftRight, HelpCircle } from 'lucide-react'
 import type { Transaction } from '../lib/db'
-import { useAccountMap, useAllTransactions, useMyLevels } from '../lib/cache'
+import { useAccountMap, useAllTransactions, useBooks, useMyLevels } from '../lib/cache'
 import { canEditTransaction, levelOn } from '../lib/accounts'
 import {
   autoLinkTransfers,
@@ -35,6 +35,7 @@ export function TransferReview() {
   const accMap = useAccountMap()
   const levels = useMyLevels()
   const txns = useAllTransactions()
+  const books = useBooks()
 
   const [mode, setMode] = useState<TransferMode | null>(null)
   const [candidates, setCandidates] = useState<TransferCandidate[]>([])
@@ -67,13 +68,17 @@ export function TransferReview() {
     if (mode === null || mode === 'manual') return
     let cancelled = false
     void (async () => {
-      const found = (await detectTransfers()).filter(
+      const found = (await detectTransfers(books)).filter(
         (c) => !handled.current.has(c.out.id) && !handled.current.has(c.in.id) && canEditBoth(c),
       )
       if (cancelled) return
 
       if (mode === 'auto') {
-        const clear = found.filter((c) => c.unambiguous)
+        // `bookSafe` as well as `unambiguous`: payday is permanently ambiguous
+        // at the level of rows — my one outgoing leg matches both arrivals —
+        // and permanently unambiguous at the level of books, which is the only
+        // level any figure is computed at.
+        const clear = found.filter((c) => c.unambiguous || c.bookSafe)
         if (clear.length > 0) {
           for (const c of clear) {
             handled.current.add(c.out.id)
@@ -85,7 +90,7 @@ export function TransferReview() {
           await syncNow()
         }
         // What is left is genuinely ambiguous, and still needs a person.
-        setCandidates(found.filter((c) => !c.unambiguous))
+        setCandidates(found.filter((c) => !c.unambiguous && !c.bookSafe))
         return
       }
       setCandidates(found)
@@ -96,7 +101,11 @@ export function TransferReview() {
     // `levels` and `canEditBoth` are fresh each render; the inputs that change
     // the answer are the mode and the transactions themselves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, txns])
+  }, [mode, txns, books])
+
+  /** Money leaving one of my accounts for one we are both on. */
+  const crossing = (c: TransferCandidate) =>
+    books.mine.has(c.out.accountId) && books.household.has(c.in.accountId)
 
   async function link(c: TransferCandidate) {
     setBusy(c.out.id)
@@ -144,7 +153,8 @@ export function TransferReview() {
               : `${candidates.length} of these might be money you moved between your accounts`}
           </span>
           <span className="text-ink-3">
-            {' '}— if so, neither side is spending or income, and both leave your totals.
+            {' '}— money moved into the household counts as what you paid in rather than as spending,
+            and money moved between two of your own accounts is neither.
           </span>
         </p>
       </div>
@@ -158,7 +168,8 @@ export function TransferReview() {
                 <Leg txn={c.in} name={accMap.get(c.in.accountId)?.name} />
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {!c.unambiguous && (
+                {crossing(c) && <Chip tone="accent">into the household</Chip>}
+                {!c.unambiguous && !c.bookSafe && (
                   <Chip tone="warn">
                     <HelpCircle size={11} className="mr-1" /> more than one match
                   </Chip>

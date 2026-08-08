@@ -1,9 +1,27 @@
 import { useMemo, useState } from 'react'
 import { Table2, ChartPie, ChevronLeft } from 'lucide-react'
-import { useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useFlows } from '../lib/cache'
+import {
+  useAllTransactions,
+  useBook,
+  useBooks,
+  useCategories,
+  useCategoryMap,
+  useFlows,
+  useMemberMap,
+} from '../lib/cache'
+import { useSyncState } from '../hooks/useSync'
+import { nameOf } from '../components/PersonDot'
 import { thisMonthKey, monthLabel } from '../lib/dates'
 import { OTHER_SLICE_ID } from '../lib/stats'
-import { bookSeries, bookSlices, bookTotals, hasBreakdown, BOOK_WORDS, type BookId } from '../lib/books'
+import {
+  bookSeries,
+  bookSlices,
+  bookTotals,
+  contributionSplit,
+  hasBreakdown,
+  BOOK_WORDS,
+  type BookId,
+} from '../lib/books'
 import { useApp } from '../state/AppContext'
 import { Card, Segmented, Empty, Toolbar, MonthStepper, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
@@ -24,6 +42,23 @@ export default function Reports() {
   const catMap = useCategoryMap()
   const books = useBooks()
   const flows = useFlows(txns, books)
+  const { userId } = useSyncState()
+  const memberMap = useMemberMap()
+
+  /**
+   * Who paid in what. Household book only — it is meaningless anywhere else,
+   * and it is the one figure this whole model makes newly possible: neither of
+   * us can see the other's salary, but every contribution ARRIVES in a joint
+   * account, which we can both read.
+   */
+  const split = useMemo(
+    () => contributionSplit(txns ?? [], flows, month, books),
+    [txns, flows, month, books],
+  )
+  const partner = useMemo(() => {
+    const others = [...memberMap.values()].filter((m) => m.userId !== userId)
+    return others.length === 1 ? nameOf(others[0]) : null
+  }, [memberMap, userId])
 
   const slices = useMemo(
     () => bookSlices(txns ?? [], flows, categories, book, month, books, drill ?? undefined),
@@ -110,6 +145,40 @@ export default function Reports() {
           />
         </div>
         <p className="mt-2 text-xs text-ink-3">{words.netHint}</p>
+
+        {book === 'household' && totals.contributions > 0 && (
+          <div className="mt-3 border-t border-hairline pt-3">
+            <p className="mb-1.5 text-xs text-ink-3">Who paid in</p>
+            <div className="flex h-2 overflow-hidden rounded-full bg-surface-2">
+              {[
+                { key: 'mine', value: split.mineMinor, color: 'var(--series-2)' },
+                { key: 'theirs', value: split.theirsMinor, color: 'var(--series-5)' },
+                { key: 'other', value: split.otherMinor, color: 'var(--ink-3)' },
+              ]
+                .filter((s) => s.value > 0)
+                .map((s) => (
+                  <span
+                    key={s.key}
+                    style={{ width: `${(s.value / Math.max(1, totals.income)) * 100}%`, background: s.color }}
+                  />
+                ))}
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {split.mineMinor > 0 && <Legend color="var(--series-2)" label="You" value={money(split.mineMinor)} />}
+              {split.theirsMinor > 0 && (
+                <Legend color="var(--series-5)" label={partner ?? 'Someone else'} value={money(split.theirsMinor)} />
+              )}
+              {split.otherMinor > 0 && (
+                <Legend
+                  color="var(--ink-3)"
+                  label="Not linked to anyone"
+                  value={money(split.otherMinor)}
+                  hint="Interest, refunds, and any transfer nobody has confirmed yet — an arrival on its own cannot say who sent it."
+                />
+              )}
+            </div>
+          </div>
+        )}
       </Card>
 
       <div className="grid gap-3 md:gap-2.5 xl:grid-cols-2">
@@ -252,6 +321,16 @@ export default function Reports() {
         )}
       </div>
     </div>
+  )
+}
+
+function Legend({ color, label, value, hint }: { color: string; label: string; value: string; hint?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5" title={hint}>
+      <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
+      <span className="text-ink-2">{label}</span>
+      <span className="font-medium tabular">{value}</span>
+    </span>
   )
 }
 

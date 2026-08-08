@@ -5,6 +5,7 @@ import {
   bookTotals,
   classifyAccounts,
   classifyFlows,
+  contributionSplit,
   type BookMap,
 } from './books'
 
@@ -365,5 +366,33 @@ describe('money moved at the end of one month to be spent in the next', () => {
 
     expect(bookTotals([out, back], f, 'household', '2026-08', books).withdrawn).toBe(25000)
     expect(bookTotals([out, back], f, 'household', '2026-09', books).withdrawn).toBe(0)
+  })
+})
+
+describe('who put what into the household', () => {
+  it('tells my contribution from hers, without seeing her account', () => {
+    // Mine is traceable because one leg is in my own account. Hers is knowable
+    // only by elimination: the far leg is in an account I am not on, and the
+    // only accounts hidden from me belong to the other people here.
+    const txns = march()
+    const flows = classifyFlows(txns, books)
+    const split = contributionSplit(txns, flows, '2026-03', books)
+
+    expect(split.mineMinor).toBe(200000)
+    expect(split.theirsMinor).toBe(180000)
+    expect(split.otherMinor).toBe(8800) // child benefit
+    expect(split.mineMinor + split.theirsMinor).toBe(380000)
+  })
+
+  it('does not claim to know who sent money nobody has linked', () => {
+    // An unlinked arrival is indistinguishable from a tax refund — both are
+    // just a credit in the joint account. It must not be attributed to anyone.
+    const arrival = txn({ accountId: 'joint', amountMinor: 180000, date: '2026-03-02' })
+    const flows = classifyFlows([arrival], books)
+    const split = contributionSplit([arrival], flows, '2026-03', books)
+
+    expect(split.mineMinor).toBe(0)
+    expect(split.theirsMinor).toBe(0)
+    expect(split.otherMinor).toBe(180000)
   })
 })

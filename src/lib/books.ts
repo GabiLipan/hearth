@@ -395,6 +395,75 @@ export function isSpend(flow: Flow | undefined): boolean {
   return flow === 'household-spend' || flow === 'personal-spend'
 }
 
+/**
+ * Who put what into the household this month.
+ *
+ * Only askable because of how the books work. Neither of us can see the other's
+ * salary, but every contribution ARRIVES in a joint account, and joint accounts
+ * are readable by both — so this is one figure that is complete and identical on
+ * both screens.
+ *
+ * Attribution does not use `created_by`. That is whoever entered the row, which
+ * for an imported statement is whoever did the importing, not whose money it
+ * was. It uses the far leg instead:
+ *
+ *   - far leg in one of MY accounts → mine
+ *   - far leg not visible at all    → somebody else's, because the only accounts
+ *                                     hidden from me belong to the other people
+ *                                     in the household
+ *
+ * The honest limit is `otherMinor`. An arrival nobody has linked to anything is
+ * indistinguishable from money paid in from outside the household — both are
+ * just a credit in the joint account — so the two share a bucket rather than
+ * the app pretending it can tell a salary transfer from a tax refund. Linking
+ * is what moves money out of that bucket and onto a name, and each of us can
+ * only link our own.
+ */
+export interface ContributionSplit {
+  mineMinor: number
+  theirsMinor: number
+  /** Outside income, plus any arrival nobody has linked yet. See above. */
+  otherMinor: number
+}
+
+export function contributionSplit(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  month: string,
+  books: BookMap,
+): ContributionSplit {
+  const legs = new Map<string, Transaction[]>()
+  for (const t of txns) {
+    if (!t.transferId) continue
+    const list = legs.get(t.transferId)
+    if (list) list.push(t)
+    else legs.set(t.transferId, [t])
+  }
+
+  const out: ContributionSplit = { mineMinor: 0, theirsMinor: 0, otherMinor: 0 }
+
+  for (const t of txns) {
+    if (!books.household.has(t.accountId) || t.amountMinor <= 0) continue
+    const flow = flows.get(t.id)
+    if (effectiveMonth(t, flow) !== month) continue
+
+    if (flow === 'external-income') {
+      out.otherMinor += t.amountMinor
+      continue
+    }
+    if (flow !== 'contribution') continue
+
+    const partner = t.transferId ? legs.get(t.transferId)?.find((l) => l.id !== t.id) : undefined
+    // No partner row means an account this device is not on, which in a
+    // household is somebody else's private account.
+    if (!t.transferId) out.otherMinor += t.amountMinor
+    else if (!partner) out.theirsMinor += t.amountMinor
+    else if (books.mine.has(partner.accountId)) out.mineMinor += t.amountMinor
+    else out.otherMinor += t.amountMinor
+  }
+  return out
+}
+
 export interface BookMonth extends BookTotals {
   key: string
   label: string

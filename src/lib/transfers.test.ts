@@ -111,3 +111,68 @@ describe('transfer pairing', () => {
     expect(findTransferCandidates([shop, refund])).toHaveLength(0)
   })
 })
+
+describe('ambiguity that does not matter, and ambiguity that does', () => {
+  // Both of us are paid at the end of the month and both move a round sum into
+  // the joint account. My one outgoing leg matches two identical arrivals, so
+  // `unambiguous` is false and always will be — but the question "which £2,000
+  // was mine" has no consequence for any figure the app shows.
+  const books = {
+    household: new Set(['joint']),
+    mine: new Set(['myPrivate']),
+    others: new Set<string>(),
+  }
+
+  it('links my payday contribution even though two arrivals match it', () => {
+    const out = txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-31' })
+    const mineIn = txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-31' })
+    const hersIn = txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-31' })
+
+    const found = findTransferCandidates([out, mineIn, hersIn], { books })
+
+    expect(found).toHaveLength(2)
+    expect(found.every((c) => !c.unambiguous)).toBe(true)
+    // Whichever arrival is chosen, my leg is a £2,000 contribution and the
+    // leftover counts as outside income — the household's total is the same.
+    expect(found.every((c) => c.bookSafe)).toBe(true)
+  })
+
+  it('refuses the mirror image, where the leftover would become spending', () => {
+    // Two outgoing legs of mine competing for one arrival. Pick either and the
+    // other is stranded as personal SPENDING, which is a different number and a
+    // wrong one. This is the case that must never be linked unattended.
+    const outA = txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-31' })
+    const outB = txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-31' })
+    const onlyIn = txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-31' })
+
+    const found = findTransferCandidates([outA, outB, onlyIn], { books })
+
+    expect(found).toHaveLength(2)
+    expect(found.every((c) => !c.unambiguous)).toBe(true)
+    expect(found.every((c) => !c.bookSafe)).toBe(true)
+  })
+
+  it('does not guess at a transfer between two of my own accounts', () => {
+    // Nothing crosses a book, so no total moves whichever way it is read, and
+    // guessing buys nothing.
+    const twoOfMine = {
+      household: new Set<string>(),
+      mine: new Set(['myPrivate', 'mySavings']),
+      others: new Set<string>(),
+    }
+    const out = txn({ accountId: 'myPrivate', amountMinor: -10000 })
+    const a = txn({ accountId: 'mySavings', amountMinor: 10000 })
+
+    const [found] = findTransferCandidates([out, a], { books: twoOfMine })
+
+    expect(found.unambiguous).toBe(true)
+    expect(found.bookSafe).toBe(false)
+  })
+
+  it('reports nothing book-safe when it has not been given the books', () => {
+    const out = txn({ accountId: 'myPrivate', amountMinor: -200000 })
+    const inc = txn({ accountId: 'joint', amountMinor: 200000 })
+
+    expect(findTransferCandidates([out, inc])[0].bookSafe).toBe(false)
+  })
+})

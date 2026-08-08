@@ -71,8 +71,11 @@ export function monthlySeries(txns: Transaction[], categories: Category[], n: nu
     const agg = byKey.get(k)
     if (!agg) continue
     if (t.amountMinor < 0) agg.spend -= t.amountMinor
+    // Only a category marked as income counts as income. The two branches here
+    // used to have identical bodies, which meant ANY credit did: a refund, a
+    // cashback, and — worst — the incoming leg of a transfer nobody had linked
+    // yet, which inflated income by money that was only ever moved.
     else if (t.categoryId && kinds.get(t.categoryId) === 'income') agg.income += t.amountMinor
-    else agg.income += t.amountMinor
   }
   return keys.map((key) => {
     const { spend, income } = byKey.get(key)!

@@ -72,10 +72,12 @@ Two consequences worth remembering:
 
 ## Phase 3 — Transfers under book accounting
 
-- [ ] Auto-link cross-book pairs even when row-ambiguous — if both readings land
-      in the same book every number is identical, so payday resolves itself
-- [ ] Label a linked cross-book transfer as "contribution" / "withdrawal" rather
-      than hiding it
+- [x] Auto-link cross-book pairs even when row-ambiguous — if both readings land
+      in the same book every number is identical, so payday resolves itself.
+      Only in one direction: one leg out matching two arrivals is safe, two legs
+      out matching one arrival is not (the leftover would become spending)
+- [x] Label a cross-book pair as money into the household rather than as a
+      generic transfer
 - [ ] Handle joint → private properly as a withdrawal, not household spending
 - [ ] Recurring transfer routes — learn "£2,000, my private → joint, monthly"
       the way a bill is learned
@@ -97,8 +99,9 @@ Two consequences worth remembering:
       in current, as one figure per step
 - [ ] **Personal stacked bar** — `contributed | personal spend | left over` = salary,
       one bar per month
-- [ ] **Who contributed what** — the split between us, newly possible because
-      both contributions are visible in the joint account
+- [x] **Who contributed what** — the split between us, newly possible because
+      both contributions are visible in the joint account. Attributed from the
+      far leg, never from `created_by` (which is whoever did the importing)
 - [ ] **Fixed vs variable** — tracked bills against everything else
 - [ ] **Savings rate** — percentage put away, and its trend
 - [ ] **Top payees** — where the money actually goes, under the category level
@@ -120,8 +123,8 @@ contribution from the 1st, rather than nothing until payday.
       against finished months
 
 ### Sharpening what's there
-- [ ] Fix `monthlySeries` — the dead `else if`/`else` pair means *any* positive
-      amount counts as income, including refunds and unlinked transfer legs
+- [x] Fix `monthlySeries` — the dead `else if`/`else` pair meant *any* positive
+      amount counted as income, including refunds and unlinked transfer legs
 - [ ] "Net each month" only claims to be saving where that is actually true
 - [ ] Month-on-month delta per category — "groceries £120 above typical"
 - [ ] Same month last year, where there is a year of history
