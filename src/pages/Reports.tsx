@@ -63,7 +63,7 @@ export default function Reports() {
   return (
     <div>
       <Toolbar>
-        <BookSwitcher book={book} onChange={changeBook} className="w-full md:w-auto md:min-w-72" />
+        <BookSwitcher book={book} onChange={changeBook} className="w-full md:w-auto md:min-w-[22rem]" />
         <Segmented
           value={view}
           onChange={setView}

@@ -110,9 +110,11 @@ Two consequences worth remembering:
       "Paid in £0.57, spent £3,142, left over −£3,141" is arithmetically right
       and reads like a disaster. "£4,200 at the start, £1,058 now" is the same
       fact and is actually useful
-- [ ] **decision** — should the household month run payday-to-payday rather than
-      1st-to-1st? If we fund the joint account at the end of the month for the
-      next one, a calendar month will always show spending before its income
+- [ ] **Count a contribution towards the month it is FOR, not the month it
+      landed.** We fund the joint account at the end of one month to spend it in
+      the next, so a calendar month pairs spending with the wrong income
+- [ ] **decision** — the cut-off day for the above (contributions on or after
+      the Nth count towards next month). Default 25
 - [ ] Dim or annotate the current month as incomplete, everywhere it is compared
       against finished months
 
@@ -125,6 +127,14 @@ Two consequences worth remembering:
 - [ ] Export the current report as CSV
 
 ## Phase 5 — Edges the model gets wrong
+
+- [x] Warn before removing your OWN access to an account — legal whenever
+      somebody else owns it, but the account vanishes from your app and only the
+      remaining owner can give it back
+- [ ] `reclaim_account` — let a household admin restore ownership of an account
+      with no owner left, for the cases the guard cannot catch (the last owner
+      leaving the household)
+- [x] `supabase/dev-reset-data.sql` — clear test data, keep users and household
 
 - [ ] A household bill paid from a personal card — a per-transaction "this was
       household spending, I just paid for it" flag

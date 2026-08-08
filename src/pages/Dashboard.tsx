@@ -232,7 +232,7 @@ export default function Dashboard() {
   return (
     <div>
       <Toolbar>
-        <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto md:min-w-72" />
+        <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto md:min-w-[22rem]" />
       </Toolbar>
 
       {/* Masonry columns on desktop: cards pack vertically instead of aligning

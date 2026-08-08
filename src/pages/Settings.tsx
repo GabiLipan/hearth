@@ -11,6 +11,7 @@ import {
   canSeeAccount,
   canSeeTransactionsAt,
   deleteAccount as removeAccount,
+  atLeast,
   levelOn,
   setAccountLevel,
   transactionsOn,
@@ -1027,6 +1028,7 @@ function AccountsSection() {
 function AccountAccessSheet({ account, open, onClose }: { account: Account; open: boolean; onClose: () => void }) {
   const { userId } = useSyncState()
   const members = useMembers()
+  const memberMap = useMemberMap()
   const grants = useGrantsFor(account.id)
   const levels = useMyLevels()
   const mayShare = canAdministerAccount(levelOn(account.id, levels))
@@ -1052,6 +1054,34 @@ function AccountAccessSheet({ account, open, onClose }: { account: Account; open
     if (next !== 'owner' && levelFor(uid) === 'owner' && owners.length <= 1) {
       setError({ userId: uid, message: 'An account must always have an owner. Make somebody else an owner first.' })
       return
+    }
+    /**
+     * Taking access away from YOURSELF.
+     *
+     * Legal, and the server allows it whenever somebody else still owns the
+     * account — but the consequence is not what the row you just changed looks
+     * like it does. The account, its balance and every transaction on it leave
+     * this app immediately, and you cannot put them back: reading the sharing
+     * list needs a grant, so there is nothing left to click. Only the remaining
+     * owner can undo it.
+     *
+     * So it asks, and it names who will still have it, because "are you sure"
+     * on its own does not tell you whether you are about to strand the account
+     * with your partner or with nobody you can reach.
+     */
+    if (uid === userId && !atLeast(next, levelFor(uid))) {
+      const others = owners
+        .filter((g) => g.userId !== userId)
+        .map((g) => nameOf(memberMap.get(g.userId)))
+      const willVanish = next === 'none' || !canSeeAccount(next)
+      const message = willVanish
+        ? `Remove your own access to "${account.name}"?\n\nIt will disappear from your app straight away, along with its balance and everything recorded on it. ${
+            others.length ? `${others.join(' and ')} will still own it and can give it back.` : ''
+          }`
+        : `Reduce your own access to "${account.name}" to ${LEVEL_LABEL[next].toLowerCase()}?\n\nYou will not be able to undo this yourself. ${
+            others.length ? `${others.join(' and ')} can restore it.` : ''
+          }`
+      if (!confirm(message)) return
     }
     await setAccountLevel(account.id, uid, next, grants.find((g) => g.userId === uid))
   }

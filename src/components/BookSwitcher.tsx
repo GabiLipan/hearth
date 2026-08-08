@@ -1,5 +1,5 @@
 import { Home, User, Layers, type LucideIcon } from 'lucide-react'
-import { BOOK_HINT, BOOK_LABEL, type BookId } from '../lib/books'
+import { BOOK_HINT, type BookId } from '../lib/books'
 import { Segmented } from './ui'
 
 /**
@@ -10,10 +10,15 @@ import { Segmented } from './ui'
  *
  * The short form is not an abbreviation so much as the same idea in fewer words.
  */
-const BOOKS: { id: BookId; icon: LucideIcon; short: string }[] = [
-  { id: 'household', icon: Home, short: 'Ours' },
-  { id: 'mine', icon: User, short: 'Mine' },
-  { id: 'all', icon: Layers, short: 'All' },
+const BOOKS: { id: BookId; icon: LucideIcon; short: string; long: string }[] = [
+  // Not BOOK_LABEL: every option is an equal third of the track, so the LONGEST
+  // label sets the width the whole control needs. "Our household" made that
+  // width bigger than a toolbar can spare, and the label was clipped mid-word
+  // rather than overflowing — which looks like a rendering fault rather than a
+  // space problem. "Household" is the same idea and fits.
+  { id: 'household', icon: Home, short: 'Ours', long: 'Household' },
+  { id: 'mine', icon: User, short: 'Mine', long: 'Mine' },
+  { id: 'all', icon: Layers, short: 'All', long: 'Everything' },
 ]
 
 /**
@@ -40,13 +45,13 @@ export function BookSwitcher({
       value={book}
       onChange={onChange}
       className={className}
-      options={BOOKS.map(({ id, icon: Icon, short }) => ({
+      options={BOOKS.map(({ id, icon: Icon, short, long }) => ({
         value: id,
         label: (
           <span className="flex items-center justify-center gap-1.5" title={BOOK_HINT[id]}>
             <Icon size={14} className="shrink-0" />
             <span className="md:hidden">{short}</span>
-            <span className="hidden md:inline">{BOOK_LABEL[id]}</span>
+            <span className="hidden md:inline">{long}</span>
           </span>
         ),
       }))}
