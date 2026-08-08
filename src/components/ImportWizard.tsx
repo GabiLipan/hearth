@@ -12,7 +12,7 @@ import { createMany } from '../lib/data'
 import { useSyncState } from '../hooks/useSync'
 import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { Sheet, Button, Field, Select, cx } from './ui'
+import { Sheet, Button, Field, Select, Segmented, cx } from './ui'
 
 type Step = 'pick' | 'map' | 'review' | 'done'
 
@@ -215,6 +215,39 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       {step === 'map' && csv && mapping && (
         <div className="space-y-4">
           <p className="text-sm text-ink-2">Check the columns were detected correctly.</p>
+
+          {/* Above the pickers, because it changes what the picker below it
+              means. Detection reads the rows rather than only the headings and
+              is usually right, but "usually" is not good enough for the one
+              setting that can silently import every expense as income — so it
+              is always adjustable, and the preview shows the answer. */}
+          <Field label="How are the amounts written?">
+            <Segmented
+              value={mapping.layout}
+              onChange={(layout) =>
+                setMapping({
+                  ...mapping,
+                  layout,
+                  // Switching INTO split with nothing chosen: offer the next
+                  // numeric-looking column rather than an empty control.
+                  moneyIn:
+                    layout === 'split' && mapping.moneyIn < 0
+                      ? csv.headers.findIndex((_, i) => i !== mapping.amount && i !== mapping.date && i !== mapping.payee)
+                      : mapping.moneyIn,
+                })
+              }
+              options={[
+                { value: 'signed', label: 'One column' },
+                { value: 'split', label: 'Out and in' },
+              ]}
+            />
+            <span className="mt-1 block text-xs text-ink-3">
+              {mapping.layout === 'split'
+                ? 'Two columns, both usually positive — which column a value is in says whether it went out or came in.'
+                : 'One column, negative for money out.'}
+            </span>
+          </Field>
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Date column">
               <Select value={mapping.date} onChange={(e) => setMapping({ ...mapping, date: Number(e.target.value) })}>
@@ -234,7 +267,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                 ))}
               </Select>
             </Field>
-            <Field label={mapping.outIsPositive ? 'Money out column' : 'Amount column'}>
+            <Field label={mapping.layout === 'split' ? 'Money out column' : 'Amount column'}>
               <Select value={mapping.amount} onChange={(e) => setMapping({ ...mapping, amount: Number(e.target.value) })}>
                 {csv.headers.map((h, i) => (
                   <option key={i} value={i}>
@@ -243,6 +276,22 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                 ))}
               </Select>
             </Field>
+            {/* Only under `split`, and it sits directly under the money-out
+                picker so the pair reads as a pair. */}
+            {mapping.layout === 'split' && (
+              <Field label="Money in column">
+                <Select
+                  value={mapping.moneyIn}
+                  onChange={(e) => setMapping({ ...mapping, moneyIn: Number(e.target.value) })}
+                >
+                  {csv.headers.map((h, i) => (
+                    <option key={i} value={i}>
+                      {h || `Column ${i + 1}`}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Field label="Date format">
               <Select value={mapping.dateFormat} onChange={(e) => setMapping({ ...mapping, dateFormat: e.target.value })}>
                 {['dd/MM/yyyy', 'yyyy-MM-dd', 'MM/dd/yyyy', 'dd-MM-yyyy', 'dd MMM yyyy', 'dd.MM.yyyy'].map((f) => (

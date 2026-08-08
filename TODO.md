@@ -77,6 +77,9 @@ the gap before that happens, or where linking is not possible at all.
 
 ## Everyday screens
 
+- [ ] Remember an import mapping per account, so the same bank's CSV does not
+      have to be confirmed every month
+
 - [ ] A month heading in Activity that sticks to the top while you scroll its
       rows. Wants care: `main` carries `overflow-x: clip` on mobile and the
       header above it is already sticky
@@ -153,6 +156,13 @@ bar IS the salary. Committed vs chosen. Share kept, as a rate with a zero line.
 Top payees, grouped by the app's own definition of "same merchant". Category by
 month as a heatmap for spotting drift. And pace: spend-to-date against the same
 point last month, the one comparison a part-finished month can honestly make.
+
+**CSV import.** Handles a statement with separate money-out and money-in
+columns, both positive — the commonest UK export, and the layout is now always
+adjustable rather than only guessed. Detection reads the rows as well as the
+headings, which fixed two silent failures: "Debit Amount" being read as a
+signed column (every expense imported as income) and "Running Balance" being
+read as money in.
 
 **Bills.** Reconciliation walks both ways from `nextDue`, so a year of history
 imported after a bill was created is offered rather than ignored.
