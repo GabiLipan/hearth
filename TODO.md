@@ -12,10 +12,10 @@ of finished work stops being read.
 
 Right now: **nothing waiting on us.** Every open question has been answered —
 they are recorded below, because the reasoning is worth keeping. What is left is
-**3 pieces of work**: one ready, two needing a migration of their own.
+**2 pieces of work**: one ready, one needing a migration of its own.
 
-**`supabase/12-transfer-categories.sql` needs applying by hand**, like the
-others. Until then unlinking a transfer still loses the categories.
+**`supabase/13-paid-for-household.sql` needs applying by hand**, like the
+others. Until then the tick box on a transaction saves nothing.
 
 ---
 
@@ -63,7 +63,7 @@ operations. A category set while the transfer was linked wins over the
 remembered one, since it is the newer answer.
 
 **A household bill paid from a personal card moves the spending into the
-household book and leaves a debt in the personal one.** In Gabi's words: it is
+household book and leaves a debt in the personal one.** Built — migration 13. In Gabi's words: it is
 almost exactly as if the money had gone from the personal account into the joint
 one and then been spent from there. So one flagged row is two events — a
 contribution out of my book, and household spending in theirs — which is the
@@ -94,13 +94,10 @@ to link it", which needs somewhere shared to put the note.
 from grants gets it wrong. A column on `accounts` and a policy that lets an
 owner set it.
 
-**Paying for the household from a personal account**, and reimbursements with
-it. Now specified (see Decided): a flagged row counts as a contribution out of
-my book and as household spending in theirs. The awkward part is not the column
-but `bookTotals`, which selects rows by ACCOUNT — deliberately, since that is
-what stops a contribution being counted into both books twice. This one row has
-to be an exception to that rule, and the exception has to be written so it
-cannot widen.
+**Reimbursements between us.** The mechanism from migration 13 exists now; what
+is left is the other direction — paying somebody back, and seeing what is
+outstanding between us. Wants no new column, only a view of what has been paid
+for and not settled.
 
 ---
 

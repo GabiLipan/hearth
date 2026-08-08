@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
 import { ScanLine, ArrowLeftRight, CalendarClock, PiggyBank } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
-import { useAccounts, useAccountMap, useBills, useCategories, useGoals, useMyLevels, useGrantsFor, useMemberMap } from '../lib/cache'
+import { useAccounts, useAccountMap, useBills, useBooks, useCategories, useGoals, useMyLevels, useGrantsFor, useMemberMap } from '../lib/cache'
 import { findTransferCandidates, linkTransfer, setTransferGoal, unlinkTransfer } from '../lib/transfers'
 import { unlinkBillPayment } from '../lib/bills'
 import { syncNow } from '../lib/session'
@@ -52,6 +52,7 @@ export function TransactionForm({
   const [date, setDate] = useState(todayISO())
   const [accountId, setAccountId] = useState<string | undefined>()
   const [note, setNote] = useState('')
+  const [forHousehold, setForHousehold] = useState(false)
   const [suggested, setSuggested] = useState(false)
   const [applySimilar, setApplySimilar] = useState(false)
   const [scanState, setScanState] = useState<string | null>(null)
@@ -81,6 +82,7 @@ export function TransactionForm({
       setDate(editing.date)
       setAccountId(editing.accountId)
       setNote(editing.note ?? '')
+      setForHousehold(!!editing.paidForHousehold)
     } else {
       setKind('expense')
       setAmount('')
@@ -89,6 +91,7 @@ export function TransactionForm({
       setDate(todayISO())
       setAccountId(accounts[0]?.id)
       setNote('')
+      setForHousehold(false)
       setTimeout(() => amountRef.current?.focus(), 60)
     }
     setSuggested(false)
@@ -175,6 +178,16 @@ export function TransactionForm({
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, payee, categoryId, kind, editing?.id, userId]) ?? []
 
+  /**
+   * Whether "I paid for this, but it was the household's" is even a question.
+   *
+   * Only for money going OUT of an account that is not already the household's:
+   * a refund is not a contribution, and money leaving a joint account is
+   * already the household's to spend.
+   */
+  const books = useBooks()
+  const offerHousehold = kind === 'expense' && !!accountId && !books.household.has(accountId)
+
   const amountMinor = parseAmount(amount)
   const canSave = amountMinor !== null && amountMinor > 0 && payee.trim() && categoryId !== undefined && accountId !== undefined
 
@@ -204,6 +217,7 @@ export function TransactionForm({
         // Explicitly undefined rather than omitted: that is what clears the note
         // rather than leaving the old one in place (see mapping.ts).
         note: note.trim() || undefined,
+        paidForHousehold: forHousehold && offerHousehold,
       })
     } else {
       await create('transactions', {
@@ -213,6 +227,7 @@ export function TransactionForm({
         date,
         accountId: accountId!,
         note: note.trim() || undefined,
+        paidForHousehold: forHousehold && offerHousehold,
         createdBy: userId,
         createdAt: new Date().toISOString(),
       })
@@ -386,6 +401,27 @@ export function TransactionForm({
             </Select>
           </Field>
         </div>
+
+        {/* Only where it can mean anything: an expense, from an account that is
+            not already the household's. Money already in a joint account is the
+            household's, so there is nothing to move. */}
+        {offerHousehold && (
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-surface-2 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={forHousehold}
+              onChange={(e) => setForHousehold(e.target.checked)}
+              className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+            />
+            <span className="min-w-0 text-sm">
+              <span className="font-medium">I paid for this, but it was the household's</span>
+              <span className="mt-0.5 block text-xs text-ink-3">
+                Counted as household spending, and as money you put in — the same as moving it to the joint
+                account and spending it from there.
+              </span>
+            </span>
+          </label>
+        )}
 
         <Field label="Note (optional)">
           <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" />

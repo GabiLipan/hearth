@@ -561,3 +561,101 @@ describe('an arbitrary run of days', () => {
     expect(t.spend).toBe(bookTotals(rows, classifyFlows(rows, books), 'household', '2026-03', books).spend)
   })
 })
+
+describe('paying for the household out of my own pocket', () => {
+  const cats: Category[] = [
+    { id: 'groceries', name: 'Groceries', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+  ]
+  /**
+   * The weekly shop, on my own card because the joint one was at home.
+   *
+   * Built once, not per call: `txn()` mints a fresh id each time, so a second
+   * call would classify a different set of rows and every lookup by id would
+   * miss.
+   */
+  const fixture = [
+    txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-03-01', categoryId: 'salary' }),
+    txn({
+      accountId: 'myPrivate',
+      amountMinor: -9000,
+      date: '2026-03-10',
+      categoryId: 'groceries',
+      paidForHousehold: true,
+    }),
+  ]
+  const rows = () => fixture
+  const flows = () => classifyFlows(fixture, books)
+
+  it('is a contribution out of my book, not spending', () => {
+    const t = bookTotals(rows(), flows(), 'mine', '2026-03', books)
+    expect(t.spend).toBe(0)
+    expect(t.contributed).toBe(9000)
+    // Salary less what I put in. The £90 is not mine to have spent.
+    expect(t.net).toBe(300000 - 9000)
+  })
+
+  it('is money in AND money out of the household book', () => {
+    const t = bookTotals(rows(), flows(), 'household', '2026-03', books)
+    expect(t.contributions).toBe(9000)
+    expect(t.spend).toBe(9000)
+    // Received and spent in the same breath.
+    expect(t.net).toBe(0)
+  })
+
+  it('reaches the household category breakdown, even though it is in my account', () => {
+    // The point of the whole feature: the household's grocery figure is the
+    // household's real grocery figure.
+    const byCat = bookSpendByCategory(rows(), flows(), cats, 'household', '2026-03', books)
+    expect(byCat).toEqual([{ categoryId: 'groceries', totalMinor: 9000 }])
+  })
+
+  it('and stays out of mine', () => {
+    expect(bookSpendByCategory(rows(), flows(), cats, 'mine', '2026-03', books)).toEqual([])
+  })
+
+  it('the categories still add up to the total above them', () => {
+    // The failure `spendsIn` exists to prevent: a "£90 spent" heading over an
+    // empty donut.
+    for (const book of ['household', 'mine', 'all'] as const) {
+      const total = bookTotals(rows(), flows(), book, '2026-03', books).spend
+      const byCat = bookSpendByCategory(rows(), flows(), cats, book, '2026-03', books)
+      expect(byCat.reduce((s, r) => s + r.totalMinor, 0)).toBe(total)
+    }
+  })
+
+  it('is ordinary spending under Everything, counted once', () => {
+    // My account and the joint one are one pool there, so the contribution is
+    // internal again and what is left is simply spending.
+    const t = bookTotals(rows(), flows(), 'all', '2026-03', books)
+    expect(t.spend).toBe(9000)
+    expect(t.contributions).toBe(0)
+    expect(t.contributed).toBe(0)
+  })
+
+  it('ignores the flag on money coming IN', () => {
+    // A refund landing back on the card is not a contribution to anything, and
+    // crediting the household with it would invent money.
+    const refund = [
+      txn({ accountId: 'myPrivate', amountMinor: 9000, date: '2026-03-12', paidForHousehold: true }),
+    ]
+    const f = classifyFlows(refund, books)
+    expect(bookTotals(refund, f, 'household', '2026-03', books).contributions).toBe(0)
+    expect(bookTotals(refund, f, 'mine', '2026-03', books).externalIncome).toBe(9000)
+  })
+
+  it('does nothing when the flag is on a joint account', () => {
+    // Already the household's money; there is nothing to move.
+    const joint = [
+      txn({ accountId: 'joint', amountMinor: -9000, date: '2026-03-10', categoryId: 'groceries', paidForHousehold: true }),
+    ]
+    const t = bookTotals(joint, classifyFlows(joint, books), 'household', '2026-03', books)
+    expect(t.spend).toBe(9000)
+    expect(t.contributions).toBe(0)
+  })
+
+  it('counts in a range the same way', () => {
+    const t = bookTotalsInRange(rows(), flows(), 'household', books, '2026-03-01', '2026-03-31')
+    expect(t.contributions).toBe(9000)
+    expect(t.spend).toBe(9000)
+  })
+})

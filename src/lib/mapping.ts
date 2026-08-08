@@ -55,7 +55,7 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   bills: ['id', 'name', 'payee', 'amountMinor', 'categoryId', 'accountId', 'freq', 'nextDue', 'active', 'autoPost'],
   // transferId and goalId are set by create_transfer server-side, never posted
   // directly — a client that could write transferId could fabricate half a transfer.
-  transactions: ['id', 'accountId', 'categoryId', 'billId', 'date', 'payee', 'note', 'amountMinor', 'importHash'],
+  transactions: ['id', 'accountId', 'categoryId', 'billId', 'date', 'payee', 'note', 'amountMinor', 'importHash', 'paidForHousehold'],
   budgets: ['id', 'categoryId', 'ownerId', 'amountMinor', 'month'],
   rules: ['id', 'match', 'categoryId'],
 } as const

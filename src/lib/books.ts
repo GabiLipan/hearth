@@ -169,6 +169,15 @@ export type Flow =
   | 'personal-income'
   /** What I spent on myself. */
   | 'personal-spend'
+  /**
+   * Spending on the household, paid from a personal account.
+   *
+   * The only flow that is TWO events rather than one: a contribution out of the
+   * payer's book and household spending in the household's. See
+   * `13-paid-for-household.sql` for the reasoning, and `bookTotals` for the one
+   * place it has to break the by-account selection rule.
+   */
+  | 'paid-for-household'
   /** Both legs in the same book: joint current → joint savings. Not an event. */
   | 'internal'
   /** In no book of mine, or a transfer whose far leg makes no sense. */
@@ -244,6 +253,11 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
 
     if (here === 'household') {
       out.set(t.id, t.amountMinor > 0 ? 'external-income' : 'household-spend')
+    } else if (t.paidForHousehold && t.amountMinor < 0) {
+      // Money OUT of a personal account only. A refund arriving back on the
+      // card is not a contribution to anything, and flagging one would credit
+      // the household with money it never had.
+      out.set(t.id, 'paid-for-household')
     } else {
       out.set(t.id, t.amountMinor > 0 ? 'personal-income' : 'personal-spend')
     }
@@ -350,8 +364,48 @@ export function bookTotals(
   const ids = accountsInBook(book, books)
 
   for (const row of txns) {
-    if (!ids.has(row.accountId)) continue
     const flow = flows.get(row.id)
+
+    /**
+     * The one exception to selecting rows by ACCOUNT, and it is deliberately
+     * written before that filter rather than inside it.
+     *
+     * Selecting by account is what stops a contribution being counted into both
+     * books — see the note on this function. This row genuinely belongs to two
+     * books at once: it is money leaving a personal account (a contribution)
+     * and money the household spent. So it is admitted to the household book
+     * despite living outside it, and to the payer's book as a contribution
+     * rather than as spending.
+     *
+     * The exception cannot widen, because it is gated on a flow that only
+     * `classifyFlows` can produce and only for a negative row in a personal
+     * account.
+     *
+     * The honest limit: the household book is normally IDENTICAL on both our
+     * screens, because every row it needs is in a joint account we can both
+     * read. This one is not — a row in a private account is invisible to the
+     * other person, so a household expense paid privately appears in the
+     * household book only for people who can see the account it was paid from.
+     */
+    if (flow === 'paid-for-household') {
+      if (effectiveMonth(row, flow) !== month) continue
+      const amount = -row.amountMinor
+      if (book === 'household') {
+        // Received and spent in the same breath: net unchanged, but the
+        // category figure is now the household's real one.
+        t.contributions += amount
+        t.spend += amount
+      } else if (ids.has(row.accountId)) {
+        // The payer's own book, or Everything. Under `all` my account and the
+        // joint one are a single pool, so the contribution is internal again
+        // and what is left is simply spending.
+        if (book === 'all') t.spend += amount
+        else t.contributed += amount
+      }
+      continue
+    }
+
+    if (!ids.has(row.accountId)) continue
     if (!flow || flow === 'internal' || flow === 'ignored') continue
     // Not `monthKey(row.date)`: a contribution counts towards the month it was
     // FOR, which for money moved at the end of one month is the next one.
@@ -417,9 +471,23 @@ export function bookTotalsInRange(
   const ids = accountsInBook(book, books)
 
   for (const row of txns) {
-    if (!ids.has(row.accountId)) continue
     if (row.date < from || row.date > to) continue
     const flow = flows.get(row.id)
+
+    // The same exception as `bookTotals` — see the long note there.
+    if (flow === 'paid-for-household') {
+      const amount = -row.amountMinor
+      if (book === 'household') {
+        t.contributions += amount
+        t.spend += amount
+      } else if (ids.has(row.accountId)) {
+        if (book === 'all') t.spend += amount
+        else t.contributed += amount
+      }
+      continue
+    }
+
+    if (!ids.has(row.accountId)) continue
     if (!flow || flow === 'internal' || flow === 'ignored') continue
     if (book === 'all' && (flow === 'contribution' || flow === 'withdrawal')) continue
 
@@ -463,9 +531,9 @@ export function bookSpendByCategoryInRange(
   const ids = accountsInBook(book, books)
 
   for (const t of txns) {
-    if (!ids.has(t.accountId)) continue
     if (t.date < from || t.date > to) continue
-    if (!isSpend(flows.get(t.id)) || !t.categoryId) continue
+    if (!spendsIn(flows.get(t.id), book, t.accountId, ids)) continue
+    if (!t.categoryId) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
 
@@ -505,9 +573,37 @@ export function sumBookTotals(parts: BookTotals[]): BookTotals {
   return t
 }
 
-/** Whether a transaction is spending, for this book. */
+/** Whether a transaction is spending at all, regardless of whose. */
 export function isSpend(flow: Flow | undefined): boolean {
   return flow === 'household-spend' || flow === 'personal-spend'
+}
+
+/**
+ * Whether a row counts as spending IN A PARTICULAR BOOK.
+ *
+ * `isSpend` plus the by-account filter, in one place, because
+ * `paid-for-household` makes the two questions come apart: that row is spending
+ * in the household's book while living in an account outside it, and is not
+ * spending in the payer's book at all — there it is a contribution.
+ *
+ * Every breakdown has to use this rather than rolling its own pair of
+ * conditions, or the categories stop adding up to the total above them. That is
+ * the failure it exists to prevent: a "£412 spent" heading over a donut of
+ * £322, with nothing on the screen to explain the difference.
+ */
+export function spendsIn(
+  flow: Flow | undefined,
+  book: BookId,
+  accountId: string,
+  ids: Set<string>,
+): boolean {
+  if (flow === 'paid-for-household') {
+    // Household: yes, that is the whole point. Everything: yes, but only
+    // because the payer's account is in view — it is ordinary spending there.
+    // Mine: no. I contributed it; the household spent it.
+    return book === 'household' || (book === 'all' && ids.has(accountId))
+  }
+  return ids.has(accountId) && isSpend(flow)
 }
 
 /**
@@ -678,8 +774,8 @@ export function bookSpendByCategory(
   const want = new Set(Array.isArray(month) ? month : [month])
 
   for (const t of txns) {
-    if (!ids.has(t.accountId)) continue
-    if (!isSpend(flows.get(t.id)) || !t.categoryId || !want.has(monthKey(t.date))) continue
+    if (!spendsIn(flows.get(t.id), book, t.accountId, ids)) continue
+    if (!t.categoryId || !want.has(monthKey(t.date))) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
 

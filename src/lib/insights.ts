@@ -6,7 +6,7 @@ import {
   accountsInBook,
   bookTotals,
   effectiveMonth,
-  isSpend,
+  spendsIn,
   type BookId,
   type BookMap,
   type Flow,
@@ -178,9 +178,8 @@ export function fixedVsVariable(
   const byMonth = new Map(months.map((m) => [m, { fixedMinor: 0, variableMinor: 0 }]))
 
   for (const t of txns) {
-    if (!ids.has(t.accountId)) continue
     const flow = flows.get(t.id)
-    if (!isSpend(flow)) continue
+    if (!spendsIn(flow, book, t.accountId, ids)) continue
     const bucket = byMonth.get(effectiveMonth(t, flow))
     if (!bucket) continue
     if (t.billId) bucket.fixedMinor -= t.amountMinor
@@ -291,9 +290,9 @@ export function topPayees(
   const seen = new Map<string, Group>()
 
   for (const t of txns) {
-    if (!ids.has(t.accountId)) continue
     const flow = flows.get(t.id)
-    if (!isSpend(flow) || effectiveMonth(t, flow) !== month) continue
+    if (!spendsIn(flow, book, t.accountId, ids)) continue
+    if (effectiveMonth(t, flow) !== month) continue
 
     const key = normalizePayee(t.payee) || t.payee.toLowerCase()
     let g = seen.get(key)
@@ -372,9 +371,9 @@ export function categoryHeatmap(
   const rows = new Map<string, number[]>()
 
   for (const t of txns) {
-    if (!ids.has(t.accountId) || !t.categoryId) continue
+    if (!t.categoryId) continue
     const flow = flows.get(t.id)
-    if (!isSpend(flow)) continue
+    if (!spendsIn(flow, book, t.accountId, ids)) continue
     const at = index.get(effectiveMonth(t, flow))
     if (at === undefined) continue
     const cat = catMap.get(t.categoryId)
@@ -444,9 +443,9 @@ export function pace(
   const daily = (key: string) => {
     const byDay = new Array<number>(32).fill(0)
     for (const t of txns) {
-      if (!ids.has(t.accountId)) continue
       const flow = flows.get(t.id)
-      if (!isSpend(flow) || effectiveMonth(t, flow) !== key) continue
+      if (!spendsIn(flow, book, t.accountId, ids)) continue
+      if (effectiveMonth(t, flow) !== key) continue
       byDay[Number(t.date.slice(8, 10))] -= t.amountMinor
     }
     return byDay
@@ -518,9 +517,9 @@ export function categoryDeltas(
   const current = new Map<string, number>()
 
   for (const t of txns) {
-    if (!ids.has(t.accountId) || !t.categoryId) continue
+    if (!t.categoryId) continue
     const flow = flows.get(t.id)
-    if (!isSpend(flow)) continue
+    if (!spendsIn(flow, book, t.accountId, ids)) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
     const key = budgetCategoryId(cat)!

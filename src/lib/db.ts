@@ -40,11 +40,13 @@ export interface Transaction {
   /** Money paid into a savings goal — set on the incoming leg. */
   goalId?: string
   /**
-   * What this leg was filed under before `link_transfer` cleared it, so
-   * "Not a transfer" can put it back. Server-owned: only the link/unlink RPCs
-   * write it, and it is not in `mapping.ts`'s writable allow-list.
+   * "I paid for this out of my own account, but it was the household's."
+   *
+   * Counted as a contribution out of my book and as household spending in
+   * theirs — the same row read two ways, which is the rule that already governs
+   * a transfer crossing between books. See `classifyFlows`.
    */
-  priorCategoryId?: string
+  paidForHousehold?: boolean
   date: string // yyyy-MM-dd (server column `occurred_on`)
   payee: string
   note?: string

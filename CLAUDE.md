@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `12`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `13`, then `local/98-grants.sql`, then `exec`
 a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -57,6 +57,7 @@ read-only detector that reports which are present — run it when unsure.
 | `10-goal-transfers.sql` | a transfer that already exists can fund a goal — `link_transfer` gains `p_goal_id`, `set_transfer_goal` tags one afterwards, `unlink_transfer` releases it |
 | `11-account-recovery.sql` | `restore_account` undoes a delete, `deleted_accounts` is the bin, `claim_account` lets an admin take an ownerless account and `unowned_accounts` is how they find one |
 | `12-transfer-categories.sql` | `transactions.prior_category_id`, so unlinking a transfer gives each leg back the category linking took off it |
+| `13-paid-for-household.sql` | `transactions.paid_for_household` — household spending paid from a personal account |
 
 All are re-runnable, with **one ordering trap**: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
@@ -320,6 +321,15 @@ the single place a level comes from.
   setEditing(null)}`), and without the freeze the sheet would flip to its "new
   item" form on the way out. A sheet keyed on what it is editing
   (`key={editing?.id ?? 'closed'}`) remounts instead, and so has no exit at all.
+- **`bookTotals` selects rows by ACCOUNT, and `paid-for-household` is the one
+  exception.** Selecting by account is what stops a contribution being counted
+  into both books; that flow genuinely belongs to two at once, so it is admitted
+  to the household book while living outside it. Anything computing spending
+  must use `spendsIn(flow, book, accountId, ids)` rather than
+  `ids.has(...) && isSpend(...)`, or the categories stop adding up to the total
+  above them. One honest limit: the household book is normally identical on both
+  screens, and this is the only thing that breaks that — a row in a private
+  account is invisible to the other person.
 - **A budget is per month, so "the budget" is never a single number.** `useBudgets()`
   returns every month; `useBudgetsForMonth()` returns one. Handing the whole lot to a
   view that assumes one month renders each category once per month it was ever
