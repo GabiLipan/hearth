@@ -312,3 +312,52 @@ export function downloadCSV(filename: string, csv: string) {
 
 /** Minor units as a plain decimal — a spreadsheet wants 1234.56, not "£1,234.56". */
 export const csvAmount = (minor: number) => (minor / 100).toFixed(2)
+
+/* ---------- remembering a layout ---------- */
+
+/**
+ * A statement's shape, as a key.
+ *
+ * The HEADERS, not the account. One bank exports one format, and keying on the
+ * format means the answer carries across accounts at the same bank and does not
+ * carry across two banks that happen to share an account — which is the right
+ * way round. It also means an export that changes its columns falls back to
+ * guessing rather than silently reusing a mapping that no longer fits.
+ */
+export const mappingKey = (headers: string[]) =>
+  `import-map:${headers.map((h) => h.trim().toLowerCase()).join('|')}`
+
+/**
+ * A remembered mapping, checked against the file in front of us.
+ *
+ * Validated rather than trusted: the column count has to match and every index
+ * has to be in range. A stored mapping is device-local state that can outlive
+ * the thing it describes, and applying a stale one would point "money in" at a
+ * column that is now something else.
+ */
+export function readMapping(raw: string | undefined, csv: ParsedCSV): ColumnMapping | undefined {
+  if (!raw) return undefined
+  try {
+    const m = JSON.parse(raw) as Partial<ColumnMapping> & { columns?: number }
+    const width = csv.headers.length
+    const inRange = (i: unknown) => typeof i === 'number' && i >= 0 && i < width
+    if (m.columns !== width) return undefined
+    if (!inRange(m.date) || !inRange(m.payee) || !inRange(m.amount)) return undefined
+    if (m.layout !== 'signed' && m.layout !== 'split') return undefined
+    if (m.layout === 'split' && !inRange(m.moneyIn)) return undefined
+    if (typeof m.dateFormat !== 'string' || !m.dateFormat) return undefined
+    return {
+      date: m.date!,
+      payee: m.payee!,
+      amount: m.amount!,
+      moneyIn: m.layout === 'split' ? m.moneyIn! : -1,
+      layout: m.layout,
+      dateFormat: m.dateFormat,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+export const writeMapping = (m: ColumnMapping, csv: ParsedCSV) =>
+  JSON.stringify({ ...m, columns: csv.headers.length })

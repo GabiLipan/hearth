@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileUp, CheckCircle2 } from 'lucide-react'
-import { db } from '../lib/db'
+import { db, getSetting, setSetting } from '../lib/db'
 import { useAccounts, useCategories, useMyLevels } from '../lib/cache'
 import { fullName } from '../lib/categories'
 import { canAddTransactions, levelOn } from '../lib/accounts'
-import { parseCSV, guessMapping, extractRows, importHash, type ParsedCSV, type ColumnMapping, type ImportRow } from '../lib/csv'
+import {
+  parseCSV,
+  guessMapping,
+  extractRows,
+  importHash,
+  mappingKey,
+  readMapping,
+  writeMapping,
+  type ParsedCSV,
+  type ColumnMapping,
+  type ImportRow,
+} from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
 import { matchRule, prettyPayee, learnRule, buildHistoryMatcher } from '../lib/rules'
 import { findLikelyDuplicate } from '../lib/dedupe'
@@ -46,6 +57,8 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   const [step, setStep] = useState<Step>('pick')
   const [csv, setCsv] = useState<ParsedCSV | null>(null)
   const [mapping, setMapping] = useState<ColumnMapping | null>(null)
+  /** Whether the columns on screen came from last time rather than a guess. */
+  const [remembered, setRemembered] = useState(false)
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [importedCount, setImportedCount] = useState(0)
   const [reading, setReading] = useState(false)
@@ -55,6 +68,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     setStep('pick')
     setCsv(null)
     setMapping(null)
+    setRemembered(false)
     setRows([])
     setReading(false)
   }
@@ -87,8 +101,11 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       alert('Could not find any rows in that file.')
       return
     }
+    // What was chosen for this shape of file last time, if it still fits.
+    const saved = readMapping(await getSetting(mappingKey(parsed.headers)), parsed)
     setCsv(parsed)
-    setMapping(guessMapping(parsed))
+    setMapping(saved ?? guessMapping(parsed))
+    setRemembered(saved !== undefined)
     setStep('map')
   }
 
@@ -104,6 +121,18 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   async function buildReview(source?: ImportRow[]) {
     const extracted = (source ?? (csv && mapping ? extractRows(csv, mapping) : [])).filter((r) => r.valid)
     if (extracted.length === 0) return
+    /**
+     * Remember the columns at the point they are known to work — the rows
+     * extracted and the person moved on — rather than at the end of the import.
+     * Getting this far is the evidence that the mapping is right; whether the
+     * transactions are ultimately saved is a separate question, and abandoning
+     * the review is not a reason to have to redo the columns.
+     *
+     * Device-local, and keyed on the file's headers rather than the account:
+     * one bank exports one format, so the answer carries across accounts at the
+     * same bank and not across two banks sharing one.
+     */
+    if (csv && mapping) void setSetting(mappingKey(csv.headers), writeMapping(mapping, csv))
     const [rules, existing, cats] = await Promise.all([
       db.rules.toArray(),
       db.transactions.toArray(),
@@ -214,7 +243,11 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
 
       {step === 'map' && csv && mapping && (
         <div className="space-y-4">
-          <p className="text-sm text-ink-2">Check the columns were detected correctly.</p>
+          <p className="text-sm text-ink-2">
+            {remembered
+              ? 'These are the columns you chose for this bank last time.'
+              : 'Check the columns were detected correctly.'}
+          </p>
 
           {/* Above the pickers, because it changes what the picker below it
               means. Detection reads the rows rather than only the headings and

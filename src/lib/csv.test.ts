@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toCSV, csvAmount, parseCSV, guessMapping, extractRows } from './csv'
+import { toCSV, csvAmount, parseCSV, guessMapping, extractRows, mappingKey, readMapping, writeMapping } from './csv'
 
 /** Read a whole file the way the wizard does: guess, then extract. */
 const importAll = (text: string) => {
@@ -162,5 +162,42 @@ describe('csvAmount', () => {
 
   it('keeps the pence a whole pound would drop', () => {
     expect(csvAmount(100)).toBe('1.00')
+  })
+})
+
+describe('remembering a layout', () => {
+  const file = parseCSV(
+    ['Date,Description,Money Out,Money In', '01/03/2026,TESCO,45.20,', '02/03/2026,SALARY,,2500.00'].join('\n'),
+  )
+
+  it('keys on the headers, not the account', () => {
+    // One bank exports one format, so the answer should carry across accounts
+    // at the same bank and not across two banks sharing one.
+    const same = parseCSV(['date,description,money out,money in', '01/03/2026,X,1.00,'].join('\n'))
+    expect(mappingKey(file.headers)).toBe(mappingKey(same.headers))
+    expect(mappingKey(file.headers)).not.toBe(mappingKey(['Date', 'Detail', 'Amount']))
+  })
+
+  it('round-trips a mapping', () => {
+    const m = guessMapping(file)
+    expect(readMapping(writeMapping(m, file), file)).toEqual(m)
+  })
+
+  it('refuses a mapping from a file with a different number of columns', () => {
+    // Stored state can outlive the thing it describes, and applying a stale
+    // mapping would point "money in" at a column that is now something else.
+    const narrower = parseCSV(['Date,Description,Amount', '01/03/2026,TESCO,-45.20'].join('\n'))
+    expect(readMapping(writeMapping(guessMapping(file), file), narrower)).toBeUndefined()
+  })
+
+  it('refuses an index that is out of range, and anything unreadable', () => {
+    expect(readMapping(JSON.stringify({ ...guessMapping(file), columns: 4, amount: 9 }), file)).toBeUndefined()
+    expect(readMapping('not json', file)).toBeUndefined()
+    expect(readMapping(undefined, file)).toBeUndefined()
+  })
+
+  it('refuses a split mapping with no money-in column', () => {
+    const broken = { ...guessMapping(file), columns: 4, layout: 'split' as const, moneyIn: -1 }
+    expect(readMapping(JSON.stringify(broken), file)).toBeUndefined()
   })
 })

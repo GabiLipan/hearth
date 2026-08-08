@@ -76,8 +76,6 @@ the gap before that happens, or where linking is not possible at all.
 
 ## Everyday screens
 
-- [ ] Remember an import mapping per account, so the same bank's CSV does not
-      have to be confirmed every month
 
 - [ ] A month heading in Activity that sticks to the top while you scroll its
       rows. Wants care: `main` carries `overflow-x: clip` on mobile and the
@@ -161,6 +159,12 @@ table, measured against the median of the months before it — the mean would le
 one annual insurance payment become the norm — with months of no spending
 dropped rather than counted as zero. Silent below three months of history, and
 silent within a tenth of typical, because neither is news.
+
+**CSV import remembers its columns**, keyed on the file's headers rather than
+the account — one bank exports one format, so the answer carries across accounts
+at the same bank and not across two banks sharing one. Validated against the
+file in front of it before being applied, and saved at the point the columns are
+known to have worked rather than at the end of the import.
 
 **CSV import.** Handles a statement with separate money-out and money-in
 columns, both positive — the commonest UK export, and the layout is now always
