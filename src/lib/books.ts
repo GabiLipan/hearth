@@ -51,6 +51,41 @@ export const BOOK_LABEL: Record<BookId, string> = {
   all: 'Everything',
 }
 
+/**
+ * How each book describes itself.
+ *
+ * The words are not decoration, and they live here rather than on a page so the
+ * dashboard and Reports cannot drift into describing the same figure two ways.
+ * On the household book "income" is the money we each put in and "net" is
+ * literally what we saved — every account is inside the book, so nothing leaves
+ * except by being spent. On the personal book "net" is what is still sitting in
+ * my account after contributing and spending, and contributing is neither of
+ * those. Calling both of them "Income" and "Net" is how the old single-scope
+ * page managed to be wrong in two directions at once.
+ */
+export const BOOK_WORDS: Record<BookId, { income: string; spend: string; net: string; netHint: string }> = {
+  household: {
+    income: 'Paid in',
+    spend: 'Household spending',
+    net: 'Left over',
+    netHint:
+      'What we put in, minus what the household spent. Every account is inside this book, so this is what we actually saved.',
+  },
+  mine: {
+    income: 'Earned',
+    spend: 'Personal spending',
+    net: 'Left with me',
+    netHint:
+      'Salary minus what I moved to the household and what I spent on myself. Contributing is not spending.',
+  },
+  all: {
+    income: 'Money in',
+    spend: 'Money out',
+    net: 'Net',
+    netHint: 'Every account this device can see, added together. Transfers between them cancel out.',
+  },
+}
+
 export const BOOK_HINT: Record<BookId, string> = {
   household: 'The accounts we are both on. What we each put in, and what the household spent.',
   mine: 'My own accounts. My salary, what I contributed, and what I spent personally.',

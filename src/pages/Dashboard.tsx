@@ -2,11 +2,24 @@ import { useEffect, useState, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Sparkles, SlidersHorizontal, Check, ChevronUp, ChevronDown, EyeOff, Plus } from 'lucide-react'
 import { getSetting, setSetting } from '../lib/db'
-import { useAccounts, useAllTransactions, useBills, useBudgetsForMonth, useCategories, useRemoteBalances, useMyLevels } from '../lib/cache'
+import {
+  useAccounts,
+  useAllTransactions,
+  useBills,
+  useBook,
+  useBooks,
+  useBudgetsForMonth,
+  useCategories,
+  useFlows,
+  useRemoteBalances,
+  useMyLevels,
+} from '../lib/cache'
+import { accountsInBook } from '../lib/books'
+import { BookSwitcher } from '../components/BookSwitcher'
 import { thisMonthKey } from '../lib/dates'
 import { defaultDemoAccount, seedDemoData } from '../lib/demo'
 import { useSyncState } from '../hooks/useSync'
-import { Button, Columns, Empty, useColumnCount, cx } from '../components/ui'
+import { Button, Columns, Empty, Toolbar, useColumnCount, cx } from '../components/ui'
 import {
   HeroWidget,
   BudgetGlanceWidget,
@@ -73,6 +86,9 @@ export default function Dashboard() {
   const accounts = useAccounts()
   const remoteBalances = useRemoteBalances()
   const levels = useMyLevels()
+  const [book, setBook] = useBook()
+  const books = useBooks()
+  const flows = useFlows(txns, books)
   const [layout, setLayout] = useState<LayoutItem[]>(DEFAULT_LAYOUT)
   const [editing, setEditing] = useState(false)
   const [seeding, setSeeding] = useState(false)
@@ -150,7 +166,31 @@ export default function Dashboard() {
     )
   }
 
-  const data: HomeData = { txns: txns ?? [], categories, budgets, bills, accounts, remoteBalances, levels, userId }
+  /**
+   * Everything on this page is narrowed to the chosen book once, here, rather
+   * than in seven widgets. A widget that merely lists rows then needs no
+   * changes at all; only the ones that add money up have to know about flows,
+   * because a contribution is neither income nor spending.
+   */
+  const ids = accountsInBook(book, books)
+  const scopedTxns = (txns ?? []).filter((t) => ids.has(t.accountId))
+  const data: HomeData = {
+    txns: scopedTxns,
+    categories,
+    // Household budgets belong to the household book, personal ones to mine.
+    // Under Everything, show the lot rather than an arbitrary half.
+    budgets: budgets.filter((b) =>
+      book === 'household' ? !b.ownerId : book === 'mine' ? b.ownerId === userId : true,
+    ),
+    bills: bills.filter((b) => ids.has(b.accountId)),
+    accounts: accounts.filter((a) => ids.has(a.id)),
+    remoteBalances,
+    levels,
+    userId,
+    book,
+    books,
+    flows,
+  }
   const visible = layout.filter((l) => l.on)
   const hidden = layout.filter((l) => !l.on)
   const defOf = (id: string) => WIDGETS.find((w) => w.id === id)!
@@ -191,6 +231,10 @@ export default function Dashboard() {
 
   return (
     <div>
+      <Toolbar>
+        <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto md:min-w-72" />
+      </Toolbar>
+
       {/* Masonry columns on desktop: cards pack vertically instead of aligning
           to the tallest card in a grid row, so there's no dead space between
           cards of unequal height. The column count follows the viewport — two

@@ -54,14 +54,16 @@ Two consequences worth remembering:
 - [x] `useBook()` — the selected book, device-local like the theme
 - [x] `BookSwitcher` — `Our household · Mine · Everything`
 - [x] Wire Reports to the switcher
-- [ ] Wire Home to the switcher
-- [ ] Wire Budgets to the switcher
+- [x] Wire Home to the switcher
+- [x] Wire Budgets to the switcher
 
 ## Phase 2 — Budgets, bills and goals per book
 
-- [ ] Household budgets measure joint-account spending only, so both our screens
+- [x] Household budgets measure joint-account spending only, so both our screens
       agree on the same budget
-- [ ] Personal budgets measure my private accounts only
+- [x] Personal budgets measure my private accounts only — they used to filter on
+      who *recorded* the transaction, which is a different question and got both
+      cases wrong
 - [ ] Bills grouped by book — household bills from joint, personal subscriptions
       from mine
 - [ ] Goals marked household or personal, and shown in the matching book
@@ -102,6 +104,17 @@ Two consequences worth remembering:
 - [ ] **Top payees** — where the money actually goes, under the category level
 - [ ] **Category heatmap** — months across, categories down, for spotting drift
 - [ ] **Pace line** — spend-to-date against the same point last month
+
+### Making a part-finished month readable
+- [ ] **Show the joint balance beside the figures.** On the 8th of the month,
+      "Paid in £0.57, spent £3,142, left over −£3,141" is arithmetically right
+      and reads like a disaster. "£4,200 at the start, £1,058 now" is the same
+      fact and is actually useful
+- [ ] **decision** — should the household month run payday-to-payday rather than
+      1st-to-1st? If we fund the joint account at the end of the month for the
+      next one, a calendar month will always show spending before its income
+- [ ] Dim or annotate the current month as incomplete, everywhere it is compared
+      against finished months
 
 ### Sharpening what's there
 - [ ] Fix `monthlySeries` — the dead `else if`/`else` pair means *any* positive

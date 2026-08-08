@@ -4,15 +4,17 @@ import type { Budget, Category } from '../lib/db'
 import { create, update, remove } from '../lib/data'
 import { rpc } from '../lib/api'
 import { syncNow } from '../lib/session'
-import { useAllTransactions, useBudgets, useCategories } from '../lib/cache'
+import { useAllTransactions, useBook, useBooks, useBudgets, useCategories, useFlows } from '../lib/cache'
+import { accountsInBook, isSpend } from '../lib/books'
+import { BookSwitcher } from '../components/BookSwitcher'
 import { budgetCategoryId, styleOf, topLevel } from '../lib/categories'
-import { monthlySpendByCategory, monthsEndingAt, typicalSpend, isTransfer } from '../lib/stats'
+import { monthlySpendByCategory, monthsEndingAt, typicalSpend } from '../lib/stats'
 import { budgetSeries, fillBudgets, typicalRange, type FilledBudgets } from '../lib/budgetHistory'
 import { thisMonthKey, monthLabel, monthKey, shiftMonth } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
-import { Card, CategoryDot, Progress, Button, Empty, Segmented, Toolbar, MonthStepper, ScrollTable, table, cx } from '../components/ui'
+import { Card, CategoryDot, Progress, Button, Empty, Toolbar, MonthStepper, ScrollTable, table, cx } from '../components/ui'
 import { BudgetBullet } from '../components/BudgetBullet'
 import { BudgetBars } from '../components/BudgetBars'
 
@@ -48,7 +50,10 @@ export default function Budgets() {
   const { money, currency } = useApp()
   const { userId } = useSyncState()
   const [month, setMonth] = useState(thisMonthKey())
-  const [scope, setScope] = useState<'household' | 'mine'>('household')
+  // The same lens as Home and Reports, rather than a second toggle that means
+  // almost the same thing. A budget belongs to a book: the household's shared
+  // ones, or my own.
+  const [book, setBook] = useBook()
   const [copying, setCopying] = useState(false)
 
   const categories = useCategories()
@@ -57,10 +62,17 @@ export default function Budgets() {
   const allBudgets = useBudgets()
   const txns = useAllTransactions() ?? []
 
-  const mine = scope === 'mine' && !!userId
+  const mine = book === 'mine' && !!userId
+  const books = useBooks()
+  const flows = useFlows(txns, books)
+  const bookAccounts = useMemo(() => accountsInBook(book, books), [book, books])
   const isCurrent = month === thisMonthKey()
 
-  const owned = useCallback((b: Budget) => (mine ? b.ownerId === userId : !b.ownerId), [mine, userId])
+  const owned = useCallback(
+    (b: Budget) =>
+      book === 'mine' ? b.ownerId === userId : book === 'household' ? !b.ownerId : !b.ownerId || b.ownerId === userId,
+    [book, userId],
+  )
   const scoped = useMemo(
     () => allBudgets.filter((b) => owned(b) && b.month === `${month}-01`),
     [allBudgets, owned, month],
@@ -74,11 +86,18 @@ export default function Budgets() {
   const months = useMemo(() => monthsEndingAt(shiftMonth(month, -1), HISTORY_MONTHS), [month])
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
-  // Personal budgets track only what you recorded yourself, so the history they
-  // are judged against has to be filtered the same way.
+  /**
+   * A budget is judged against the spending of its own book.
+   *
+   * This used to filter personal budgets by `created_by`, which is a different
+   * question and got both cases wrong: a household budget counted groceries put
+   * on my private card — spending my partner cannot even see, so their screen
+   * showed a different figure against the same shared budget — and a personal
+   * budget counted anything I happened to record on a joint account.
+   */
   const relevantTxns = useMemo(
-    () => (mine ? txns.filter((t) => t.createdBy === userId) : txns),
-    [txns, mine, userId],
+    () => txns.filter((t) => bookAccounts.has(t.accountId)),
+    [txns, bookAccounts],
   )
   const history = useMemo(
     () => monthlySpendByCategory(relevantTxns, categories, months),
@@ -88,13 +107,15 @@ export default function Budgets() {
   const spentThisMonth = useMemo(() => {
     const m = new Map<string, number>()
     for (const t of relevantTxns) {
-      if (t.amountMinor >= 0 || isTransfer(t) || monthKey(t.date) !== month) continue
+      // `isSpend` rather than "negative and not a transfer": a contribution to
+      // the household leaves my account looking exactly like an expense.
+      if (!isSpend(flows.get(t.id)) || monthKey(t.date) !== month) continue
       const key = budgetCategoryId(catMap.get(t.categoryId ?? ''))
       if (!key) continue
       m.set(key, (m.get(key) ?? 0) - t.amountMinor)
     }
     return m
-  }, [relevantTxns, catMap, month])
+  }, [relevantTxns, flows, catMap, month])
 
   const rows: Row[] = useMemo(() => {
     // Budgets live on top-level categories; subcategory spending rolls up.
@@ -155,17 +176,7 @@ export default function Budgets() {
     <div>
       <Toolbar className="justify-center md:justify-start">
         <MonthStepper month={month} onChange={setMonth} label={monthLabel} canGoForward={!isCurrent} />
-        {userId && (
-          <Segmented
-            value={scope}
-            onChange={setScope}
-            className="w-48"
-            options={[
-              { value: 'household', label: 'Household' },
-              { value: 'mine', label: 'Just mine' },
-            ]}
-          />
-        )}
+        {userId && <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto md:min-w-64" />}
         {budgeted.length > 0 && (
           <div className="hidden min-w-64 flex-1 items-center gap-2.5 md:flex">
             <span className="text-sm text-ink-2 tabular">
@@ -188,7 +199,7 @@ export default function Budgets() {
 
       {mine && (
         <p className="mb-3 text-center text-xs text-ink-3 md:mb-2 md:text-left">
-          Personal budgets count only the spending you record yourself.
+          Personal budgets count spending on your own accounts. Moving money to the household is not spending.
         </p>
       )}
 

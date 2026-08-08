@@ -280,7 +280,11 @@ export function Segmented<T extends string>({
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
           className={cx(
-            'relative flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:rounded-md md:px-2.5 desktop:py-1',
+            // `min-w-0` + `truncate` rather than letting a long label wrap: the
+            // sliding thumb is positioned arithmetically from an equal share of
+            // the width, so a two-line option makes the control taller than the
+            // thumb and the selection stops covering what it selected.
+            'relative min-w-0 flex-1 truncate whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:rounded-md md:px-2.5 desktop:py-1',
             value === o.value ? 'text-ink' : 'text-ink-3 hover:text-ink-2',
           )}
         >

@@ -3,44 +3,12 @@ import { Table2, ChartPie, ChevronLeft } from 'lucide-react'
 import { useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useFlows } from '../lib/cache'
 import { thisMonthKey, monthLabel } from '../lib/dates'
 import { OTHER_SLICE_ID } from '../lib/stats'
-import { bookSeries, bookSlices, bookTotals, hasBreakdown, type BookId } from '../lib/books'
+import { bookSeries, bookSlices, bookTotals, hasBreakdown, BOOK_WORDS, type BookId } from '../lib/books'
 import { useApp } from '../state/AppContext'
 import { Card, Segmented, Empty, Toolbar, MonthStepper, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { CategoryDonut, SpendBars, IncomeSpendBars, NetLine } from '../components/charts'
-
-/**
- * How each book describes itself.
- *
- * The words are not decoration. On the household book, "income" is the money we
- * each put in and "net" is literally what we saved — every account is inside the
- * book, so nothing left except by being spent. On the personal book "net" is
- * what is still sitting in my account after I contributed and spent, and
- * contributing is neither of those things. Calling both of them "Income" and
- * "Net" was how the old single-scope page managed to be wrong in two directions
- * at once.
- */
-const WORDS: Record<BookId, { income: string; spend: string; net: string; netHint: string }> = {
-  household: {
-    income: 'Paid in',
-    spend: 'Household spending',
-    net: 'Left over',
-    netHint: 'What we put in, minus what the household spent. Every account is inside this book, so this is what we actually saved.',
-  },
-  mine: {
-    income: 'Earned',
-    spend: 'Personal spending',
-    net: 'Left with me',
-    netHint: 'Salary minus what I moved to the household and what I spent on myself. Contributing is not spending.',
-  },
-  all: {
-    income: 'Money in',
-    spend: 'Money out',
-    net: 'Net',
-    netHint: 'Every account this device can see, added together. Transfers between them cancel out.',
-  },
-}
 
 export default function Reports() {
   const { money } = useApp()
@@ -70,7 +38,7 @@ export default function Reports() {
     [txns, flows, book, month, books],
   )
 
-  const words = WORDS[book]
+  const words = BOOK_WORDS[book]
   const drillName = drill ? (catMap.get(drill)?.name ?? 'Category') : null
 
   // Changing book or month while inside a category would leave the breadcrumb
@@ -122,7 +90,11 @@ export default function Reports() {
           it is the money we each put in, and it is visible to both of us even
           though neither can see the other's salary. */}
       <Card className="mb-3 p-4 md:mb-2.5 md:p-3">
-        <div className="flex flex-wrap items-start divide-x divide-hairline">
+        {/* A two-column grid on a phone and one divided row on a desktop.
+            `flex-wrap` with `divide-x` was neither: the item that wrapped kept
+            its left border, so the second line began with a divider attached to
+            nothing and the figures no longer lined up under their headings. */}
+        <div className="grid grid-cols-2 gap-x-5 gap-y-3 md:flex md:flex-nowrap md:items-start md:gap-0 md:divide-x md:divide-hairline">
           <Stat label={words.income} value={money(totals.income)} />
           {book === 'household' && totals.contributions > 0 && (
             <Stat label="of which we put in" value={money(totals.contributions)} muted />
@@ -295,12 +267,15 @@ function Stat({
   muted?: boolean
 }) {
   return (
-    <div className="min-w-32 flex-1 px-3 first:pl-0">
-      <p className={cx('text-xs', muted ? 'text-ink-3' : 'text-ink-3')}>{label}</p>
+    <div className="min-w-0 md:flex-1 md:px-3 md:first:pl-0">
+      <p className="text-xs text-ink-3">{label}</p>
+      {/* Amounts stay on one line and shrink instead: "Household spending"
+          against "−£3,141.42" is two long strings in half a phone's width, and
+          a wrapped figure reads as two numbers. */}
       <p
         className={cx(
-          'mt-0.5 font-bold tracking-tight tabular',
-          muted ? 'text-lg text-ink-2' : 'text-2xl',
+          'mt-0.5 truncate font-bold tracking-tight tabular',
+          muted ? 'text-base text-ink-2 md:text-lg' : 'text-xl md:text-2xl',
           tone === 'bad' && 'text-critical-text',
           tone === 'good' && 'text-good-text',
         )}

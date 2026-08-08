@@ -1,6 +1,20 @@
-import { Home, User, Layers } from 'lucide-react'
+import { Home, User, Layers, type LucideIcon } from 'lucide-react'
 import { BOOK_HINT, BOOK_LABEL, type BookId } from '../lib/books'
 import { Segmented } from './ui'
+
+/**
+ * Three options and a month stepper do not fit "Our household" across a phone,
+ * and a wrapped option breaks the control: the sliding thumb takes an equal
+ * share of the width arithmetically, so a two-line label makes the track taller
+ * than the thumb and the selection stops covering what it selected.
+ *
+ * The short form is not an abbreviation so much as the same idea in fewer words.
+ */
+const BOOKS: { id: BookId; icon: LucideIcon; short: string }[] = [
+  { id: 'household', icon: Home, short: 'Ours' },
+  { id: 'mine', icon: User, short: 'Mine' },
+  { id: 'all', icon: Layers, short: 'All' },
+]
 
 /**
  * Which set of books this page is showing.
@@ -26,32 +40,16 @@ export function BookSwitcher({
       value={book}
       onChange={onChange}
       className={className}
-      options={[
-        {
-          value: 'household' as BookId,
-          label: (
-            <span className="flex items-center justify-center gap-1.5" title={BOOK_HINT.household}>
-              <Home size={14} /> {BOOK_LABEL.household}
-            </span>
-          ),
-        },
-        {
-          value: 'mine' as BookId,
-          label: (
-            <span className="flex items-center justify-center gap-1.5" title={BOOK_HINT.mine}>
-              <User size={14} /> {BOOK_LABEL.mine}
-            </span>
-          ),
-        },
-        {
-          value: 'all' as BookId,
-          label: (
-            <span className="flex items-center justify-center gap-1.5" title={BOOK_HINT.all}>
-              <Layers size={14} /> {BOOK_LABEL.all}
-            </span>
-          ),
-        },
-      ]}
+      options={BOOKS.map(({ id, icon: Icon, short }) => ({
+        value: id,
+        label: (
+          <span className="flex items-center justify-center gap-1.5" title={BOOK_HINT[id]}>
+            <Icon size={14} className="shrink-0" />
+            <span className="md:hidden">{short}</span>
+            <span className="hidden md:inline">{BOOK_LABEL[id]}</span>
+          </span>
+        ),
+      }))}
     />
   )
 }

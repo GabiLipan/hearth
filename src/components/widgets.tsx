@@ -4,7 +4,16 @@ import { ArrowRight, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
 import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
-import { spendByCategory, monthlySeries, monthTotals, monthlySpendByCategory, monthsEndingAt } from '../lib/stats'
+import { monthlySpendByCategory, monthsEndingAt } from '../lib/stats'
+import {
+  bookSeries,
+  bookSlices,
+  bookTotals,
+  BOOK_WORDS,
+  type BookId,
+  type BookMap,
+  type Flow,
+} from '../lib/books'
 import { typicalRange } from '../lib/budgetHistory'
 import { balanceOf, canSeeTransactionsAt, levelOn } from '../lib/accounts'
 import { useApp } from '../state/AppContext'
@@ -25,6 +34,16 @@ export interface HomeData {
   /** What I may do on each account — the mirror of `my_account_ids()`. */
   levels: Map<string, GrantLevel>
   userId?: string
+  /**
+   * Which book is on screen. Dashboard has already narrowed `txns`, `accounts`,
+   * `bills` and `budgets` to it, so a widget that only lists rows needs to do
+   * nothing — but anything that ADDS money up must go through `bookTotals` and
+   * friends, because a contribution is not income and not spending and only
+   * these know which.
+   */
+  book: BookId
+  books: BookMap
+  flows: Map<string, Flow>
 }
 
 const month = () => thisMonthKey()
@@ -51,8 +70,12 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
 
 export function HeroWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
-  const totals = useMemo(() => monthTotals(data.txns, month()), [data.txns])
-  const budgetTotal = data.budgets.reduce((s, b) => (b.ownerId ? s : s + b.amountMinor), 0)
+  const words = BOOK_WORDS[data.book]
+  const totals = useMemo(
+    () => bookTotals(data.txns, data.flows, data.book, month(), data.books),
+    [data.txns, data.flows, data.book, data.books],
+  )
+  const budgetTotal = data.budgets.reduce((s, b) => s + b.amountMinor, 0)
   const frac = budgetTotal > 0 ? totals.spend / budgetTotal : 0
   const over = frac > 1
   const bar = budgetTotal > 0 && <Progress fraction={frac} tone={over ? 'over' : frac > 0.85 ? 'warn' : 'ok'} />
@@ -61,9 +84,9 @@ export function HeroWidget({ data }: { data: HomeData }) {
     <Card className="p-4 md:p-3">
       {/* Phone: one headline figure with the detail stacked underneath. */}
       <div className="flex flex-wrap items-end justify-between gap-3 md:hidden">
-        <div>
-          <p className="text-sm text-ink-3">{monthLabel(month())} · spent so far</p>
-          <p className="mt-0.5 text-3xl font-bold tracking-tight tabular">{money(totals.spend)}</p>
+        <div className="min-w-0">
+          <p className="text-sm text-ink-3">{monthLabel(month())} · {words.spend.toLowerCase()}</p>
+          <p className="mt-0.5 truncate text-3xl font-bold tracking-tight tabular">{money(totals.spend)}</p>
           {budgetTotal > 0 && (
             <p className="mt-0.5 text-sm text-ink-2">
               of {money(budgetTotal, { hideDecimals: true })}
@@ -76,32 +99,31 @@ export function HeroWidget({ data }: { data: HomeData }) {
           )}
         </div>
         <div className="min-w-36 flex-1">
-          <div className="mb-1.5 flex justify-between text-xs text-ink-3">
-            <span>In {money(totals.income, { compact: true })}</span>
-            <span>Net {money(totals.net, { sign: true, compact: true })}</span>
+          <div className="mb-1.5 flex justify-between gap-2 text-xs text-ink-3">
+            <span className="truncate">{words.income} {money(totals.income, { compact: true })}</span>
+            <span className="truncate">{words.net} {money(totals.net, { sign: true, compact: true })}</span>
           </div>
           {bar}
         </div>
       </div>
 
-      {/* Desktop: a strip of figures across the full width — the numbers that
-          were buried in a sub-line each get their own column. */}
+      {/* Desktop: a strip of figures across the full width. */}
       <div className="hidden md:block">
         <p className="text-xs text-ink-3">{monthLabel(month())}</p>
-        <div className="mt-1 flex flex-wrap items-start divide-x divide-hairline">
-          <Stat label="Spent so far" value={money(totals.spend)} />
-          {budgetTotal > 0 && <Stat label="Budgeted" value={money(budgetTotal, { hideDecimals: true })} />}
-          {budgetTotal > 0 && (
-            <Stat
-              label={over ? 'Over budget' : 'Left to spend'}
-              value={money(over ? totals.spend - budgetTotal : budgetTotal - totals.spend)}
-              tone={over ? 'bad' : 'good'}
-            />
+        <div className="mt-1 flex flex-nowrap items-start divide-x divide-hairline">
+          <Stat label={words.spend} value={money(totals.spend)} />
+          <Stat label={words.income} value={money(totals.income)} />
+          {data.book === 'mine' && totals.contributed > 0 && (
+            <Stat label="To household" value={money(totals.contributed)} />
           )}
-          <Stat label="Income" value={money(totals.income)} />
-          <Stat label="Net" value={money(totals.net, { sign: true })} tone={totals.net < 0 ? 'bad' : 'good'} />
+          <Stat
+            label={words.net}
+            value={money(totals.net, { sign: true })}
+            tone={totals.net < 0 ? 'bad' : 'good'}
+          />
+          {budgetTotal > 0 && <Stat label="Budgeted" value={money(budgetTotal, { hideDecimals: true })} />}
         </div>
-        {budgetTotal > 0 && <div className="mt-2.5">{bar}</div>}
+        {budgetTotal > 0 && <div className="mt-2">{bar}</div>}
       </div>
     </Card>
   )
@@ -122,8 +144,11 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
     [data.txns, data.categories, months],
   )
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
+  // Budgets follow the book: the household's shared ones under "Our household",
+  // my own under "Mine". Spending is already narrowed to the book's accounts by
+  // Dashboard, so a household budget stops counting my private card.
   const rows = data.budgets
-    .filter((b) => !b.ownerId && catMap.has(b.categoryId)) // the household's budgets
+    .filter((b) => catMap.has(b.categoryId))
     .map((b) => {
       const series = history.get(b.categoryId) ?? months.map(() => 0)
       return {
@@ -226,20 +251,26 @@ export function AccountsWidget({ data }: { data: HomeData }) {
 /* ---------- Where it went ---------- */
 export function DonutWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
-  const totals = useMemo(() => monthTotals(data.txns, month()), [data.txns])
-  const slices = useMemo(() => spendByCategory(data.txns, data.categories, month(), 6), [data.txns, data.categories])
+  const slices = useMemo(
+    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, undefined, 6),
+    [data.txns, data.flows, data.categories, data.book, data.books],
+  )
+  const spent = slices.reduce((s, x) => s + x.totalMinor, 0)
   if (slices.length === 0) return null
   return (
     <Card className="p-4 md:p-3">
       <h3 className="mb-2 font-semibold md:mb-1.5 md:text-sm">Where it went</h3>
-      <CategoryDonut slices={slices} height={180} centerLabel={{ title: 'spent', value: money(totals.spend, { compact: true }) }} />
+      <CategoryDonut slices={slices} height={180} centerLabel={{ title: 'spent', value: money(spent, { compact: true }) }} />
     </Card>
   )
 }
 
 /* ---------- Trend ---------- */
 export function TrendWidget({ data }: { data: HomeData }) {
-  const series = useMemo(() => monthlySeries(data.txns, data.categories, 6), [data.txns, data.categories])
+  const series = useMemo(
+    () => bookSeries(data.txns, data.flows, data.book, 6, data.books),
+    [data.txns, data.flows, data.book, data.books],
+  )
   return (
     <Card className="p-4 md:p-3">
       <h3 className="mb-2 font-semibold md:mb-1.5 md:text-sm">Spending, last 6 months</h3>
