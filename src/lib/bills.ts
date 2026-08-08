@@ -1,5 +1,5 @@
 import { db, getSetting, setSetting, type Bill, type BillFreq, type Transaction } from './db'
-import { advanceDue, todayISO } from './dates'
+import { advanceDue, retreatDue, todayISO } from './dates'
 import { normalizePayee, prettyPayee, payeeSimilar } from './rules'
 import { rpc } from './api'
 import { differenceInCalendarDays, parseISO } from 'date-fns'
@@ -51,6 +51,16 @@ export async function autoPostDueBills(): Promise<number> {
 // claimed exactly once across both devices and `bill_postings` is not a table
 // the client can reach.
 
+/**
+ * How many occurrences of one bill the detector will consider, each way.
+ *
+ * A stop, not a policy. Weekly is the worst case — 260 is five years of it —
+ * and the backwards walk normally stops long before this, at the oldest
+ * payment there is to match. It exists so a bill whose `next_due` has been
+ * left absurdly far from its payments cannot spin.
+ */
+const MAX_OCCURRENCES = 260
+
 /** How far from its due date a payment can land and still be that occurrence. */
 const WINDOW_DAYS: Record<BillFreq, number> = {
   // A weekly bill's occurrences are only seven days apart, so the window has to
@@ -87,10 +97,19 @@ export interface BillMatch {
 /**
  * Every unpaid occurrence that a transaction already in the account can account for.
  *
- * Walks forward from each bill's `nextDue`, because that is by definition the
- * first occurrence nothing has claimed. Occurrences BEFORE it were either paid
- * or skipped, and re-examining them would offer to reconcile history that has
- * already been settled.
+ * Walks BOTH ways from each bill's `nextDue`. Forwards is the obvious half —
+ * the occurrences that have come due and nothing has claimed. Backwards is the
+ * half that was missing, and it is the case the whole detector exists for:
+ * track a bill today, import a year of statements, and every payment in them
+ * sits before `next_due`, where nothing was looking. The history stayed
+ * unreconciled with nothing on screen to say why.
+ *
+ * That is safe because an occurrence already settled cannot produce a match. A
+ * payment recorded against a bill carries `bill_id` and is filtered out of the
+ * candidates below, so a past occurrence whose payment is already linked finds
+ * nothing to offer — and if the occurrence was claimed some other way, the
+ * server refuses the link and the caller treats that as "the other device got
+ * there first", which it already had to.
  *
  * A transaction is offered for at most one occurrence, and an occurrence takes
  * at most one transaction: twelve identical mortgage payments must map to twelve
@@ -149,10 +168,36 @@ export async function detectBillPayments(): Promise<BillMatch[]> {
     )
     if (candidates.length === 0) continue
 
-    // Only occurrences that have actually come due. Reconciling a future one
-    // would mean claiming a payment for a month that has not happened yet.
-    let due = bill.nextDue
-    for (let i = 0; i < 60 && due <= today; i++) {
+    /**
+     * Every occurrence worth asking about, oldest first.
+     *
+     * Both directions from `next_due`, which is the fix for the case this
+     * whole detector exists to serve. A bill created today and a year of
+     * statement imported afterwards has all of its payments BEFORE `next_due`,
+     * and looking only forwards offered none of them — the history stayed
+     * unreconciled with no way to say so. `link_bill_payment` has always
+     * handled a past occurrence correctly, only advancing `next_due` when the
+     * occurrence is at or past it; nothing offered them.
+     *
+     * Backwards stops at the oldest payment there is to match, so the length of
+     * this list is set by the data rather than by a guess. Forwards stops at
+     * today: claiming a payment for a month that has not happened yet would be
+     * asserting something about the future.
+     */
+    const occurrences: string[] = []
+    const oldest = candidates.reduce((min, t) => (t.date < min ? t.date : min), candidates[0].date)
+    let back = retreatDue(bill.nextDue, bill.freq)
+    for (let i = 0; i < MAX_OCCURRENCES && differenceInCalendarDays(parseISO(back), parseISO(oldest)) >= -window; i++) {
+      occurrences.unshift(back)
+      back = retreatDue(back, bill.freq)
+    }
+    let ahead = bill.nextDue
+    for (let i = 0; i < MAX_OCCURRENCES && ahead <= today; i++) {
+      occurrences.push(ahead)
+      ahead = advanceDue(ahead, bill.freq)
+    }
+
+    for (const due of occurrences) {
       let best: Transaction | undefined
       let bestGap = Infinity
       for (const t of candidates) {
@@ -174,7 +219,6 @@ export async function detectBillPayments(): Promise<BillMatch[]> {
           amountDeltaMinor: best.amountMinor - bill.amountMinor,
         })
       }
-      due = advanceDue(due, bill.freq)
     }
   }
   // Oldest first: reconciling in order is what lets `next_due` walk forward

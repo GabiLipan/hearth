@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `09`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `10`, then `local/98-grants.sql`, then `exec`
 a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -335,11 +335,6 @@ the single place a level comes from.
 - No end-to-end test covers two users at once; the two-person cases are asserted
   in `supabase/99c-ownership-tests.sql` and `99e-reconcile-tests.sql` at the SQL
   layer only.
-- Bill reconciliation only looks forward from `nextDue`. Payments for
-  occurrences *before* it — a year of history imported after the bill was
-  created — are left alone. `link_bill_payment` would handle them correctly (it
-  only advances `next_due` when the occurrence is at or past it), but nothing
-  offers them.
 - Unlinking a transfer leaves both legs uncategorised, and now also releases any
   goal it was funding: linking clears `category_id` on both and unlinking clears
   `goal_id`, and neither previous value is recoverable. Releasing the goal is

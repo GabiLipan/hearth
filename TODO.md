@@ -203,8 +203,11 @@ Still open from the same pass:
 
 ## Phase 7 — Carried over from the last round
 
-- [ ] Bill reconciliation only looks forward from `nextDue`, so a year of history
-      imported after a bill was created is never offered
+- [x] Bill reconciliation only looks forward from `nextDue`, so a year of history
+      imported after a bill was created is never offered — it now walks both
+      ways, stopping backwards at the oldest payment there is to match. Safe
+      because a settled occurrence's payment carries `bill_id` and so is not a
+      candidate
 - [ ] Unlinking a transfer leaves both legs uncategorised, and the old categories
       are not recoverable
 - [ ] `importJSON` preserves `ownerId`, so a backup restored by the other person

@@ -62,6 +62,30 @@ export function advanceDue(dateISO: string, freq: BillFreq): string {
   }
 }
 
+/**
+ * One period earlier — `advanceDue` backwards, for walking a bill's history.
+ *
+ * Not exactly its inverse across a month end: date-fns clamps, so 31 March
+ * back a month and forward again is 28 February and then 28 March. Every
+ * caller compares due dates against payments with a tolerance window wider
+ * than that drift, which is the only reason it is safe to ignore.
+ */
+export function retreatDue(dateISO: string, freq: BillFreq): string {
+  const d = parseISO(dateISO)
+  switch (freq) {
+    case 'weekly':
+      return format(addWeeks(d, -1), 'yyyy-MM-dd')
+    case 'fortnightly':
+      return format(addWeeks(d, -2), 'yyyy-MM-dd')
+    case 'monthly':
+      return format(addMonths(d, -1), 'yyyy-MM-dd')
+    case 'quarterly':
+      return format(addMonths(d, -3), 'yyyy-MM-dd')
+    case 'yearly':
+      return format(addYears(d, -1), 'yyyy-MM-dd')
+  }
+}
+
 export const FREQ_LABEL: Record<BillFreq, string> = {
   weekly: 'Weekly',
   fortnightly: 'Fortnightly',

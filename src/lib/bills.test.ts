@@ -139,6 +139,59 @@ describe('reconciling a bill against money that already moved', () => {
   })
 })
 
+describe('reconciling history that predates the bill', () => {
+  /**
+   * The case the detector was missing entirely: you start tracking the mortgage
+   * today, then import a year of statements. Every payment in them is BEFORE
+   * `nextDue`, which is where nothing was looking — so the history stayed
+   * unreconciled and nothing on screen said why.
+   */
+  it('offers payments from before nextDue', async () => {
+    // Tracked from next month; three payments already in the account.
+    await load(
+      [bill({ nextDue: monthsAgo(-1, 1) })],
+      [txn({ date: monthsAgo(3, 2) }), txn({ date: monthsAgo(2, 2) }), txn({ date: monthsAgo(1, 2) })],
+    )
+
+    const found = await detectBillPayments()
+
+    expect(found).toHaveLength(3)
+    expect(new Set(found.map((m) => m.dueOn)).size).toBe(3)
+    expect(new Set(found.map((m) => m.txn.id)).size).toBe(3)
+    // Still oldest first, so each link walks next_due on from the last.
+    expect([...found].sort((a, b) => a.dueOn.localeCompare(b.dueOn))).toEqual(found)
+  })
+
+  it('stops walking back at the oldest payment there is to match', async () => {
+    // The backwards walk is bounded by the data, not by a guess: one payment
+    // eight months back must not produce eight months of empty occurrences.
+    await load([bill({ nextDue: monthsAgo(-1, 1) })], [txn({ date: monthsAgo(8, 2) })])
+
+    const found = await detectBillPayments()
+
+    expect(found).toHaveLength(1)
+    expect(found[0].txn.date).toBe(monthsAgo(8, 2))
+  })
+
+  it('still refuses an occurrence that has not happened yet', async () => {
+    // Forwards is still capped at today. A payment cannot satisfy next month.
+    await load([bill({ nextDue: monthsAgo(-1, 1) })], [txn({ date: monthsAgo(-1, 2) })])
+
+    expect(await detectBillPayments()).toHaveLength(0)
+  })
+
+  it('leaves a payment already recorded against the bill alone', async () => {
+    // What makes looking backwards safe: a settled occurrence has a linked
+    // payment, and a linked payment is not a candidate.
+    await load(
+      [bill({ nextDue: monthsAgo(-1, 1) })],
+      [txn({ date: monthsAgo(1, 2), billId: 'b-whatever' })],
+    )
+
+    expect(await detectBillPayments()).toHaveLength(0)
+  })
+})
+
 describe('where a newly tracked bill is next due', () => {
   it('lands one period after the last payment, not today', async () => {
     // "Next due today" on a bill that goes out on the 4th is both wrong and
