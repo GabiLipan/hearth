@@ -10,8 +10,8 @@ be built until we answer them. **Waiting on code** is work, each item labelled
 up. What has already shipped is not here at all: it is in the git log, where it
 cannot rot, and a plan made mostly of finished work stops being read.
 
-Right now: **6 decisions waiting on us**, and **6 pieces of work** — 2 ready, 4
-behind migration 11.
+Right now: **6 decisions waiting on us**, and **4 pieces of work** — 2 ready, 2
+behind migration 11 (which is written and waiting to be applied).
 
 ---
 
@@ -90,15 +90,15 @@ meaning inside a period that does not align to a month. Wants its own pass.
 **Recurring transfer routes.** Learn "£2,000, my private → joint, monthly" the
 way a bill is learned, so payday stops needing confirmation every month.
 
-## Migration 11 — all four fit in one migration
+## Migration 11 — WRITTEN, waiting to be applied
 
-**Undo for a deleted account.** `delete_account` sets `deleted_at` and the
-account vanishes for everybody with no way back. Wants a `restore_account` RPC
-and a "recently deleted" list in Settings.
+`supabase/11-account-recovery.sql`. **Run it by hand in the Supabase SQL
+editor.** Until then the "Recoverable" section in Settings stays empty and its
+two RPCs fail. Undo for a deleted account and reclaiming an ownerless one are
+both done and covered by `99g-recovery-tests.sql`.
 
-**Reclaim an ownerless account from Settings.** `dev-repair-accounts.sql`
-already does this by hand in the SQL editor; a household admin should be able to
-do it from the app.
+The two below still need building on top of it, and are what is left of that
+group:
 
 **Tell the person who CAN see the far leg.** `lib/unexplained.ts` names the
 blind spot on my screen — money moved that only my partner can confirm. The

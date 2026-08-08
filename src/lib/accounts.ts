@@ -171,3 +171,59 @@ export async function deleteAccount(accountId: string, withTransactions: boolean
   await fullPull()
   return removed
 }
+
+/* ---------- getting one back ---------- */
+
+export interface DeletedAccount {
+  id: string
+  name: string
+  kind: string
+  deletedAt: string
+  transactionCount: number
+}
+
+export interface UnownedAccount {
+  id: string
+  name: string
+  kind: string
+  createdAt: string
+}
+
+/**
+ * The bin, and the orphans. Both are RPCs rather than reads of the cache,
+ * because neither row is something `accounts_select` will hand over: a deleted
+ * account is filtered out of the ordinary read path on purpose (the cache holds
+ * live rows only), and an ownerless one is invisible to everybody precisely
+ * because it has no grant left to authorise it.
+ *
+ * Online-only in consequence, which is right — restoring an account is not
+ * something to queue and hope about.
+ */
+export async function deletedAccounts(): Promise<DeletedAccount[]> {
+  const rows = await rpc<
+    { id: string; name: string; kind: string; deleted_at: string; transaction_count: number }[]
+  >('deleted_accounts', {})
+  return (rows ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    kind: r.kind,
+    deletedAt: r.deleted_at,
+    transactionCount: Number(r.transaction_count),
+  }))
+}
+
+export async function unownedAccounts(): Promise<UnownedAccount[]> {
+  const rows = await rpc<{ id: string; name: string; kind: string; created_at: string }[]>(
+    'unowned_accounts',
+    {},
+  )
+  return (rows ?? []).map((r) => ({ id: r.id, name: r.name, kind: r.kind, createdAt: r.created_at }))
+}
+
+/** Undo a delete. Returns how many transactions came back with the account. */
+export const restoreAccount = (accountId: string) =>
+  rpc<number>('restore_account', { p_account_id: accountId })
+
+/** A household admin takes ownership of an account nobody owns. */
+export const claimAccount = (accountId: string) =>
+  rpc<string>('claim_account', { p_account_id: accountId })

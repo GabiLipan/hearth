@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, Check, AlertTriangle, ChevronRight, Wand2, ArrowLeftRight, type LucideIcon } from 'lucide-react'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, Check, AlertTriangle, ChevronRight, Wand2, ArrowLeftRight, Undo2, type LucideIcon } from 'lucide-react'
 import { db, type AccountGrant, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
@@ -48,9 +48,18 @@ import {
 } from '../lib/transfers'
 import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
 import { rpc } from '../lib/api'
+import { fmtFullDate } from '../lib/dates'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, cx } from '../components/ui'
+import {
+  claimAccount,
+  deletedAccounts,
+  restoreAccount,
+  unownedAccounts,
+  type DeletedAccount,
+  type UnownedAccount,
+} from '../lib/accounts'
 import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
 import { PersonDot, nameOf } from '../components/PersonDot'
 
@@ -183,6 +192,104 @@ function HouseholdCard() {
  */
 /** One column on a phone or laptop, two at xl, three on a wide monitor. */
 const COLUMN_STEPS: [number, number][] = [[1280, 2], [1536, 3]]
+
+/**
+ * Accounts that can be got back: ones somebody deleted, and ones nobody owns.
+ *
+ * Both lists come from RPCs rather than the cache, because neither row is one
+ * `accounts_select` will hand over — a deleted account is deliberately kept out
+ * of the ordinary read path, and an ownerless one is invisible to everybody
+ * precisely because it has no grant left to authorise it. Which is why this
+ * section can render nothing at all for weeks and then matter enormously.
+ *
+ * Fetched on mount rather than watched. Neither list changes without somebody
+ * on this device doing something, and polling for a bin nobody has put anything
+ * in is a request per minute for nothing.
+ */
+function Recoverable() {
+  const [bin, setBin] = useState<DeletedAccount[]>([])
+  const [orphans, setOrphans] = useState<UnownedAccount[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const [d, u] = await Promise.all([deletedAccounts(), unownedAccounts()])
+      setBin(d)
+      setOrphans(u)
+    } catch {
+      // Offline, or the migration has not been applied. Either way there is
+      // nothing to show and nothing worth saying about it here.
+    }
+  }, [])
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  async function run(id: string, fn: () => Promise<unknown>) {
+    setBusy(id)
+    try {
+      await fn()
+      await syncNow()
+      await refresh()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'That did not work.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (bin.length === 0 && orphans.length === 0) return null
+
+  return (
+    <section>
+      <SectionTitle>Recoverable</SectionTitle>
+      <Card className="divide-y divide-hairline">
+        {bin.map((a) => (
+          <div key={a.id} className="flex flex-wrap items-center gap-2 px-4 py-3 md:px-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium md:text-sm">{a.name}</p>
+              <p className="truncate text-xs text-ink-3">
+                Deleted {fmtFullDate(a.deletedAt.slice(0, 10))}
+                {a.transactionCount > 0 &&
+                  ` · ${a.transactionCount} transaction${a.transactionCount === 1 ? '' : 's'} would come back`}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="subtle"
+              disabled={busy !== null}
+              onClick={() => void run(a.id, () => restoreAccount(a.id))}
+            >
+              <Undo2 size={14} /> Restore
+            </Button>
+          </div>
+        ))}
+
+        {orphans.map((a) => (
+          <div key={a.id} className="flex flex-wrap items-center gap-2 px-4 py-3 md:px-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium md:text-sm">{a.name}</p>
+              {/* Said plainly, because taking an account is not nothing. */}
+              <p className="truncate text-xs text-ink-3">Nobody owns this account any more</p>
+            </div>
+            <Button
+              size="sm"
+              variant="subtle"
+              disabled={busy !== null}
+              onClick={() => {
+                if (confirm(`Take ownership of “${a.name}”? You will be able to see and change everything on it.`)) {
+                  void run(a.id, () => claimAccount(a.id))
+                }
+              }}
+            >
+              Take ownership
+            </Button>
+          </div>
+        ))}
+      </Card>
+    </section>
+  )
+}
 
 function UnsavedChanges() {
   const deadLetters = useDeadLetters()
@@ -330,6 +437,8 @@ export default function SettingsPage() {
       </section>
 
       <UnsavedChanges />
+
+      <Recoverable />
 
       <section>
         <SectionTitle>Appearance</SectionTitle>

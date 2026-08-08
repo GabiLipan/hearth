@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `10`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `11`, then `local/98-grants.sql`, then `exec`
 a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -55,6 +55,7 @@ read-only detector that reports which are present — run it when unsure.
 | `08-profiles.sql` | display names backfilled and editable, optional avatars, role change stops bumping the epoch |
 | `09-reconcile.sql` | linking rows that already exist: a transaction to a bill occurrence, two transactions into one transfer, and both undos |
 | `10-goal-transfers.sql` | a transfer that already exists can fund a goal — `link_transfer` gains `p_goal_id`, `set_transfer_goal` tags one afterwards, `unlink_transfer` releases it |
+| `11-account-recovery.sql` | `restore_account` undoes a delete, `deleted_accounts` is the bin, `claim_account` lets an admin take an ownerless account and `unowned_accounts` is how they find one |
 
 All are re-runnable, with **one ordering trap**: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
@@ -163,7 +164,15 @@ Five rules that follow:
 - **Grants outlive the accounts they point at.** `delete_account()` and
   `wipe_household()` deliberately leave `account_grants` alone: `accounts_select`
   needs a grant, so revoking one would leave every other device holding the
-  account forever with no tombstone it is allowed to read.
+  account forever with no tombstone it is allowed to read. Migration 11 depends
+  on this a second time — `restore_account()` can recognise an owner *after* the
+  account is gone only because the grant is still there.
+- **An ownerless account is invisible, so listing one needs its own function.**
+  `accounts_select` needs a grant, so an account whose grants have all gone —
+  what `depart_household()` can leave behind — cannot be seen by anybody,
+  including the admin entitled to claim it. `unowned_accounts()` exists for
+  exactly that, and returns names only: being able to give an account an owner
+  is not being able to read it.
 - **Anything that changes who-can-see-what bumps `households.visibility_epoch`.**
   A row that becomes invisible emits no realtime event and no tombstone, so the
   epoch is the only signal; a client seeing a new one drops its cache and
