@@ -152,7 +152,38 @@ contribution from the 1st, rather than nothing until payday.
       any foreign amount is silently wrong. Out of scope, recorded so it is not
       forgotten
 
-## Phase 6 — Carried over from the last round
+## Phase 6 — Activity and categorising, as everyday screens
+
+The four below are about the screens we touch most often. Activity is where every
+imported row is read and fixed, so it is the one place worth making fast.
+
+- [x] **Category picker shows categories first, subcategories on expand.** It
+      was one flat list of every category and subcategory together. Now a grid
+      of the parents, and tapping one opens its children in a drawer beneath the
+      whole row — the old iPhone folder. The tap also selects the parent, so the
+      child is one step further rather than a precondition
+- [x] **Show category *and* subcategory in Activity** — the desktop table reads
+      "Groceries · Supermarket" with the parent dimmed, the phone rows use
+      `fullName`. The filter chips are top-level only now, and a subcategory
+      counts towards its parent, the way budgets already worked
+- [x] **Filter Activity by account** — one, several or all. "All" is the absence
+      of a set rather than every id ticked, so an account shared with you
+      tomorrow appears instead of being excluded by a set written today
+- [x] **Activity is one continuous list, newest first**, cut into months, with
+      older rows rendering as you reach them and each heading carrying that
+      month's total. `Jump to` names the month you are in and offers any month
+      that has rows
+
+Still open from the same pass:
+
+- [ ] Click a category slice in Reports through to Activity, now that Activity
+      can express "this category, this account, that month" (Phase 4 has the
+      other half of this)
+- [ ] A month heading that sticks to the top while you scroll its rows. Wants
+      care: `main` carries `overflow-x: clip` on mobile and the header above it
+      is already sticky
+
+## Phase 7 — Carried over from the last round
 
 - [ ] Bill reconciliation only looks forward from `nextDue`, so a year of history
       imported after a bill was created is never offered

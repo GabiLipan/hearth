@@ -223,6 +223,15 @@ body {
   to { opacity: 1; transform: none; }
 }
 
+/* A subcategory drawer opening under its row. `grid-template-rows` from `0fr`
+   is the one way to animate to a height nobody has measured — the row simply
+   is whatever its content needs, at both ends. The inner element must carry
+   `min-h-0; overflow: hidden` or the content refuses to be squashed. */
+@keyframes drawer-open {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+
 /* The tab icon that just became active. */
 @keyframes tab-pop {
   from { transform: scale(0.72); }
@@ -240,6 +249,7 @@ body {
 .animate-page-forward { animation: page-forward 0.26s var(--ease-out-soft); }
 .animate-page-back { animation: page-back 0.26s var(--ease-out-soft); }
 .animate-tab { animation: tab-pop 0.32s var(--ease-out-soft); }
+.animate-drawer { animation: drawer-open 0.22s var(--ease-out-soft); grid-template-rows: 1fr; }
 
 /* The sideways travel of a page change is contained by `main`, not by <html>.
    Any overflow on the root element propagates to the viewport, and on iOS that
@@ -251,7 +261,7 @@ body {
    disappear — but nothing travels or scales. */
 @media (prefers-reduced-motion: reduce) {
   .animate-sheet, .animate-fade, .animate-origin, .animate-page,
-  .animate-page-forward, .animate-page-back {
+  .animate-page-forward, .animate-page-back, .animate-drawer {
     animation: fade-in 0.12s linear;
   }
   .animate-sheet-out, .animate-fade-out, .animate-origin-out {

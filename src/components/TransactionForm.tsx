@@ -9,7 +9,7 @@ import { unlinkBillPayment } from '../lib/bills'
 import { syncNow } from '../lib/session'
 import { scanReceipt } from '../lib/receipt'
 import { canAddTransactions, canEditTransaction, levelOn } from '../lib/accounts'
-import { grouped, styleOf, usableOn } from '../lib/categories'
+import { grouped, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { todayISO } from '../lib/dates'
@@ -18,8 +18,8 @@ import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
 import { create, update, remove } from '../lib/data'
 import { useApp } from '../state/AppContext'
-import { Sheet, Field, TextInput, Select, Segmented, Button, cx } from './ui'
-import { CategoryIcon } from './CategoryIcon'
+import { Sheet, Field, TextInput, Select, Segmented, Button } from './ui'
+import { CategoryPicker } from './CategoryPicker'
 
 export function TransactionForm({
   open,
@@ -335,40 +335,17 @@ export function TransactionForm({
             Category
             {suggested && <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent">auto-suggested</span>}
           </span>
-          {/* Groups flow and wrap rather than taking a line each — a category
-              with no children is a small chip, and a column of them down the
-              left is mostly empty sheet. The wider gap between groups is what
-              keeps a parent and its children reading as one thing. */}
-          <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-            {visibleGroups.map(({ parent, children }) => (
-              <div key={parent.id} className="flex flex-wrap items-center gap-1.5">
-                <CategoryChip
-                  category={parent}
-                  style={styleOf(parent, catMap)}
-                  selected={categoryId === parent.id}
-                  onSelect={() => {
-                    setCategoryId(parent.id)
-                    setSuggested(false)
-                  }}
-                />
-                {/* Children sit on the same line as their parent, so picking the
-                    more specific one is a nudge rather than a separate step. */}
-                {children.map((child) => (
-                  <CategoryChip
-                    key={child.id}
-                    category={child}
-                    style={styleOf(child, catMap)}
-                    child
-                    selected={categoryId === child.id}
-                    onSelect={() => {
-                      setCategoryId(child.id)
-                      setSuggested(false)
-                    }}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
+          {/* Parents only, with subcategories one tap behind the tile they
+              belong to. See CategoryPicker for why. */}
+          <CategoryPicker
+            groups={visibleGroups}
+            byId={catMap}
+            value={categoryId}
+            onChange={(id) => {
+              setCategoryId(id)
+              setSuggested(false)
+            }}
+          />
         </div>
 
         {similar.length > 0 && (
@@ -554,31 +531,5 @@ function Linkage({ txn, onDone }: { txn: Transaction; onDone: () => void }) {
         Cancel
       </Button>
     </div>
-  )
-}
-
-function CategoryChip({
-  category, style, selected, child, onSelect,
-}: {
-  category: { id: string; name: string }
-  style: { icon: string; slot: number }
-  selected: boolean
-  child?: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cx(
-        'flex items-center gap-1.5 rounded-full font-medium ring-1 transition',
-        child ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm',
-        selected
-          ? 'bg-accent text-accent-ink ring-accent'
-          : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
-      )}
-    >
-      <CategoryIcon icon={style.icon} size={child ? 14 : 16} /> {category.name}
-    </button>
   )
 }
