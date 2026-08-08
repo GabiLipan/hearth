@@ -467,6 +467,8 @@ export function contributionSplit(
 export interface BookMonth extends BookTotals {
   key: string
   label: string
+  /** The month we are in, which has not finished. See `MonthPoint.partial`. */
+  partial: boolean
 }
 
 /** The last `n` months of a book, oldest first. */
@@ -478,13 +480,59 @@ export function bookSeries(
   books: BookMap,
   endingAt = thisMonthKey(),
 ): BookMonth[] {
+  const now = thisMonthKey()
   const keys: string[] = []
   for (let i = n - 1; i >= 0; i--) keys.push(shiftMonth(endingAt, -i))
   return keys.map((key) => ({
     key,
     label: monthLabel(key, 'short'),
+    // The month we are in has not finished. Anything comparing it against the
+    // months either side of it has to say so — see `MonthPoint.partial`.
+    partial: key === now,
     ...bookTotals(txns, flows, book, key, books),
   }))
+}
+
+/**
+ * What the book's accounts held at the start of a month, and what they hold now.
+ *
+ * The figure the part-finished month actually needs. On the 8th, "Paid in
+ * £0.57, spent £3,142, left over −£3,141" is arithmetically right and reads
+ * like a disaster; "£4,200 at the start of the month, £1,058 now" is the same
+ * month and is useful.
+ *
+ * Undefined rather than approximate when any account in the book is one this
+ * device may only see the TOTAL of. A `balance`-level account gives us today's
+ * figure from the server and no line items at all, so there is no way to wind
+ * it back to the 1st — and quietly leaving that account out would produce a
+ * "start" and a "now" measuring different sets of accounts, which is worse than
+ * showing neither.
+ */
+export function bookBalances(
+  accounts: Account[],
+  txns: Transaction[],
+  book: BookId,
+  books: BookMap,
+  month: string,
+  canSeeRows: (accountId: string) => boolean,
+): { startMinor: number; nowMinor: number } | undefined {
+  const ids = accountsInBook(book, books)
+  const mine = accounts.filter((a) => ids.has(a.id))
+  if (mine.length === 0 || mine.some((a) => !canSeeRows(a.id))) return undefined
+
+  const firstOfMonth = `${month}-01`
+  let startMinor = 0
+  let nowMinor = 0
+  for (const a of mine) {
+    startMinor += a.openingBalanceMinor
+    nowMinor += a.openingBalanceMinor
+  }
+  for (const t of txns) {
+    if (!ids.has(t.accountId)) continue
+    nowMinor += t.amountMinor
+    if (t.date < firstOfMonth) startMinor += t.amountMinor
+  }
+  return { startMinor, nowMinor }
 }
 
 /**

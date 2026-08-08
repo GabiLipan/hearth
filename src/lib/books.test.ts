@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, AccountGrant, Category, Transaction } from './db'
 import {
+  bookBalances,
   bookSpendByCategory,
   bookTotals,
   classifyAccounts,
@@ -394,5 +395,49 @@ describe('who put what into the household', () => {
     expect(split.mineMinor).toBe(0)
     expect(split.theirsMinor).toBe(0)
     expect(split.otherMinor).toBe(180000)
+  })
+})
+
+describe('what the book held, at the start of a month and now', () => {
+  const seeEverything = () => true
+
+  it('winds the balance back to the 1st, and leaves today alone', () => {
+    // March opens with £1,000 already in the joint accounts, then a month of
+    // contributions, spending and one internal transfer runs through them.
+    const opened = accounts.map((a) =>
+      a.id === 'joint' ? { ...a, openingBalanceMinor: 100000 } : a,
+    )
+    const rows = [
+      ...march(),
+      // February, so it is inside the opening figure rather than the month.
+      txn({ accountId: 'joint', amountMinor: -20000, date: '2026-02-10', categoryId: 'groceries' }),
+    ]
+
+    const b = bookBalances(opened, rows, 'household', books, '2026-03', seeEverything)!
+
+    // £1,000 opening, less February's £200.
+    expect(b.startMinor).toBe(80000)
+    // …plus every joint row in March. The internal transfer nets to zero across
+    // the two joint accounts, which is exactly why it is not an event.
+    expect(b.nowMinor).toBe(80000 + 200000 + 180000 + 8800 - 120000 - 60000 - 25000 - 35000)
+  })
+
+  it('is undefined when any account in the book is one we can only see the total of', () => {
+    // No line items means no way to wind the figure back — and dropping that
+    // account would make "start" and "now" measure different sets of accounts.
+    const canSee = (id: string) => id !== 'jointSavings'
+    expect(bookBalances(accounts, march(), 'household', books, '2026-03', canSee)).toBeUndefined()
+  })
+
+  it('is undefined for a book with no accounts in it at all', () => {
+    const noBooks: BookMap = { household: new Set(), mine: new Set(), others: new Set() }
+    expect(bookBalances(accounts, march(), 'household', noBooks, '2026-03', seeEverything)).toBeUndefined()
+  })
+
+  it('counts only the accounts of the book it was asked about', () => {
+    const b = bookBalances(accounts, march(), 'mine', books, '2026-03', seeEverything)!
+    // Salary in, contribution out, personal spending.
+    expect(b.nowMinor).toBe(300000 - 200000 - 70000)
+    expect(b.startMinor).toBe(0)
   })
 })

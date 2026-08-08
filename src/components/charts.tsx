@@ -48,6 +48,21 @@ function ChartTip({
   )
 }
 
+/**
+ * How a month that has not finished yet is drawn: at 45%, everywhere.
+ *
+ * A part-month plotted solid beside eleven whole ones reads as a collapse in
+ * spending rather than as the 3rd of the month, and that misreading is worse
+ * on the charts than anywhere else — a figure you can question, a bar you just
+ * see. Dimming is the lightest thing that says "not comparable yet" without
+ * hiding the number or rescaling the axis around it.
+ */
+const PARTIAL_OPACITY = 0.45
+const bars = (data: MonthPoint[], fill: string, keyPrefix: string) =>
+  data.map((d, i) => (
+    <Cell key={`${keyPrefix}-${i}`} fill={fill} fillOpacity={d.partial ? PARTIAL_OPACITY : 1} />
+  ))
+
 /* ---------- Monthly spending bars ---------- */
 export function SpendBars({ data, height = 220 }: { data: MonthPoint[]; height?: number }) {
   const c = useChartColors()
@@ -74,7 +89,9 @@ export function SpendBars({ data, height = 220 }: { data: MonthPoint[]; height?:
             />
           )}
         />
-        <Bar dataKey="spend" fill={c.series[0]} radius={[4, 4, 0, 0]} maxBarSize={36} />
+        <Bar dataKey="spend" fill={c.series[0]} radius={[4, 4, 0, 0]} maxBarSize={36}>
+          {bars(data, c.series[0], 'spend')}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   )
@@ -113,8 +130,12 @@ export function IncomeSpendBars({ data, height = 240 }: { data: MonthPoint[]; he
               />
             )}
           />
-          <Bar dataKey="income" fill={income} radius={[4, 4, 0, 0]} maxBarSize={22} />
-          <Bar dataKey="spend" fill={spend} radius={[4, 4, 0, 0]} maxBarSize={22} />
+          <Bar dataKey="income" fill={income} radius={[4, 4, 0, 0]} maxBarSize={22}>
+            {bars(data, income, 'income')}
+          </Bar>
+          <Bar dataKey="spend" fill={spend} radius={[4, 4, 0, 0]} maxBarSize={22}>
+            {bars(data, spend, 'spend')}
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
       <div className="mt-1 flex justify-center gap-5 text-sm text-ink-2">
@@ -124,6 +145,7 @@ export function IncomeSpendBars({ data, height = 240 }: { data: MonthPoint[]; he
         <span className="flex items-center gap-1.5">
           <span className="size-2.5 rounded-full" style={{ background: spend }} /> Spending
         </span>
+        {data.some((d) => d.partial) && <span className="text-ink-3">Faded = this month so far</span>}
       </div>
     </div>
   )

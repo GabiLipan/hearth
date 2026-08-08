@@ -56,6 +56,15 @@ export interface MonthPoint {
   spend: number // positive minor units
   income: number
   net: number
+  /**
+   * A month that has not finished yet.
+   *
+   * The current month is a part-month, and on the 3rd it is a very small part
+   * of one. Plotted beside eleven finished months it reads as a collapse in
+   * spending rather than as a month that has barely started, so everything
+   * drawing a series has to be able to tell the two apart.
+   */
+  partial?: boolean
 }
 
 /** Aggregate the last n months (oldest first). */

@@ -126,3 +126,35 @@ export function extractRows(csv: ParsedCSV, m: ColumnMapping): ImportRow[] {
 export function importHash(row: { date: string; payee: string; amountMinor: number }) {
   return `${row.date}|${row.amountMinor}|${normalizePayee(row.payee)}`
 }
+
+/* ---------- writing it back out ---------- */
+
+/**
+ * A table as CSV text.
+ *
+ * Quoting is unconditional rather than "only where needed". Category names in
+ * this app routinely contain a comma ("Home & utilities, shared") and payees
+ * imported from a statement contain anything at all, so the interesting
+ * question is never whether to quote but whether the escaping is right — and
+ * one rule that is always applied is far easier to be sure of than two.
+ *
+ * CRLF, and a UTF-8 BOM on the download: Excel reads a plain UTF-8 CSV as
+ * Latin-1 and turns every £ into Â£, which on a finance export is the first
+ * thing anybody notices.
+ */
+export function toCSV(rows: (string | number)[][]): string {
+  return rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\r\n')
+}
+
+export function downloadCSV(filename: string, csv: string) {
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Minor units as a plain decimal — a spreadsheet wants 1234.56, not "£1,234.56". */
+export const csvAmount = (minor: number) => (minor / 100).toFixed(2)

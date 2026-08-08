@@ -125,15 +125,18 @@ Two consequences worth remembering:
 Mostly solved by the 25th cut-off above: August now shows July's end-of-month
 contribution from the 1st, rather than nothing until payday.
 
-- [ ] **Show the joint balance beside the figures.** On the 8th of the month,
-      "Paid in £0.57, spent £3,142, left over −£3,141" is arithmetically right
-      and reads like a disaster. "£4,200 at the start, £1,058 now" is the same
-      fact and is actually useful
+- [x] **Show the joint balance beside the figures.** `bookBalances` winds the
+      book's accounts back to the 1st. It returns nothing rather than a guess
+      when any account in the book is one this device may only see the TOTAL
+      of — no line items means no way to wind it back, and quietly dropping
+      that account would make "start" and "now" measure different sets
 - [x] **Count a contribution towards the month it is FOR, not the month it
       landed** — cut-off is the 25th, applied to both legs so my book and the
       household's agree about when it happened
-- [ ] Dim or annotate the current month as incomplete, everywhere it is compared
-      against finished months
+- [x] Dim or annotate the current month as incomplete, everywhere it is compared
+      against finished months — the bars are drawn at 45% with a note saying
+      why, the month-by-month row is marked "so far", and the CSV carries a
+      completeness column
 
 ### Sharpening what's there
 - [x] Fix `monthlySeries` — the dead `else if`/`else` pair meant *any* positive
@@ -141,7 +144,8 @@ contribution from the 1st, rather than nothing until payday.
 - [ ] "Net each month" only claims to be saving where that is actually true
 - [ ] Month-on-month delta per category — "groceries £120 above typical"
 - [ ] Same month last year, where there is a year of history
-- [ ] Export the current report as CSV
+- [x] Export the current report as CSV — one button per table, because the page
+      shows two and a single file holding both is readable as neither
 
 ## Phase 5 — Edges the model gets wrong
 

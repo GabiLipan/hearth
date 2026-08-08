@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Table2, ChartPie, ChevronLeft, Receipt } from 'lucide-react'
+import { Table2, ChartPie, ChevronLeft, Receipt, Download } from 'lucide-react'
 import {
+  useAccounts,
   useAllTransactions,
   useBook,
   useBooks,
@@ -9,12 +10,16 @@ import {
   useCategoryMap,
   useFlows,
   useMemberMap,
+  useMyLevels,
 } from '../lib/cache'
+import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { csvAmount, downloadCSV, toCSV } from '../lib/csv'
 import { useSyncState } from '../hooks/useSync'
 import { nameOf } from '../components/PersonDot'
 import { thisMonthKey, monthLabel } from '../lib/dates'
 import { OTHER_SLICE_ID } from '../lib/stats'
 import {
+  bookBalances,
   bookSeries,
   bookSlices,
   bookTotals,
@@ -74,8 +79,65 @@ export default function Reports() {
     [txns, flows, book, month, books],
   )
 
+  /**
+   * What the book's accounts held on the 1st, and what they hold now.
+   *
+   * The figure a part-finished month actually needs. On the 8th, "Paid in
+   * £0.57, spent £3,142, left over −£3,141" is arithmetically right and reads
+   * like a disaster; the same month as "£4,200 at the start, £1,058 now" is
+   * useful. Undefined when any account in the book is one this device may only
+   * see the total of — see `bookBalances`.
+   */
+  const accounts = useAccounts()
+  const levels = useMyLevels()
+  const balances = useMemo(
+    () =>
+      bookBalances(accounts, txns ?? [], book, books, month, (id) =>
+        canSeeTransactionsAt(levelOn(id, levels)),
+      ),
+    // `levels` is a fresh Map every render, so it is deliberately not a
+    // dependency: the inputs that change the answer are the accounts and grants
+    // it is derived from, and `accounts` is one of them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [accounts, txns, book, books, month],
+  )
+
   const words = BOOK_WORDS[book]
   const drillName = drill ? (catMap.get(drill)?.name ?? 'Category') : null
+  /** The month we are in is a part-month, and every comparison has to say so. */
+  const partial = month === thisMonthKey()
+
+  /**
+   * The table on screen, as a file.
+   *
+   * Two buttons rather than one "export the report": the page shows two
+   * different tables, and a single CSV holding both would be two tables in one
+   * file, which no spreadsheet can read as either.
+   */
+  const exportCategories = () => {
+    const rows: (string | number)[][] = [['Category', 'Spent', 'Share']]
+    for (const s of slices) {
+      rows.push([s.name, csvAmount(s.totalMinor), `${Math.round(s.fraction * 100)}%`])
+    }
+    downloadCSV(`hearth-${book}-${month}${drill ? `-${drillName}` : ''}`, toCSV(rows))
+  }
+
+  const exportMonths = () => {
+    const head = ['Month', words.income]
+    if (book === 'mine') head.push('To household')
+    head.push(words.spend, words.net, 'Complete')
+    const rows: (string | number)[][] = [head]
+    for (const p of [...series].reverse()) {
+      const row: (string | number)[] = [p.label, csvAmount(p.income)]
+      if (book === 'mine') row.push(csvAmount(p.contributed))
+      // The completeness column is not decoration: without it the current
+      // month is a small number in a column of large ones and nothing in the
+      // file says why.
+      row.push(csvAmount(p.spend), csvAmount(p.net), p.partial ? 'so far' : 'yes')
+      rows.push(row)
+    }
+    downloadCSV(`hearth-${book}-${series[0]?.key ?? month}-to-${month}`, toCSV(rows))
+  }
 
   // Changing book or month while inside a category would leave the breadcrumb
   // pointing at a slice that is no longer on screen.
@@ -163,6 +225,23 @@ export default function Reports() {
         </div>
         <p className="mt-2 text-xs text-ink-3">{words.netHint}</p>
 
+        {/* The balances, for the month that has not finished. Deliberately
+            below the figures rather than beside them: it is the sentence that
+            makes an alarming "left over" readable, not a fourth statistic. */}
+        {partial && balances && (
+          <p className="mt-1.5 text-xs text-ink-2">
+            <span className="font-medium tabular">{money(balances.startMinor)}</span> at the start of{' '}
+            {monthLabel(month)},{' '}
+            <span className="font-medium tabular">{money(balances.nowMinor)}</span> now
+            <span className="text-ink-3"> — the month is not over.</span>
+          </p>
+        )}
+        {partial && !balances && (
+          <p className="mt-1.5 text-xs text-ink-3">
+            {monthLabel(month)} is not over, so these are part of a month.
+          </p>
+        )}
+
         {book === 'household' && totals.contributions > 0 && (
           <div className="mt-3 border-t border-hairline pt-3">
             <p className="mb-1.5 text-xs text-ink-3">Who paid in</p>
@@ -219,6 +298,11 @@ export default function Reports() {
               {slices.length > 0 && (
                 <Button size="sm" variant="subtle" onClick={() => seeTransactions(drill ?? undefined)}>
                   <Receipt size={13} /> See transactions
+                </Button>
+              )}
+              {slices.length > 0 && (
+                <Button size="sm" variant="ghost" onClick={exportCategories} title="Download this table as CSV">
+                  <Download size={13} /> CSV
                 </Button>
               )}
             </div>
@@ -328,7 +412,12 @@ export default function Reports() {
           </>
         ) : (
           <Card className="p-5 md:p-4 xl:col-span-2">
-            <h3 className="mb-3 font-semibold md:mb-2 md:text-sm">Month by month</h3>
+            <div className="mb-3 flex items-center justify-between gap-2 md:mb-2">
+              <h3 className="font-semibold md:text-sm">Month by month</h3>
+              <Button size="sm" variant="ghost" onClick={exportMonths} title="Download this table as CSV">
+                <Download size={13} /> CSV
+              </Button>
+            </div>
             <ScrollTable minWidth={560}>
               <thead>
                 <tr className={table.head}>
@@ -341,8 +430,13 @@ export default function Reports() {
               </thead>
               <tbody>
                 {[...series].reverse().map((p) => (
-                  <tr key={p.key} className={table.row}>
-                    <td className={cx(table.cell, table.pinned)}>{p.label}</td>
+                  <tr key={p.key} className={cx(table.row, p.partial && 'text-ink-2')}>
+                    <td className={cx(table.cell, table.pinned)}>
+                      {p.label}
+                      {/* Not a footnote: this row is the reason the column
+                          below it looks like a collapse. */}
+                      {p.partial && <span className="ml-1.5 text-xs text-ink-3">so far</span>}
+                    </td>
                     <td className={cx(table.cell, 'text-right tabular')}>{money(p.income)}</td>
                     {book === 'mine' && (
                       <td className={cx(table.cell, 'text-right tabular text-ink-3')}>{money(p.contributed)}</td>
