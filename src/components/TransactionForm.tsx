@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ScanLine } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ScanLine, ArrowLeftRight, CalendarClock } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
-import { useAccounts, useCategories, useMyLevels, useGrantsFor, useMemberMap } from '../lib/cache'
+import { useAccounts, useAccountMap, useBills, useCategories, useMyLevels, useGrantsFor, useMemberMap } from '../lib/cache'
+import { findTransferCandidates, linkTransfer, unlinkTransfer } from '../lib/transfers'
+import { unlinkBillPayment } from '../lib/bills'
+import { syncNow } from '../lib/session'
 import { scanReceipt } from '../lib/receipt'
 import { canAddTransactions, canEditTransaction, levelOn } from '../lib/accounts'
 import { grouped, styleOf, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { todayISO } from '../lib/dates'
-import { learnRule, suggestCategory, prettyPayee } from '../lib/rules'
+import { learnRule, suggestCategory, prettyPayee, similarTo, applyCategory } from '../lib/rules'
 import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
 import { create, update, remove } from '../lib/data'
@@ -49,6 +53,7 @@ export function TransactionForm({
   const [accountId, setAccountId] = useState<string | undefined>()
   const [note, setNote] = useState('')
   const [suggested, setSuggested] = useState(false)
+  const [applySimilar, setApplySimilar] = useState(false)
   const [scanState, setScanState] = useState<string | null>(null)
   const amountRef = useRef<HTMLInputElement>(null)
   const receiptRef = useRef<HTMLInputElement>(null)
@@ -87,6 +92,7 @@ export function TransactionForm({
       setTimeout(() => amountRef.current?.focus(), 60)
     }
     setSuggested(false)
+    setApplySimilar(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing])
 
@@ -143,6 +149,32 @@ export function TransactionForm({
     if (!stillAllowed) setCategoryId(undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId])
+  /**
+   * Other transactions from this payee that are filed somewhere else.
+   *
+   * Offered here, in the form, rather than as a "we noticed…" prompt after
+   * saving. Categorising one pet insurance payment and being told about the
+   * other eleven is useful; being told after the sheet has already closed, in a
+   * second dialog, is an interruption — and the answer is much easier to give
+   * while the category you just chose is still on screen.
+   *
+   * Filtered to what this device may actually change, so the number offered is
+   * the number that will move. At `contribute` you may only edit what you
+   * added, and a bulk update is the easiest possible way to queue a dozen
+   * writes that dead-letter quietly a minute later.
+   */
+  const similar =
+    useLiveQuery(async () => {
+      if (!open || !categoryId || kind !== 'expense' || payee.trim().length < 3) return []
+      const all = await db.transactions.toArray()
+      return similarTo(payee, categoryId, all, editing?.id).filter((t) =>
+        canEditTransaction(t, levelOn(t.accountId, levels), userId),
+      )
+      // `levels` is a fresh Map each render, so it is deliberately not a
+      // dependency — the query re-runs on the inputs that change the answer.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, payee, categoryId, kind, editing?.id, userId]) ?? []
+
   const amountMinor = parseAmount(amount)
   const canSave = amountMinor !== null && amountMinor > 0 && payee.trim() && categoryId !== undefined && accountId !== undefined
 
@@ -186,7 +218,13 @@ export function TransactionForm({
       })
     }
     // The quiet automation: every save teaches the categoriser.
-    if (kind === 'expense') void learnRule(payee, categoryId!)
+    if (kind === 'expense') {
+      await learnRule(payee, categoryId!)
+      // …and, if asked, applies what it just learned backwards. `similar` is
+      // already filtered to what this device may change, so the predicate here
+      // passes everything through.
+      if (applySimilar && similar.length > 0) await applyCategory(similar, categoryId!, () => true)
+    }
     onClose()
   }
 
@@ -333,6 +371,30 @@ export function TransactionForm({
           </div>
         </div>
 
+        {similar.length > 0 && (
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-accent/8 px-4 py-3 ring-1 ring-accent/20">
+            <input
+              type="checkbox"
+              checked={applySimilar}
+              onChange={(e) => setApplySimilar(e.target.checked)}
+              className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+            />
+            <span className="min-w-0 text-sm">
+              <span className="font-medium">
+                Move {similar.length} other {similar.length === 1 ? 'transaction' : 'transactions'} here too
+              </span>
+              <span className="mt-0.5 block text-xs text-ink-3">
+                {similar.length === 1 ? 'One is' : `${similar.length} are`} from “{prettyPayee(payee)}” and filed
+                somewhere else. There is more in{' '}
+                <Link to="/settings/rules" className="underline underline-offset-2">
+                  Settings › Rules
+                </Link>
+                .
+              </span>
+            </span>
+          </label>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="Date">
             <TextInput type="date" value={date} max={todayISO()} onChange={(e) => setDate(e.target.value)} />
@@ -351,8 +413,147 @@ export function TransactionForm({
         <Field label="Note (optional)">
           <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" />
         </Field>
+
+        {editing && editable && <Linkage txn={editing} onDone={onClose} />}
       </fieldset>
     </Sheet>
+  )
+}
+
+/**
+ * What else this transaction is part of, and how to change your mind.
+ *
+ * Three states, and only ever one of them at a time — the server refuses to let
+ * a row be both a bill payment and a transfer:
+ *
+ *   - recorded against a bill  → release it, freeing that occurrence
+ *   - one leg of a transfer    → split it back into two ordinary transactions
+ *   - neither                  → pair it with its other half by hand
+ *
+ * The manual pairing is what makes "Never" a usable answer to the transfer
+ * setting rather than just switching the feature off. It searches a wider date
+ * window than the automatic detector and ignores dismissals: you have asked, so
+ * the app should stop being cautious on your behalf.
+ */
+function Linkage({ txn, onDone }: { txn: Transaction; onDone: () => void }) {
+  const { money } = useApp()
+  const { userId } = useSyncState()
+  const levels = useMyLevels()
+  const accMap = useAccountMap()
+  const bills = useBills()
+  const [picking, setPicking] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const partners =
+    useLiveQuery(async () => {
+      if (!picking) return []
+      const all = await db.transactions.toArray()
+      return findTransferCandidates(all, { maxDaysApart: 10 })
+        .filter((c) => c.out.id === txn.id || c.in.id === txn.id)
+        .filter(
+          (c) =>
+            canEditTransaction(c.out, levelOn(c.out.accountId, levels), userId) &&
+            canEditTransaction(c.in, levelOn(c.in.accountId, levels), userId),
+        )
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [picking, txn.id, userId]) ?? []
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true)
+    try {
+      await fn()
+    } finally {
+      setBusy(false)
+      await syncNow()
+      onDone()
+    }
+  }
+
+  if (txn.billId) {
+    const bill = bills.find((b) => b.id === txn.billId)
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface-2 px-4 py-3">
+        <CalendarClock size={16} className="shrink-0 text-ink-3" />
+        <p className="min-w-0 flex-1 text-sm">
+          Recorded as a payment of <span className="font-medium">{bill?.name ?? 'a bill'}</span>.
+        </p>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => void run(() => unlinkBillPayment(txn.id))}
+        >
+          Not that bill
+        </Button>
+      </div>
+    )
+  }
+
+  if (txn.transferId) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface-2 px-4 py-3">
+        <ArrowLeftRight size={16} className="shrink-0 text-ink-3" />
+        <p className="min-w-0 flex-1 text-sm">
+          One side of a transfer between your accounts, so it counts as neither spending nor income.
+        </p>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => void run(() => unlinkTransfer(txn.transferId!))}
+        >
+          Not a transfer
+        </Button>
+      </div>
+    )
+  }
+
+  if (!picking) {
+    return (
+      <button
+        type="button"
+        onClick={() => setPicking(true)}
+        className="flex w-full items-center gap-2 rounded-xl bg-surface-2 px-4 py-3 text-left text-sm text-ink-2 transition hover:text-ink"
+      >
+        <ArrowLeftRight size={16} className="shrink-0 text-ink-3" />
+        <span className="min-w-0 flex-1">This was a transfer between my accounts</span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="space-y-2 rounded-xl bg-surface-2 px-4 py-3">
+      <p className="text-sm text-ink-2">
+        {partners.length === 0
+          ? 'No matching payment found in another account. The other side has to be the exact same amount, within ten days, and not already spoken for.'
+          : 'Pick the other side. Both will drop out of your spending and income totals.'}
+      </p>
+      {partners.map((c) => {
+        const other = c.out.id === txn.id ? c.in : c.out
+        return (
+          <button
+            key={other.id}
+            type="button"
+            disabled={busy}
+            onClick={() => void run(() => linkTransfer(c.out.id, c.in.id))}
+            className="flex w-full items-center gap-2.5 rounded-lg bg-surface px-3 py-2 text-left ring-1 ring-hairline transition hover:ring-accent/50 disabled:opacity-60"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">
+                {accMap.get(other.accountId)?.name ?? 'Unknown account'}
+              </span>
+              <span className="block truncate text-xs text-ink-3">
+                {other.payee} · {fmtFullDate(other.date)}
+              </span>
+            </span>
+            <span className="shrink-0 text-sm font-semibold tabular">{money(other.amountMinor, { sign: true })}</span>
+          </button>
+        )
+      })}
+      <Button size="sm" variant="ghost" onClick={() => setPicking(false)}>
+        Cancel
+      </Button>
+    </div>
   )
 }
 

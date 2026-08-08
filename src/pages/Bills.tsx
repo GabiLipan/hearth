@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Check, SkipForward, Wand2, CalendarClock } from 'lucide-react'
+import { Plus, Check, SkipForward, Wand2, CalendarClock, Link2 } from 'lucide-react'
 import type { Bill, BillFreq } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
-import { useAccounts, useBills, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
+import { useAccounts, useAllTransactions, useBills, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
 import { canAddTransactions, levelOn } from '../lib/accounts'
 import { syncNow } from '../lib/session'
-import { daysUntil, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from '../lib/dates'
-import { postBill, skipBill, detectBillSuggestions, type BillSuggestion } from '../lib/bills'
+import { daysUntil, fmtDay, fmtFullDate, FREQ_LABEL, monthlyEquivalent, todayISO } from '../lib/dates'
+import {
+  postBill,
+  skipBill,
+  detectBillSuggestions,
+  detectBillPayments,
+  dismissBillMatch,
+  linkBillPayment,
+  dueAfter,
+  type BillMatch,
+  type BillSuggestion,
+} from '../lib/bills'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, Toolbar, table, ScrollTable, cx } from '../components/ui'
@@ -51,10 +61,59 @@ export default function Bills() {
     setOpened((n) => n + 1)
   }
   const [suggestions, setSuggestions] = useState<BillSuggestion[]>([])
+  const txns = useAllTransactions()
 
   useEffect(() => {
     void detectBillSuggestions().then(setSuggestions)
-  }, [bills.length])
+  }, [bills.length, txns])
+
+  /**
+   * Payments already in the account that satisfy a bill nobody has recorded.
+   *
+   * Recomputed when the bills or the transactions change, which covers the case
+   * this exists for: importing a statement, and every tracked bill in it going
+   * from "overdue" to "here is the payment, is this it?".
+   */
+  const [matches, setMatches] = useState<BillMatch[]>([])
+  useEffect(() => {
+    void detectBillPayments().then(setMatches)
+  }, [bills, txns])
+
+  /**
+   * Linking happens on the server, so the local transaction keeps `billId`
+   * undefined until the next pull lands — and until then the match would still
+   * be offered. Dropping it here is what makes the row disappear on the tap
+   * rather than up to a minute later.
+   */
+  async function reconcile(m: BillMatch) {
+    setMatches((list) => list.filter((x) => x.txn.id !== m.txn.id))
+    try {
+      await linkBillPayment(m.bill.id, m.txn.id, m.dueOn)
+    } finally {
+      await syncNow()
+    }
+  }
+
+  async function reconcileAll() {
+    // Oldest first, which detectBillPayments already guarantees: each link walks
+    // `next_due` forward from where the last one left it.
+    const list = [...matches]
+    setMatches([])
+    for (const m of list) {
+      try {
+        await linkBillPayment(m.bill.id, m.txn.id, m.dueOn)
+      } catch {
+        // Usually the other device claimed the occurrence first. The next pull
+        // settles it either way.
+      }
+    }
+    await syncNow()
+  }
+
+  async function dismissMatch(m: BillMatch) {
+    setMatches((list) => list.filter((x) => x.txn.id !== m.txn.id))
+    await dismissBillMatch(m)
+  }
 
   const active = bills.filter((b) => b.active).sort((a, b) => a.nextDue.localeCompare(b.nextDue))
   const paused = bills.filter((b) => !b.active)
@@ -73,6 +132,71 @@ export default function Bills() {
           <Plus size={15} /> New bill
         </Button>
       </Toolbar>
+
+      {/* Placed above the bills, because it is the answer to the question the
+          bills below are provoking: "why does this say overdue when I paid it?"
+          Reading the explanation after the complaint is the wrong order. */}
+      {matches.length > 0 && (
+        <Card className="mb-3 overflow-hidden md:mb-2.5">
+          <div className="flex flex-wrap items-center gap-2 border-b border-hairline bg-good/8 px-4 py-2.5 md:px-3 md:py-2">
+            <Check size={16} className="shrink-0 text-good-text" />
+            <p className="min-w-0 flex-1 text-sm">
+              <span className="font-medium">
+                {matches.length === 1
+                  ? 'One of these looks already paid'
+                  : `${matches.length} of these look already paid`}
+              </span>
+              <span className="text-ink-3">
+                {' '}— payments already in your account, not yet recorded against the bill.
+              </span>
+            </p>
+            {matches.length > 1 && (
+              <Button size="sm" variant="subtle" className="shrink-0" onClick={reconcileAll}>
+                <Link2 size={14} /> Record all
+              </Button>
+            )}
+          </div>
+          <ul className="divide-y divide-hairline">
+            {matches.map((m) => (
+              <li
+                key={m.txn.id}
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:px-3 desktop:py-2.5"
+              >
+                <CategoryDot
+                  category={m.bill.categoryId ? catMap.get(m.bill.categoryId) : undefined}
+                  size={32}
+                  className="md:[--dot:26px]"
+                />
+                <div className="min-w-0 flex-1 basis-48">
+                  <p className="truncate font-medium md:text-sm">{m.bill.name}</p>
+                  <p className="truncate text-sm text-ink-3 md:text-xs">
+                    due {fmtFullDate(m.dueOn)} · paid {fmtDay(m.txn.date)} as “{m.txn.payee}”
+                    {m.daysOff !== 0 && ` (${Math.abs(m.daysOff)}d ${m.daysOff < 0 ? 'early' : 'late'})`}
+                  </p>
+                </div>
+                {/* The amount is shown whenever it differs, because "£142 not
+                    £138" is exactly the case where the match might be wrong. */}
+                <span className="shrink-0 text-sm font-semibold tabular">
+                  {money(m.txn.amountMinor)}
+                  {m.amountDeltaMinor !== 0 && (
+                    <span className="ml-1.5 font-normal text-ink-3">
+                      vs {money(m.bill.amountMinor)}
+                    </span>
+                  )}
+                </span>
+                <div className="flex shrink-0 gap-1.5">
+                  <Button size="sm" variant="subtle" onClick={() => void reconcile(m)}>
+                    That's it
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => void dismissMatch(m)}>
+                    No
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {active.length === 0 && paused.length === 0 ? (
         <Empty
@@ -236,7 +360,11 @@ export default function Bills() {
                       categoryId: s.categoryId,
                       accountId: s.accountId,
                       freq: s.freq,
-                      nextDue: todayISO(),
+                      // One period on from the payment we can see, not today.
+                      // "Next due today" on a bill that went out on the 4th is
+                      // both wrong and instantly overdue, so the first thing a
+                      // brand new bill did was tell you off about itself.
+                      nextDue: dueAfter(s.lastDate, s.freq),
                       active: true,
                       autoPost: false,
                     } as Bill)

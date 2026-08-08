@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, Check, AlertTriangle, ChevronRight, type LucideIcon } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, Check, AlertTriangle, ChevronRight, Wand2, ArrowLeftRight, type LucideIcon } from 'lucide-react'
 import { db, type AccountGrant, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
@@ -37,6 +38,13 @@ import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
 import { SLOTS, SLOT_NAMES, slotVar, nextFreeSlot } from '../lib/palette'
 import { seedDemoData } from '../lib/demo'
+import {
+  getTransferMode,
+  setTransferMode,
+  TRANSFER_MODE_HINT,
+  TRANSFER_MODE_LABEL,
+  type TransferMode,
+} from '../lib/transfers'
 import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
 import { rpc } from '../lib/api'
 import { useSyncState } from '../hooks/useSync'
@@ -225,6 +233,56 @@ function UnsavedChanges() {
   )
 }
 
+/**
+ * How much this device volunteers to spot transfers between your accounts.
+ *
+ * Device-local and unsynced, like the theme — see `getTransferMode`. What it
+ * decides is how much THIS screen does without asking, not a fact about the
+ * household, so your phone doing it automatically is no reason for a laptop to.
+ */
+function TransferModeRow() {
+  const [mode, setMode] = useState<TransferMode | null>(null)
+
+  useEffect(() => {
+    void getTransferMode().then(setMode)
+  }, [])
+
+  async function choose(next: TransferMode) {
+    setMode(next)
+    await setTransferMode(next)
+  }
+
+  return (
+    <div className="px-4 py-3 md:px-3 desktop:py-2.5">
+      <div className="flex items-center gap-3 md:gap-2.5">
+        <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 md:size-8">
+          <ArrowLeftRight size={16} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium md:text-sm">Transfers between your accounts</p>
+          <p className="text-sm text-ink-3 md:text-xs">
+            Money moved from one of your accounts to another is neither spending nor income, so both
+            sides are left out of your totals.
+          </p>
+        </div>
+      </div>
+      {mode && (
+        <div className="mt-2.5 pl-12 md:pl-[42px]">
+          <Segmented
+            value={mode}
+            onChange={(m) => void choose(m)}
+            options={(['auto', 'ask', 'manual'] as TransferMode[]).map((m) => ({
+              value: m,
+              label: TRANSFER_MODE_LABEL[m],
+            }))}
+          />
+          <p className="mt-1.5 text-xs text-ink-3">{TRANSFER_MODE_HINT[mode]}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { themePref, setThemePref, currency, setCurrency } = useApp()
   const categories = useCategories()
@@ -346,26 +404,29 @@ export default function SettingsPage() {
       </section>
 
       <section>
-        <SectionTitle>Learned rules</SectionTitle>
-        <Card className="p-4 md:p-3">
-          {rules.length === 0 ? (
-            <p className="text-sm text-ink-3">
-              Nothing learned yet. Every time you categorise a payee, Hearth remembers and applies it to future entries and imports.
-            </p>
-          ) : (
-            <ul className="max-h-64 space-y-1 overflow-y-auto">
-              {rules.map((r) => (
-                <li key={r.id} className="flex items-center gap-2 text-sm">
-                  <span className="min-w-0 flex-1 truncate">
-                    “{r.match}” → {categories.find((c) => c.id === r.categoryId)?.name ?? '?'}
-                  </span>
-                  <button onClick={() => void removeRow('rules', r.id)} aria-label={`Forget rule ${r.match}`} className="text-ink-3 hover:text-critical-text">
-                    <Trash2 size={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+        <SectionTitle>Automation</SectionTitle>
+        <Card className="divide-y divide-hairline">
+          {/* Rules moved to their own page. The list here could say what a rule
+              was but never what it had done to your data, which is the only
+              question worth asking of one. */}
+          <Link
+            to="/settings/rules"
+            className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-2.5"
+          >
+            <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 md:size-8">
+              <Wand2 size={16} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium md:text-sm">Categorisation rules</p>
+              <p className="truncate text-sm text-ink-3 md:text-xs">
+                {rules.length === 0
+                  ? 'Nothing learned yet — categorise a payee and it is remembered'
+                  : `${rules.length} learned · apply them to transactions you have already recorded`}
+              </p>
+            </div>
+            <ChevronRight size={16} className="shrink-0 text-ink-3" />
+          </Link>
+          <TransferModeRow />
         </Card>
       </section>
 

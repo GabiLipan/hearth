@@ -9,6 +9,7 @@ import { Card, CategoryDot, Empty, TextInput, Toolbar, MonthStepper, Button, tab
 import { CategoryIcon } from '../components/CategoryIcon'
 import { TransactionForm } from '../components/TransactionForm'
 import { ImportWizard } from '../components/ImportWizard'
+import { TransferReview } from '../components/TransferReview'
 
 export default function Activity() {
   const { money } = useApp()
@@ -74,6 +75,10 @@ export default function Activity() {
           </p>
         )}
       </Toolbar>
+
+      {/* Above the list, so both legs of a proposed pair are visible while you
+          decide. It renders nothing at all when there is nothing to ask. */}
+      <TransferReview />
 
       {/* Category filter chips */}
       <div className="no-scrollbar -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 py-1 md:mx-0 md:mb-2 md:flex-wrap md:gap-1.5 md:overflow-visible md:px-0">

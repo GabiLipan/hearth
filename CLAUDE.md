@@ -24,10 +24,14 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `08`, then `local/98-grants.sql`, then `exec`
-a test file and read the final result set — every row must have `ok = true`.
+Load `local/00-shim.sql`, then `01` … `09`, then `local/98-grants.sql`, then `exec`
+a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
+
+Take the last result set that HAS rows, not the last one: every test file ends
+with `rollback`, which returns none, so reading `results[results.length - 1]`
+reports zero checks and zero failures — a green run that asserted nothing.
 
 A test helper that must read **past** RLS has to be `security definer`; under
 `set role authenticated` a plain helper is filtered by the policies it is trying
@@ -49,6 +53,7 @@ read-only detector that reports which are present — run it when unsure.
 | `06-category-palette.sql` | widens `categories.slot` to 12 |
 | `07-permissions.sql` | `household_members`, `account_grants`, per-level RLS, the departure cascade |
 | `08-profiles.sql` | display names backfilled and editable, optional avatars, role change stops bumping the epoch |
+| `09-reconcile.sql` | linking rows that already exist: a transaction to a bill occurrence, two transactions into one transfer, and both undos |
 
 All are re-runnable. `05` refuses to install if `04` is missing — necessary,
 because **plpgsql bodies are only syntax-checked at creation time**, so a
@@ -71,6 +76,8 @@ UI  →  data.ts (create/update/remove)  →  Dexie cache   (instant paint)
 ```
 
 Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
+`rules.ts` (payee matching, learning, bulk recategorisation), `bills.ts`
+(suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
 allow-lists), `session.ts` (auth, household, sync orchestration).
@@ -127,12 +134,20 @@ accounts moved.
 and promote; they gain no access to any account they were not granted, and
 `my_account_ids()` must never consult `is_household_admin()`.
 
-Four rules that follow:
+Five rules that follow:
 
 - **RLS is the only enforcement, and `security definer` switches it off.** Any
   definer function must restate in its body every predicate the policies would
   have applied. `wipe_household()` did not, and one person's "Erase everything"
-  deleted the other's private accounts.
+  deleted the other's private accounts. Migration 09 states the
+  `transactions_update` predicate once, as `may_edit_transaction(account_id,
+  created_by)`; a new definer function that touches a transaction calls that
+  rather than retyping the expression and drifting from it.
+- **A function that changes two rows must authorise both.** `link_transfer()`
+  checks each leg and refuses unless it may write both, because half a transfer
+  is worse than none: the visible leg would leave the totals while the hidden
+  one stayed in them, and no screen could explain the difference. Same for
+  `unlink_transfer()`, from the other direction.
 - **There are no DELETE policies anywhere.** Deletion is `set deleted_at`, an
   UPDATE. A hard delete would leave the other device's cache holding the row
   forever with nothing left to replicate.
@@ -279,6 +294,25 @@ the single place a level comes from.
   comparing history against budget must read the budget in force for *that* month —
   `lib/budgetHistory.ts` does this, and fills months with none from the median of
   the months that have one.
+- **Linking happens on the server, so the local row does not change yet.**
+  `link_bill_payment` and `link_transfer` are RPCs, and nothing writes their
+  result back — `billId` and `transferId` stay undefined in the cache until the
+  next pull, up to a minute later. So a detector re-run before then proposes the
+  same pair again. Every caller drops the row from its own list on the tap and
+  calls `syncNow()`; `TransferReview` additionally keeps a ref of what it has
+  already linked, or auto mode would sit in a loop of RPCs the server refuses.
+- **Applying a category in bulk is the easiest way to make fifty dead letters.**
+  At `contribute` you may edit only what you added, and writes fail late and
+  quietly. `applyCategory` therefore takes a `canEdit` predicate with no default
+  and reports what it skipped, so the screen can say "18 updated, 3 are Sam's"
+  rather than silently doing less than the button promised.
+- **Transfer pairing is the one matcher with no tolerance.** Every other
+  comparison in the app is fuzzy — `payeeSimilar`, the bill amount window, the
+  duplicate check. `findTransferCandidates` requires `out === -in` exactly, and
+  `link_transfer` enforces the same equality, because absorbing a £4 difference
+  here does not add a row you can delete: it removes two real amounts from every
+  total in the app. An ambiguous pair (either side has more than one reading) is
+  offered but never linked automatically, for the same reason.
 
 ## Known gaps (not yet fixed)
 
@@ -286,7 +320,16 @@ the single place a level comes from.
   by another dead-letters rows that RLS refuses. It does not merge or remap.
 - `stats.ts` `monthlySeries` has an `else if`/`else` pair with identical bodies —
   the income branch is dead code, harmless but misleading.
-- Bill posting, transfers, account deletion and the wipe are **online-only** RPCs.
-  Deliberate (they must be atomic), but there is no queued-offline story for them.
+- Bill posting and reconciliation, transfers and their linking, account deletion
+  and the wipe are **online-only** RPCs. Deliberate (they must be atomic), but
+  there is no queued-offline story for them.
 - No end-to-end test covers two users at once; the two-person cases are asserted
-  in `supabase/99c-ownership-tests.sql` at the SQL layer only.
+  in `supabase/99c-ownership-tests.sql` and `99e-reconcile-tests.sql` at the SQL
+  layer only.
+- Bill reconciliation only looks forward from `nextDue`. Payments for
+  occurrences *before* it — a year of history imported after the bill was
+  created — are left alone. `link_bill_payment` would handle them correctly (it
+  only advances `next_due` when the occurrence is at or past it), but nothing
+  offers them.
+- Unlinking a transfer leaves both legs uncategorised: linking clears
+  `category_id` on both, and the previous values are not recoverable.
