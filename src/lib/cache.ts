@@ -1,7 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { classifyAccounts, classifyFlows, type BookId, type BookMap, type Flow } from './books'
 import {
   db,
+  getSetting,
+  setSetting,
   type Account,
   type AccountGrant,
   type Bill,
@@ -200,6 +203,55 @@ export function useAccountMap(): Map<string, Account> {
 export function useRemoteBalances(): Map<string, number> {
   const rows = useLiveQuery(() => db.balances.toArray(), [], []) ?? []
   return useMemo(() => new Map(rows.map((b) => [b.accountId, b.balanceMinor])), [rows])
+}
+
+/* ---------- books ---------- */
+
+/**
+ * Which book each account belongs to, derived from the grants already there.
+ *
+ * Nothing to configure and nothing that can disagree with the permissions —
+ * see `classifyAccounts`. Note it reads `useGrantsByAccount`, which below
+ * `manage` returns only your own grant; that is exactly why "mine" requires
+ * ownership rather than "only one grant".
+ */
+export function useBooks(): BookMap {
+  const { userId } = useSyncState()
+  const accounts = useAccounts()
+  const grants = useGrantsByAccount()
+  return useMemo(() => classifyAccounts(accounts, grants, userId), [accounts, grants, userId])
+}
+
+/** What each transaction means, given the books. Recomputed when either changes. */
+export function useFlows(txns: Transaction[] | undefined, books: BookMap): Map<string, Flow> {
+  return useMemo(() => classifyFlows(txns ?? [], books), [txns, books])
+}
+
+const BOOK_KEY = 'book'
+
+/**
+ * The book being looked at.
+ *
+ * Device-local and unsynced, like the theme and the sidebar: it is which lens
+ * this screen is using, not a fact about the household. Read synchronously
+ * enough that the page does not paint the household's figures and then flip to
+ * yours, which would be alarming on a page full of money.
+ */
+export function useBook(): [BookId, (next: BookId) => void] {
+  const [book, setBook] = useState<BookId>('household')
+
+  useEffect(() => {
+    void getSetting(BOOK_KEY).then((raw) => {
+      if (raw === 'household' || raw === 'mine' || raw === 'all') setBook(raw)
+    })
+  }, [])
+
+  const choose = useCallback((next: BookId) => {
+    setBook(next)
+    void setSetting(BOOK_KEY, next)
+  }, [])
+
+  return [book, choose]
 }
 
 /** Writes the server refused. Surfaced in Settings so a failure is never silent. */
