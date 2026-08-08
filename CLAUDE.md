@@ -348,8 +348,6 @@ the single place a level comes from.
 
 ## Known gaps (not yet fixed)
 
-- `importJSON` preserves `ownerId`, so a backup taken by one person and restored
-  by another dead-letters rows that RLS refuses. It does not merge or remap.
 - `stats.ts` `monthlySeries` has an `else if`/`else` pair with identical bodies —
   the income branch is dead code, harmless but misleading.
 - Bill posting and reconciliation, transfers and their linking, account deletion

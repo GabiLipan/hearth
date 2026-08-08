@@ -2,6 +2,7 @@ import { db, SYNCED_TABLES, type SyncedTable } from './db'
 import { createMany } from './data'
 import { rpc } from './api'
 import { fullPull } from './pull'
+import { syncStore } from './session'
 
 /**
  * Backup and restore.
@@ -54,9 +55,37 @@ export function downloadJSON(json: string) {
  * Ids are preserved, so re-importing the same file twice is a no-op rather than
  * a second copy of everything.
  */
-export async function importJSON(text: string) {
+export interface RestoreResult {
+  added: number
+  /** Rows belonging privately to somebody else, left where they were. */
+  skippedPrivate: number
+}
+
+/** Tables carrying `ownerId`: null means the household's, set means one person's. */
+const OWNED: readonly SyncedTable[] = ['categories', 'budgets', 'goals']
+
+export async function importJSON(text: string): Promise<RestoreResult> {
   const parsed = JSON.parse(text)
   if (parsed?.app !== 'hearth' || !parsed.data) throw new Error('Not a Hearth backup file')
+
+  const me = syncStore.getState().userId
+  const result: RestoreResult = { added: 0, skippedPrivate: 0 }
+  /**
+   * Personal rows this restore is dropping, so anything pointing at one can be
+   * dealt with rather than left dangling.
+   *
+   * A backup carries `owner_id` verbatim, and the policies on all three owned
+   * tables are `owner_id is null or owner_id = auth.uid()`. So restoring your
+   * partner's backup used to queue their private categories, budgets and goals
+   * under their id — every one of which the server refused, surfacing minutes
+   * later as a pile of dead letters in Settings with no explanation.
+   *
+   * Skipped rather than claimed. Rewriting the owner to whoever is restoring
+   * would turn their private category into yours, which is the one thing the
+   * ownership column exists to prevent, and making it the household's
+   * (`owner_id = null`) would publish it to both of you. Neither is a restore.
+   */
+  const dropped = new Set<string>()
 
   // SYNCED_TABLES, not a second hand-written list. The list here used to omit
   // `goals` while `exportJSON` wrote them from SYNCED_TABLES, so a backup
@@ -65,10 +94,47 @@ export async function importJSON(text: string) {
   // ordered parents-before-children, so a transaction is never queued ahead of
   // the account it belongs to.
   for (const name of backupTables()) {
-    const rows = parsed.data[name]
-    if (!Array.isArray(rows) || !rows.length) continue
-    await createMany(name, name === 'budgets' ? rows.map(withMonth) : rows)
+    const raw = parsed.data[name]
+    if (!Array.isArray(raw) || !raw.length) continue
+
+    let rows = raw as Record<string, unknown>[]
+
+    if (OWNED.includes(name)) {
+      const mine = rows.filter((r) => {
+        const owner = r.ownerId
+        if (owner == null || owner === me) return true
+        if (typeof r.id === 'string') dropped.add(r.id)
+        return false
+      })
+      result.skippedPrivate += rows.length - mine.length
+      rows = mine
+    }
+
+    // A budget names a category, and it is a required column — so a budget on a
+    // category that was just dropped has to go too, or the insert fails a
+    // foreign key and dead-letters exactly the way this is meant to prevent.
+    if (name === 'budgets') {
+      const keep = rows.filter((r) => typeof r.categoryId !== 'string' || !dropped.has(r.categoryId))
+      result.skippedPrivate += rows.length - keep.length
+      rows = keep.map(withMonth)
+    }
+
+    // A transaction's category is optional, so it loses the reference and keeps
+    // the money. The row is the fact; the filing is a detail that can be redone.
+    if (name === 'transactions' && dropped.size > 0) {
+      rows = rows.map((r) =>
+        typeof r.categoryId === 'string' && dropped.has(r.categoryId)
+          ? { ...r, categoryId: undefined }
+          : r,
+      )
+    }
+
+    if (rows.length === 0) continue
+    await createMany(name, rows)
+    result.added += rows.length
   }
+
+  return result
 }
 
 /**

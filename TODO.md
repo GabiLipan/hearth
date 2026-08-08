@@ -92,8 +92,6 @@ the gap before that happens, or where linking is not possible at all.
       `dev-repair-accounts.sql` already does it by hand
 - [ ] **Unlinking a transfer leaves both legs uncategorised**, and the old
       categories are not recoverable
-- [ ] **`importJSON` preserves `ownerId`**, so a backup restored by the other
-      person dead-letters rows RLS refuses
 
 ## Recorded so it is not forgotten
 
@@ -159,6 +157,12 @@ table, measured against the median of the months before it — the mean would le
 one annual insurance payment become the norm — with months of no spending
 dropped rather than counted as zero. Silent below three months of history, and
 silent within a tenth of typical, because neither is news.
+
+**Restoring somebody else's backup** no longer produces a pile of dead letters.
+Personal categories, budgets and goals owned by another person are left where
+they are rather than claimed or published, budgets on a dropped category go with
+it (the column is required), and a transaction keeps its money and loses only
+its filing. The count of what was left alone is reported.
 
 **CSV import remembers its columns**, keyed on the file's headers rather than
 the account — one bank exports one format, so the answer carries across accounts

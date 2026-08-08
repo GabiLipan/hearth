@@ -454,10 +454,17 @@ export default function SettingsPage() {
               const f = e.target.files?.[0]
               e.target.value = ''
               if (!f) return
-              if (!confirm('Importing a backup replaces everything on this device. Continue?')) return
+              // "Replaces" was never true — `importJSON` adds, and ids are
+              // preserved so re-importing the same file is a no-op rather than
+              // a second copy of everything.
+              if (!confirm('This adds the backup’s contents to what is already here. Continue?')) return
               try {
-                await importJSON(await f.text())
-                alert('Backup imported.')
+                const { added, skippedPrivate } = await importJSON(await f.text())
+                alert(
+                  skippedPrivate > 0
+                    ? `Restored ${added} row${added === 1 ? '' : 's'}. ${skippedPrivate} were somebody else’s private categories, budgets or goals, so they were left alone — the server would have refused them.`
+                    : `Restored ${added} row${added === 1 ? '' : 's'}.`,
+                )
               } catch (err) {
                 alert(err instanceof Error ? err.message : 'That file could not be imported.')
               }
