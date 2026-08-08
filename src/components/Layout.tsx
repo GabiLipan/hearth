@@ -29,6 +29,7 @@ const TITLES: Record<string, string> = {
   '/goals': 'Goals',
   '/reports': 'Reports',
   '/settings': 'Settings',
+  '/settings/rules': 'Rules',
 }
 
 /**

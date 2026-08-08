@@ -20,6 +20,24 @@ export function prettyPayee(raw: string) {
   return n.replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/**
+ * Are these two the same merchant?
+ *
+ * Lives here rather than in dedupe.ts, which is where it started: it is a fact
+ * about payees, and three separate features now ask it (duplicate detection,
+ * bulk recategorisation, transfer pairing). Keeping one definition is what makes
+ * "looks like a duplicate" and "looks similar" agree on screen.
+ */
+export function payeeSimilar(a: string, b: string): boolean {
+  const na = normalizePayee(a)
+  const nb = normalizePayee(b)
+  if (na.length < 3 || nb.length < 3) return false
+  if (na === nb || na.includes(nb) || nb.includes(na)) return true
+  const ta = na.split(' ')[0]
+  const tb = nb.split(' ')[0]
+  return ta.length >= 5 && ta === tb
+}
+
 export function matchRule(payee: string, rules: Rule[]): Rule | undefined {
   const hay = normalizePayee(payee)
   // Longest match wins — "tesco petrol" beats "tesco".
@@ -87,4 +105,102 @@ export async function suggestCategory(payee: string): Promise<string | undefined
   if (rule) return rule.categoryId
   const txns = await db.transactions.toArray()
   return buildHistoryMatcher(txns)(payee)
+}
+
+/* ---------- applying a rule to history ---------- */
+//
+// A rule learned from one transaction only ever affected the NEXT one. Everything
+// already in the account kept whatever category it was imported with, so
+// categorising one "PETS AT HOME INS" left eleven months of them sitting under
+// "Other" with no way to fix them but one at a time.
+//
+// Two things are needed for that, and they are deliberately different questions:
+//
+//   coverageOf  — which transactions does this rule speak for? Asked of an
+//                 existing rule, on the rules page.
+//   similarTo   — which transactions look like the one I just categorised?
+//                 Asked at the moment of categorising, when the rule has only
+//                 just been learned and the payee is all we have.
+
+/** A transaction is eligible to be recategorised in bulk. */
+function recategorisable(t: Transaction): boolean {
+  // Income is not what rules are learned from (see learnRule's callers), and a
+  // transfer is neither spending nor income — giving either a category from a
+  // payee rule would be wrong rather than merely unhelpful.
+  return t.amountMinor < 0 && t.transferId == null
+}
+
+export interface RuleCoverage {
+  /** Every transaction this rule is the winning match for. */
+  all: Transaction[]
+  /** Those it would actually change — currently a different category, or none. */
+  changed: Transaction[]
+}
+
+/**
+ * What a rule covers.
+ *
+ * Note that this asks `matchRule` rather than testing `match` on its own, so it
+ * inherits longest-match-wins: applying the "tesco" rule does not reach into
+ * the transactions the "tesco petrol" rule owns. Testing the substring directly
+ * would make bulk-applying a general rule quietly undo a specific one — and the
+ * preview would have shown you the right count while doing it.
+ */
+export function coverageOf(rule: Rule, txns: Transaction[], rules: Rule[]): RuleCoverage {
+  const all = txns.filter((t) => recategorisable(t) && matchRule(t.payee, rules)?.id === rule.id)
+  return { all, changed: all.filter((t) => t.categoryId !== rule.categoryId) }
+}
+
+/**
+ * Transactions that look like this one, by payee.
+ *
+ * Used the instant a category is chosen by hand, to offer "and the other nine".
+ * `payeeSimilar` rather than an exact normalised match, because a statement
+ * writes the same merchant a dozen ways — it is the same comparison the
+ * duplicate check uses, so the two screens agree about what "similar" means.
+ */
+export function similarTo(
+  payee: string,
+  categoryId: string,
+  txns: Transaction[],
+  exceptId?: string,
+): Transaction[] {
+  return txns.filter(
+    (t) =>
+      t.id !== exceptId &&
+      recategorisable(t) &&
+      t.categoryId !== categoryId &&
+      payeeSimilar(t.payee, payee),
+  )
+}
+
+/**
+ * Recategorise transactions, skipping any the server would refuse.
+ *
+ * `canEdit` is not optional and has no default. At `contribute` you may change
+ * only what you added, and a bulk update is the easiest possible way to queue
+ * fifty writes that each dead-letter a minute later in Settings — the failure
+ * mode this data layer is most prone to, since writes fail late and quietly.
+ * Callers build the predicate from `canEditTransaction`, so this mirrors
+ * `transactions_update` rather than guessing.
+ *
+ * Returns what it actually changed and what it had to leave, so the UI can say
+ * "18 updated, 3 are Sam's" instead of silently doing less than it claimed.
+ */
+export async function applyCategory(
+  txns: Transaction[],
+  categoryId: string,
+  canEdit: (t: Transaction) => boolean,
+): Promise<{ updated: number; skipped: number }> {
+  let updated = 0
+  let skipped = 0
+  for (const t of txns) {
+    if (!canEdit(t)) {
+      skipped++
+      continue
+    }
+    await update('transactions', t.id, { categoryId })
+    updated++
+  }
+  return { updated, skipped }
 }

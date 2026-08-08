@@ -1,6 +1,6 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns'
 import type { Transaction } from './db'
-import { normalizePayee } from './rules'
+import { payeeSimilar } from './rules'
 
 /**
  * Cross-source duplicate detection. An exact `importHash` match catches
@@ -8,17 +8,13 @@ import { normalizePayee } from './rules'
  * manually-entered (or receipt-scanned) expense turning up later in a
  * statement: same amount, dates within a few days (statements post late),
  * and a recognisably similar payee.
+ *
+ * `payeeSimilar` moved to rules.ts once bulk recategorisation and transfer
+ * pairing started asking the same question. Re-exported here because this is
+ * where callers learned to look for it.
  */
 
-export function payeeSimilar(a: string, b: string): boolean {
-  const na = normalizePayee(a)
-  const nb = normalizePayee(b)
-  if (na.length < 3 || nb.length < 3) return false
-  if (na === nb || na.includes(nb) || nb.includes(na)) return true
-  const ta = na.split(' ')[0]
-  const tb = nb.split(' ')[0]
-  return ta.length >= 5 && ta === tb
-}
+export { payeeSimilar }
 
 export function findLikelyDuplicate(
   cand: { date: string; payee: string; amountMinor: number },

@@ -9,6 +9,7 @@ import Bills from './pages/Bills'
 import Goals from './pages/Goals'
 import Reports from './pages/Reports'
 import SettingsPage from './pages/Settings'
+import RulesPage from './pages/Rules'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/goals" element={<Goals />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/rules" element={<RulesPage />} />
           </Routes>
         </Layout>
       </AuthGate>
