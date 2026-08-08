@@ -1,14 +1,17 @@
-# Hearth — book accounting, reporting and visuals
+# Hearth — what is left
 
 The plan for reshaping Hearth around how we actually move money: salaries land in
 private accounts, most of each salary moves to the joint account, the household
 spends from there, and some personal spending stays behind.
 
-**How to read this.** Everything still to do is at the top, grouped by what it is
-rather than by when it was thought of; what has shipped is a one-line log at the
-bottom. Anything marked **decision** is waiting on us, not on code. The
-reasoning behind a shipped item lives in its commit message, not here — this
-file is a plan, and a plan made mostly of finished work stops being read.
+**How to read this.** Two sections. **Waiting on us** is decisions — nothing can
+be built until we answer them. **Waiting on code** is work, each item labelled
+`ready` or `migration 11` so you can see at a glance what is actually pickable
+up. What has already shipped is not here at all: it is in the git log, where it
+cannot rot, and a plan made mostly of finished work stops being read.
+
+Right now: **6 decisions waiting on us**, and **6 pieces of work** — 2 ready, 4
+behind migration 11.
 
 ---
 
@@ -35,177 +38,91 @@ Two consequences worth remembering:
 - The household book is **right even before anything is linked**. Linking only
   matters for the personal book, and we can each do our own.
 
-### Assumptions made (change these if wrong)
+---
 
-- [ ] **decision** — Joint savings is inside the household book. This is what makes
-      "net" literally equal "saved". Alternative: its own book.
-- [ ] **decision** — Credit cards follow the normal rule: a card only one of us
-      holds is personal, a joint one is the household's. A personal card paid off
-      from joint is then a household → personal flow, not household spending.
+# Waiting on us
+
+Six questions. None of them has code waiting behind it that I can write first —
+answering them *is* the blocker.
+
+**1. Is joint savings inside the household book?**
+It is today, which is what makes "net" literally equal "saved". The alternative
+is giving it its own book. Currently assumed, not decided.
+
+**2. Do credit cards follow the normal rule?**
+Assumed yes: a card only one of us holds is personal, a joint one is the
+household's. A personal card paid off from joint is then a household → personal
+flow rather than household spending. Say if that is wrong.
+
+**3. Should unlinking a transfer put the categories back?**
+Linking clears `category_id` on both legs and the old values are gone. Storing
+them to restore is easy — the question is whether restoring is *right*, or
+whether it re-creates an answer somebody deliberately cleared.
+
+**4. A household bill paid from a personal card.**
+Needs a per-transaction "this was household spending, I just paid for it" flag.
+The column is the easy half; what it does to both books is the question. Does it
+move the spending into the household book and leave a debt in mine? Or stay
+where it is and only annotate?
+
+**5. Reimbursements between us.**
+Almost certainly the same mechanism as (4) — worth settling the two together
+rather than building one and retrofitting the other.
+
+**6. Multi-currency, for Wise and Revolut.**
+The app is single-currency and any foreign amount is silently wrong today. Not
+"out of scope" so much as "not decided": a real answer means a rate source and a
+decision about which day's rate a transaction is worth.
 
 ---
 
-# Still to do
+# Waiting on code
 
-**Everything below is one of three things**, and the label says which:
+## Ready — nothing blocking these
 
-- **ready** — no blockers, can be picked up as-is
-- **needs a migration** — SQL applied by hand in the Supabase editor first
-- **wants a design decision** — the shape is not settled; worth talking about
+**Custom date range in Reports.** Not just whole months or a year. The one
+substantial piece left in reporting: unlike the year view, an arbitrary start and
+end cannot reuse the month-keyed aggregates. `bookTotals`,
+`bookSpendByCategory` and every function in `insights.ts` would have to take a
+range, and the contribution cut-off (`effectiveMonth`, the 25th rule) has no
+meaning inside a period that does not align to a month. Wants its own pass.
 
-Nothing here is in priority order. Ten items: **2 ready**, **4 needing a
-migration** (all four fit in one — migration 11), and **4 wanting a decision
-from us before there is anything to build**.
+**Recurring transfer routes.** Learn "£2,000, my private → joint, monthly" the
+way a bill is learned, so payday stops needing confirmation every month.
 
-## Safety nets — the gaps that lose data
+## Migration 11 — all four fit in one migration
 
-- **needs a migration** · **Deleting an account has no undo.** `delete_account`
-  sets `deleted_at` and it vanishes for everybody, with no bin to recover from.
-  Wants migration 11: a `restore_account` RPC and a "recently deleted" list in
-  Settings.
-- **needs a migration** · **Reclaim an ownerless account from Settings.**
-  `dev-repair-accounts.sql` already does this by hand in the SQL editor; a
-  household admin should be able to do it from the app. Same migration.
-- **wants a design decision** · **Unlinking a transfer leaves both legs
-  uncategorised**, and the old categories are not recoverable. Storing them to
-  put back is easy; whether unlinking SHOULD restore them, or whether that
-  re-creates a wrong answer somebody deliberately cleared, is the question.
+**Undo for a deleted account.** `delete_account` sets `deleted_at` and the
+account vanishes for everybody with no way back. Wants a `restore_account` RPC
+and a "recently deleted" list in Settings.
 
-## Transfers, and what the app cannot see
+**Reclaim an ownerless account from Settings.** `dev-repair-accounts.sql`
+already does this by hand in the SQL editor; a household admin should be able to
+do it from the app.
 
-The book model is right whenever a transfer is linked. Everything here is about
-the gap before that happens, or where linking is not possible at all.
+**Tell the person who CAN see the far leg.** `lib/unexplained.ts` names the
+blind spot on my screen — money moved that only my partner can confirm. The
+other half is my device telling theirs "there is an arrival here waiting for you
+to link it", which needs somewhere shared to put the note.
 
-- **needs a migration** · **Tell the person who CAN see the far leg.**
-  `lib/unexplained.ts` names the blind spot on my screen; the other half is my
-  device telling theirs "there is an arrival here waiting for you to link it",
-  which needs somewhere shared to put the note.
-- **needs a migration** · **Explicit per-account book override**, for when
-  derivation from grants is wrong.
-- **ready** · **Recurring transfer routes** — learn "£2,000, my private →
-  joint, monthly" the way a bill is learned.
-- **wants a design decision** · **A household bill paid from a personal card.**
-  Needs a per-transaction "this was household spending, I just paid for it"
-  flag — which is a column, so a migration, but the harder half is what it does
-  to both books once it exists.
-- **wants a design decision** · **Reimbursements between us.** Probably the same
-  mechanism as the above; worth settling them together.
-
-## Reporting
-
-- **ready** · **Custom date range**, not just whole months or a year. The one
-  substantial piece of work left in reporting: unlike the year view, an
-  arbitrary start and end cannot reuse the month-keyed aggregates —
-  `bookTotals`, `bookSpendByCategory` and every function in `insights.ts` would
-  have to take a range, and the contribution cut-off (`effectiveMonth`, the
-  25th rule) has no meaning inside a period that does not align to a month.
-  Wants its own pass rather than being tacked onto something else.
-
-## Recorded so it is not forgotten
-
-- **wants a design decision** · **Multi-currency** for Wise / Revolut. The app
-  is single-currency today and any foreign amount is silently wrong. Out of
-  scope until it isn't.
+**Explicit per-account book override**, for the cases where deriving the book
+from grants gets it wrong.
 
 ---
 
 # Shipped
 
-**The foundation.** `lib/books.ts` classifying accounts into household / mine /
-someone else's, and every transaction into a flow; book-aware aggregates
-(`bookTotals`, `bookSeries`); `useBook()` and the `BookSwitcher`, wired through
-Home, Reports and Budgets; unit tests including the payday case and the
-partner-leg-invisible case.
+Deliberately not itemised. Every change is in the git log with its reasoning in
+the commit message, and `CLAUDE.md` carries the parts that are still
+load-bearing: the architecture, the invariants, the privacy model, the migration
+order, and the traps that have actually bitten.
 
-**Budgets, bills and goals per book.** Household budgets measure joint-account
-spending, personal ones measure my private accounts — they used to filter on who
-*recorded* a row, which got both cases wrong. Bills belong to the account they
-leave, so the monthly total is what that book costs to run; under `Everything`
-the list splits under headings. Goals take their book from their own `owner_id`.
-
-**Migration 10** — a transfer that already exists can fund a goal.
-`link_transfer` takes one, `set_transfer_goal` tags one afterwards (the case that
-matters, since cross-book pairs link themselves), and `unlink_transfer` releases
-it. `may_use_goal()` states the predicate once. Applied.
-
-**Transfers.** Cross-book pairs auto-link even when row-ambiguous, in the one
-direction that is safe. A cross-book pair reads as money into the household
-rather than as a generic transfer.
-
-**Reporting.** Drill into a category's subcategories from the donut or the table.
-Click any slice through to Activity, filtered to that category, month and book.
-Who contributed what, attributed from the far leg rather than from `created_by`.
-The part-finished month says so everywhere — dimmed bars, a "so far" row, and the
-book's balance at the 1st beside the figures. Both tables export as CSV.
-`monthlySeries`' dead branch fixed, which had been counting every refund as
-income.
-
-**Activity and categorising.** The category picker shows parents only and opens
-subcategories in a drawer under the row. Rows show both halves of the category.
-Filter by one account, several or all. One continuous list, newest first, cut
-into months, with a jump-to-month.
-
-**Legs with no visible partner.** `lib/unexplained.ts` finds the rows in the
-joint accounts that read as movements of money and that nothing has paired —
-money out counted as household spending, money in counted as household income —
-and Reports says so under the figures, with the row marked in Activity. It reads
-the words the bank used and nothing else: no amount heuristic, and a category is
-taken as the answer. Nothing is reclassified, because guessing here would make
-the figures wrong in a way nobody could see.
-
-**Seven report views** (`lib/insights.ts`, `components/insights.tsx`). Household
-waterfall — paid in → spent → moved to savings → left in current, as one path
-rather than three figures to subtract. What each salary turned into, where the
-bar IS the salary. Committed vs chosen. Share kept, as a rate with a zero line.
-Top payees, grouped by the app's own definition of "same merchant". Category by
-month as a heatmap for spotting drift. And pace: spend-to-date against the same
-point last month, the one comparison a part-finished month can honestly make.
-
-**Month-on-month delta per category.** A "vs typical" column in the report
-table, measured against the median of the months before it — the mean would let
-one annual insurance payment become the norm — with months of no spending
-dropped rather than counted as zero. Silent below three months of history, and
-silent within a tenth of typical, because neither is news.
-
-**Reporting, sharpened.** "Kept each month" no longer claims saving over a line
-that dips below zero, and the tooltip names an overspent month as one. The same
-period a year earlier sits beside the figures where there is a year of history
-to compare against. Recharts' tooltip now outranks the donut's centre figure,
-which used to paint over it.
-
-**A year at a time.** Reports switches between a month and a whole year, with
-the aggregates taking a set of months rather than gaining a second code path.
-The year stops at the month we are in rather than pretending the rest happened.
-
-**Activity's search says which book it searched** and offers a way out of it.
-
-**Sticky month headings in Activity**, pinned under the mobile top bar — whose
-height is measured into `--header-h` rather than guessed, since it varies with
-the safe-area inset.
-
-**Drilling into subcategories from Home**, the same breadcrumb Reports has.
-
-**Restoring somebody else's backup** no longer produces a pile of dead letters.
-Personal categories, budgets and goals owned by another person are left where
-they are rather than claimed or published, budgets on a dropped category go with
-it (the column is required), and a transaction keeps its money and loses only
-its filing. The count of what was left alone is reported.
-
-**CSV import remembers its columns**, keyed on the file's headers rather than
-the account — one bank exports one format, so the answer carries across accounts
-at the same bank and not across two banks sharing one. Validated against the
-file in front of it before being applied, and saved at the point the columns are
-known to have worked rather than at the end of the import.
-
-**CSV import.** Handles a statement with separate money-out and money-in
-columns, both positive — the commonest UK export, and the layout is now always
-adjustable rather than only guessed. Detection reads the rows as well as the
-headings, which fixed two silent failures: "Debit Amount" being read as a
-signed column (every expense imported as income) and "Running Balance" being
-read as money in.
-
-**Bills.** Reconciliation walks both ways from `nextDue`, so a year of history
-imported after a bill was created is offered rather than ignored.
-
-**Edges.** A warning before removing your own access to an account.
-`dev-repair-accounts.sql` and `dev-reset-data.sql`.
+Broadly, and in build order: book accounting end to end (`lib/books.ts`, the
+switcher, book-aware budgets, bills and goals); transfers that pair themselves
+and can fund a goal after the fact (migration 10); Activity rebuilt as one
+continuous list with a drawer category picker; the reports — donut drill-down,
+click-through to Activity, seven analysis views, CSV export, and honesty about
+part-finished months; a CSV importer that reads both statement layouts and
+remembers which one your bank uses; and the safety work — bill reconciliation
+both ways, backups that survive being restored by the other person, and the
+blind spot in the book model said out loud rather than papered over.
