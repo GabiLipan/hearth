@@ -463,31 +463,53 @@ function KnownRoutes() {
 /* ---------- The sections, and how they are grouped ---------- */
 
 function AppearanceSection() {
-  const { themePref, setThemePref, currency, setCurrency } = useApp()
+  const { themePref, setThemePref } = useApp()
   return (
     <section>
       <SectionTitle>Appearance</SectionTitle>
       <Card className="p-4 md:p-3">
+        {/* Currency is not appearance — it is a property of the money, so it
+            lives with the accounts the money is in. */}
         <Segmented
           value={themePref}
           onChange={setThemePref}
-          options={[
-            { value: 'light', label: <span className="flex items-center justify-center gap-1.5"><Sun size={15} /> Light</span> },
-            { value: 'dark', label: <span className="flex items-center justify-center gap-1.5"><Moon size={15} /> Dark</span> },
-            { value: 'system', label: <span className="flex items-center justify-center gap-1.5"><MonitorSmartphone size={15} /> Auto</span> },
-          ]}
+          options={THEME_OPTIONS}
         />
-        <div className="mt-3">
-          <Field label="Currency">
-            <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              {CURRENCIES.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
+      </Card>
+    </section>
+  )
+}
+
+/** Shared by the phone's quick box and the wide screen's Appearance section. */
+const THEME_OPTIONS = [
+  { value: 'light' as const, label: <span className="flex items-center justify-center gap-1.5"><Sun size={15} /> Light</span> },
+  { value: 'dark' as const, label: <span className="flex items-center justify-center gap-1.5"><Moon size={15} /> Dark</span> },
+  { value: 'system' as const, label: <span className="flex items-center justify-center gap-1.5"><MonitorSmartphone size={15} /> Auto</span> },
+]
+
+/**
+ * What every figure in the app is counted in.
+ *
+ * Filed with the accounts rather than with the theme: it is a fact about the
+ * money, not about how this screen looks, and the question "what currency are
+ * we in" is one you ask while looking at the accounts holding it.
+ */
+function CurrencySection() {
+  const { currency, setCurrency } = useApp()
+  return (
+    <section>
+      <SectionTitle>Currency</SectionTitle>
+      <Card className="p-4 md:p-3">
+        <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          {CURRENCIES.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.label}
+            </option>
+          ))}
+        </Select>
+        <p className="mt-2 text-xs text-ink-3">
+          Every amount in the app is shown in this. It changes the symbol, not the numbers.
+        </p>
       </Card>
     </section>
   )
@@ -657,36 +679,22 @@ function DataSection() {
  * the theme in two places there would be two controls for one setting.
  */
 function QuickSettings() {
-  const { themePref, setThemePref, currency, setCurrency } = useApp()
+  const { themePref, setThemePref } = useApp()
   const { userId } = useSyncState()
   const members = useMembers()
   const me = members.find((m) => m.userId === userId)
+  const others = Math.max(0, members.length - 1)
 
   return (
     <div className="mb-4 space-y-2">
-      <Card className="space-y-3 p-4">
-        <Segmented
-          value={themePref}
-          onChange={setThemePref}
-          options={[
-            { value: 'light', label: <span className="flex items-center justify-center gap-1.5"><Sun size={15} /> Light</span> },
-            { value: 'dark', label: <span className="flex items-center justify-center gap-1.5"><Moon size={15} /> Dark</span> },
-            { value: 'system', label: <span className="flex items-center justify-center gap-1.5"><MonitorSmartphone size={15} /> Auto</span> },
-          ]}
-        />
-        <Field label="Currency">
-          <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-            {CURRENCIES.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+      <Card className="p-4">
+        <Segmented value={themePref} onChange={setThemePref} options={THEME_OPTIONS} />
       </Card>
 
-      {/* Editing the name and photo lives with the people it is shown to, so
-          this is a way in rather than a second copy of the form. */}
+      {/* This IS the household group's row — your face on it rather than an
+          icon, because you are the first thing in it. There is no separate
+          "Household & people" line below: the two were the same destination
+          twice, which reads as two places until you have been to both. */}
       <Card>
         <Link
           to="/settings/household"
@@ -695,7 +703,11 @@ function QuickSettings() {
           <PersonDot member={me} size={38} />
           <div className="min-w-0 flex-1">
             <p className="truncate font-medium">{me ? nameOf(me) : 'Your profile'}</p>
-            <p className="truncate text-sm text-ink-3">Your name and photo, as everyone else sees them</p>
+            <p className="truncate text-sm text-ink-3">
+              {others === 0
+                ? 'Your name and photo, and who you share with'
+                : `Your name and photo · ${others} other ${others === 1 ? 'person' : 'people'}`}
+            </p>
           </div>
           <ChevronRight size={16} className="shrink-0 text-ink-3" />
         </Link>
@@ -835,11 +847,12 @@ const GROUPS: Group[] = [
       const accounts = useAccounts()
       return accounts.length === 0
         ? 'Add the accounts your money moves through'
-        : `${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'} · who can see each one`
+        : `${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'} · who can see each one · currency`
     },
     Body: () => (
       <div className="space-y-6 md:space-y-5">
         <AccountsSection />
+        <CurrencySection />
         <Recoverable />
       </div>
     ),
@@ -875,9 +888,8 @@ const GROUPS: Group[] = [
     title: 'Appearance',
     icon: Palette,
     Summary: () => {
-      const { themePref, currency } = useApp()
-      const theme = themePref === 'system' ? 'Auto' : themePref === 'dark' ? 'Dark' : 'Light'
-      return `${theme} · ${currency}`
+      const { themePref } = useApp()
+      return themePref === 'system' ? 'Following your device' : themePref === 'dark' ? 'Dark' : 'Light'
     },
     Body: () => <AppearanceSection />,
   },
@@ -942,10 +954,10 @@ export default function SettingsPage() {
     )
   }
 
-  // Appearance is inlined at the top on a phone rather than listed, so it must
-  // not also appear as a row you can walk into — that would be two ways to the
-  // same two controls, one of them a detour.
-  const rows = GROUPS.filter((g) => g.slug !== 'appearance' && g.slug !== 'data')
+  // Two of the six are already above the list: the theme is inlined in the quick
+  // box, and the household is the row with your face on it. Listing either again
+  // would be a second door to the same room.
+  const rows = GROUPS.filter((g) => !['appearance', 'household', 'data'].includes(g.slug))
   const data = GROUPS.find((g) => g.slug === 'data')!
 
   return (

@@ -57,7 +57,8 @@ export default function Activity() {
   const { money } = useApp()
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
-  const [catFilter, setCatFilter] = useState<string | null>(null)
+  /** null = every category; a set = just those, top-level, subcategories included. */
+  const [catFilter, setCatFilter] = useState<Set<string> | null>(null)
   /** null = every account in the current book; a set = just those. */
   const [accountFilter, setAccountFilter] = useState<Set<string> | null>(null)
   /**
@@ -102,7 +103,7 @@ export default function Activity() {
     const category = params.get('category')
     const month = params.get('month')
     const from = params.get('book')
-    if (category) setCatFilter(category)
+    if (category) setCatFilter(new Set([category]))
     if (month) setMonthFilter(month)
     if (from === 'household' || from === 'mine' || from === 'all') setBook(from as BookId)
     setParams({}, { replace: true })
@@ -131,10 +132,10 @@ export default function Activity() {
       if (accountFilter && !accountFilter.has(t.accountId)) return false
       if (monthFilter && monthKey(t.date) !== monthFilter) return false
       if (catFilter !== null) {
-        // The chips are top-level, so a subcategory counts towards its parent —
+        // The list is top-level, so a subcategory counts towards its parent —
         // the same rule budgets use, and the rule the report slices are built on.
         const cat = t.categoryId ? catMap.get(t.categoryId) : undefined
-        if (!cat || (cat.id !== catFilter && cat.parentId !== catFilter)) return false
+        if (!cat || !(catFilter.has(cat.id) || (cat.parentId != null && catFilter.has(cat.parentId)))) return false
       }
       if (q && !(t.payee.toLowerCase().includes(q) || (t.note ?? '').toLowerCase().includes(q))) return false
       return true
@@ -184,7 +185,13 @@ export default function Activity() {
 
   // A changed filter means a different list; keeping the old depth would leave
   // hundreds of rows rendered for a search that matches four.
-  const filterKey = `${query}|${catFilter}|${monthFilter}|${book}|${accountFilter ? [...accountFilter].sort().join(',') : 'all'}`
+  const filterKey = [
+    query,
+    catFilter ? [...catFilter].sort().join(',') : 'all',
+    monthFilter,
+    book,
+    accountFilter ? [...accountFilter].sort().join(',') : 'all',
+  ].join('|')
   useEffect(() => {
     setLimit(PAGE)
     window.scrollTo({ top: 0 })
@@ -329,6 +336,7 @@ export default function Activity() {
           />
         </div>
 
+        <CategoryFilter parents={parents} value={catFilter} onChange={setCatFilter} />
         <AccountFilter accounts={accounts} value={accountFilter} onChange={setAccountFilter} />
         {/* Nowhere to jump to inside a single month. */}
         {!monthFilter && <MonthJump current={atMonth} months={months} onPick={jumpTo} />}
@@ -347,7 +355,7 @@ export default function Activity() {
           in the header now, on every page at once. */}
       <FilterBar>
         <SearchChip value={query} onChange={setQuery} />
-        <CategoryChip parents={parents} value={catFilter} onChange={setCatFilter} />
+        <CategoryFilter parents={parents} value={catFilter} onChange={setCatFilter} variant="chip" />
         <AccountFilter accounts={accounts} value={accountFilter} onChange={setAccountFilter} variant="chip" />
         {!monthFilter && <MonthJump current={atMonth} months={months} onPick={jumpTo} variant="chip" />}
         <MoreChip onImport={() => setImportOpen(true)} />
@@ -371,7 +379,7 @@ export default function Activity() {
             <span className="font-medium">{monthLabel(monthFilter)} only</span>
             <span className="text-ink-3">
               {' · '}
-              {catFilter ? (catMap.get(catFilter)?.name ?? 'one category') : 'every category'}
+              {catLabel(catFilter, catMap)}
               {book !== 'all' && ` · ${BOOK_LABEL[book]}`}
             </span>
           </p>
@@ -386,35 +394,6 @@ export default function Activity() {
           </button>
         </div>
       )}
-
-      {/* Category filter chips — top-level only, matching the picker. */}
-      {/* Every top-level category, visible at once — worth the row on a wide
-          screen, where the colours are half of what makes it scannable. A phone
-          gets `CategoryChip` in the bar above instead. */}
-      <div className="mb-3 hidden gap-2 md:mx-0 md:mb-2 md:flex md:flex-wrap md:gap-1.5 md:px-0">
-        <button
-          onClick={() => setCatFilter(null)}
-          className={cx(
-            'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition desktop:px-2.5 desktop:py-0.5 md:text-xs',
-            catFilter === null ? 'bg-ink text-page ring-ink' : 'bg-surface text-ink-2 ring-hairline hover:ring-ink-3/40',
-          )}
-        >
-          All
-        </button>
-        {parents.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setCatFilter(catFilter === c.id ? null : c.id)}
-            className={cx(
-              'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition',
-              'md:gap-1 desktop:px-2.5 desktop:py-0.5 md:text-xs',
-              catFilter === c.id ? 'bg-ink text-page ring-ink' : 'bg-surface text-ink-2 ring-hairline hover:ring-ink-3/40',
-            )}
-          >
-            <CategoryIcon icon={c.icon} size={14} /> {c.name}
-          </button>
-        ))}
-      </div>
 
       {/* `undefined` is the cache still opening, not an empty history — telling
           somebody they have no transactions for one frame is worse than a
@@ -1069,67 +1048,108 @@ function SearchChip({ value, onChange }: { value: string; onChange: (next: strin
 }
 
 /**
- * The category filter, folded into one chip on a phone.
+ * How a set of chosen categories reads in a sentence or on a control.
  *
- * On a wide screen this is still a visible row of every top-level category,
- * which is worth its space there — the colours are half of what makes it
- * scannable. On a phone that row was 40px plus a margin for something that is
- * set on a minority of visits, so it becomes a chip that reports the one
- * chosen. Top-level only, matching the picker and the way budgets count.
+ * Naming one is worth far more than counting it — "Groceries" tells you why the
+ * list is short, "1 category" tells you only that it is — so a single choice is
+ * always spelled out and everything past that counts.
  */
-function CategoryChip({
+function catLabel(value: Set<string> | null, byId: Map<string, Category>, empty = 'every category') {
+  if (value === null || value.size === 0) return empty
+  if (value.size === 1) {
+    const only = [...value][0]
+    return byId.get(only)?.name ?? 'one category'
+  }
+  return `${value.size} categories`
+}
+
+/**
+ * Which categories the list is narrowed to.
+ *
+ * Several at once, because the questions people bring here are plural — "what
+ * did the car and the house cost us this year" is one question, and it used to
+ * be two passes over the same screen with the answer added up by hand.
+ *
+ * `null` rather than "every id ticked" is the resting state, the same as
+ * `AccountFilter` and for the same reason: a category invented next week then
+ * appears in the list instead of being silently excluded by a set written
+ * before it existed.
+ *
+ * Top-level only, matching the picker and the way budgets count — choosing a
+ * parent takes its subcategories with it.
+ */
+function CategoryFilter({
   parents,
   value,
   onChange,
+  variant = 'control',
 }: {
   parents: Category[]
-  value: string | null
-  onChange: (next: string | null) => void
+  value: Set<string> | null
+  onChange: (next: Set<string> | null) => void
+  variant?: Variant
 }) {
-  const chosen = parents.find((c) => c.id === value)
+  const byId = useMemo(() => new Map(parents.map((c) => [c.id, c])), [parents])
+  const label = catLabel(value, byId, variant === 'chip' ? 'Category' : 'All categories')
+  const only = value?.size === 1 ? byId.get([...value][0]) : undefined
+  const icon = only ? <CategoryIcon icon={only.icon} size={15} /> : <Shapes size={15} />
+
+  function toggle(id: string) {
+    const next = new Set(value ?? parents.map((c) => c.id))
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    // Back to "all" at both ends: everything ticked means the same thing, and
+    // nothing ticked is a list of no transactions nobody asked for.
+    onChange(next.size === 0 || next.size === parents.length ? null : next)
+  }
+
   return (
     <Popover
       width="w-60"
-      trigger={({ open, toggle }) => (
-        <FilterChip
-          open={open}
-          onClick={toggle}
-          active={!!chosen}
-          onClear={chosen ? () => onChange(null) : undefined}
-          icon={chosen ? <CategoryIcon icon={chosen.icon} size={15} /> : <Shapes size={15} />}
-          label={chosen?.name ?? 'Category'}
-        />
-      )}
+      trigger={({ open, toggle: press }) =>
+        variant === 'chip' ? (
+          <FilterChip
+            open={open}
+            onClick={press}
+            active={value !== null}
+            onClear={value !== null ? () => onChange(null) : undefined}
+            icon={icon}
+            label={label}
+          />
+        ) : (
+          <ControlTrigger label={label} icon={icon} open={open} toggle={press} />
+        )
+      }
     >
-      {(close) => (
+      {() => (
+        // No `close` on a choice: picking several is the point, and a panel that
+        // shut after the first one would make the second choice cost as much as
+        // the first.
         <div className="max-h-72 overflow-y-auto">
           <button
-            onClick={() => {
-              onChange(null)
-              close()
-            }}
+            onClick={() => onChange(null)}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
           >
             <Check size={15} className={cx('shrink-0', value === null ? 'text-accent' : 'opacity-0')} />
             <span className="font-medium">All categories</span>
           </button>
           <div className="my-1 border-t border-hairline" />
-          {parents.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => {
-                onChange(c.id === value ? null : c.id)
-                close()
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
-            >
-              <Check size={15} className={cx('shrink-0', value === c.id ? 'text-accent' : 'opacity-0')} />
-              <span className="shrink-0" style={{ color: `var(--series-${c.slot})` }}>
-                <CategoryIcon icon={c.icon} size={15} />
-              </span>
-              <span className="min-w-0 flex-1 truncate">{c.name}</span>
-            </button>
-          ))}
+          {parents.map((c) => {
+            const on = value === null || value.has(c.id)
+            return (
+              <button
+                key={c.id}
+                onClick={() => toggle(c.id)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
+              >
+                <Check size={15} className={cx('shrink-0', on ? 'text-accent' : 'opacity-0')} />
+                <span className="shrink-0" style={{ color: `var(--series-${c.slot})` }}>
+                  <CategoryIcon icon={c.icon} size={15} />
+                </span>
+                <span className="min-w-0 flex-1 truncate">{c.name}</span>
+              </button>
+            )
+          })}
         </div>
       )}
     </Popover>
