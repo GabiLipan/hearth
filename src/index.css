@@ -157,6 +157,29 @@ body {
   z-index: 20;
 }
 
+/* A confirmed transfer's row — one side of money moved between two accounts,
+   which is neither spending nor income.
+ *
+ * Plain CSS rather than a Tailwind tint, for one reason: the desktop table's
+ * first column is sticky and so must paint an OPAQUE background of its own (see
+ * `table.pinned`), which a translucent `bg-accent/5` on the row cannot reach.
+ * `color-mix` against `--surface` gives the cell and the row the same solid
+ * colour, so the tint survives being scrolled under. Unlayered, so it beats the
+ * `bg-surface` utility the pinned cell carries whatever the source order.
+ *
+ * Applied to the row AND to its pinned cell; the `.group` half is the row's
+ * hover reaching the cell, which is how `table.pinned` already works. */
+.tint-transfer {
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+.tint-transfer:hover,
+.group:hover > .tint-transfer {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+}
+.tint-transfer:active {
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+}
+
 /* ---------- Motion ----------
  * One decelerating curve for everything that arrives, its mirror for everything
  * that leaves, and durations short enough that a tab tapped twice never feels
@@ -168,6 +191,10 @@ body {
 :root {
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-soft: cubic-bezier(0.4, 0, 0.9, 0.4);
+  /* Leaves late and arrives past its mark: a breath of anticipation at the
+     start, a small overshoot at the end. Kept well under a "boing" — this is
+     for a panel changing shape under your thumb, not for a toy. */
+  --ease-settle: cubic-bezier(0.5, -0.18, 0.32, 1.24);
 }
 
 @keyframes sheet-up {
@@ -261,6 +288,12 @@ body {
 .animate-tab { animation: tab-pop 0.32s var(--ease-out-soft); }
 .animate-drawer { animation: drawer-open 0.22s var(--ease-out-soft); grid-template-rows: 1fr; }
 
+/* A panel that changes shape because its contents did — the Expense/Income
+   toggle swapping a receipt scanner in and out, a prompt appearing under a
+   category. The height comes from a measurement in JS (see `useMorphHeight`),
+   so all that is needed here is the curve to travel it on. */
+.morph-height { transition: height 0.34s var(--ease-settle); }
+
 /* The sideways travel of a page change is contained by `main`, not by <html>.
    Any overflow on the root element propagates to the viewport, and on iOS that
    detaches `position: fixed` from the visual viewport: the bottom tab bar stops
@@ -279,5 +312,8 @@ body {
   }
   .animate-tab {
     animation: none;
+  }
+  .morph-height {
+    transition: none;
   }
 }

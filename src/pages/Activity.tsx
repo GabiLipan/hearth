@@ -142,6 +142,33 @@ export default function Activity() {
     return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
   }, [txns, catFilter, catMap, accountFilter, monthFilter, accounts, query])
 
+  /**
+   * The other leg of each transfer, so a row can say where the money went.
+   *
+   * Built over the whole cache rather than the filtered list — the far leg is
+   * routinely in an account the current filter excludes, and "Transfer" with no
+   * destination is the answer this exists to improve on. It stays `undefined`
+   * when the partner is in an account this device cannot see, which is a real
+   * state (see `lib/unexplained.ts`) and not a lookup failure.
+   */
+  const partnerLeg = useMemo(() => {
+    const byTransfer = new Map<string, Transaction[]>()
+    for (const t of txns ?? []) {
+      if (!t.transferId) continue
+      const legs = byTransfer.get(t.transferId)
+      if (legs) legs.push(t)
+      else byTransfer.set(t.transferId, [t])
+    }
+    const out = new Map<string, Transaction>()
+    for (const legs of byTransfer.values()) {
+      for (const leg of legs) {
+        const other = legs.find((l) => l.id !== leg.id)
+        if (other) out.set(leg.id, other)
+      }
+    }
+    return out
+  }, [txns])
+
   /** Where each month starts in `filtered`, and what it came to. */
   const months = useMemo(() => {
     const index = new Map<string, { at: number; count: number; spendMinor: number }>()
@@ -421,11 +448,15 @@ export default function Activity() {
                         <ul className="divide-y divide-hairline">
                           {list.map((t) => {
                             const cat = t.categoryId ? catMap.get(t.categoryId) : undefined
+                            const transfer = !!t.transferId
                             return (
                               <li key={t.id}>
                                 <button
                                   onClick={() => setEditing(t)}
-                                  className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 active:bg-surface-2"
+                                  className={cx(
+                                    'flex w-full items-center gap-3 px-4 py-3 text-left transition-colors',
+                                    transfer ? 'tint-transfer' : 'hover:bg-surface-2/50 active:bg-surface-2',
+                                  )}
                                 >
                                   {/* The account rides on the category badge
                                       rather than taking a line of its own: a
@@ -433,7 +464,14 @@ export default function Activity() {
                                       are spoken for, and "which card" is a
                                       glance question, not a reading one. */}
                                   <span className="relative shrink-0">
-                                    <CategoryDot category={cat} size={34} />
+                                    {/* A transfer takes the category's place in
+                                        the row rather than sitting beside it:
+                                        linking strips the category off both
+                                        legs, so what would otherwise be here is
+                                        a grey "Uncategorised" tag — the least
+                                        informative badge in the app standing in
+                                        for one of the most. */}
+                                    {transfer ? <TransferDot size={34} /> : <CategoryDot category={cat} size={34} />}
                                     <AccountDot
                                       account={accMap.get(t.accountId)}
                                       size={16}
@@ -443,14 +481,27 @@ export default function Activity() {
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate font-medium">{t.payee}</p>
                                     <p className="flex items-center gap-1 truncate text-sm text-ink-3">
-                                      {(looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
+                                      {!transfer && (looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
                                       <span className="truncate">
-                                        {cat ? fullName(cat, catMap) : 'Uncategorised'}
+                                        {transfer
+                                          ? transferLine(t, partnerLeg.get(t.id), accMap)
+                                          : cat
+                                            ? fullName(cat, catMap)
+                                            : 'Uncategorised'}
                                         {t.note ? ` · ${t.note}` : ''}
                                       </span>
                                     </p>
                                   </div>
-                                  <span className={cx('font-semibold tabular', t.amountMinor > 0 && 'text-good-text')}>
+                                  {/* Muted, not green. A transfer's arriving leg
+                                      is not income, and painting it the colour
+                                      income wears is the one reading the whole
+                                      pairing mechanism exists to prevent. */}
+                                  <span
+                                    className={cx(
+                                      'font-semibold tabular',
+                                      transfer ? 'text-ink-3' : t.amountMinor > 0 && 'text-good-text',
+                                    )}
+                                  >
                                     {money(t.amountMinor, { sign: t.amountMinor > 0 })}
                                   </span>
                                 </button>
@@ -501,17 +552,26 @@ export default function Activity() {
                       const acc = accMap.get(t.accountId)
                       const editable = canEditCell(t)
                       const open = cell?.id === t.id ? cell : null
+                      const transfer = !!t.transferId
                       return (
                         <tr
                           key={t.id}
                           onClick={() => setEditing(t)}
-                          className={cx(table.row, 'cursor-pointer transition-colors')}
+                          className={cx(table.row, 'cursor-pointer transition-colors', transfer && 'tint-transfer')}
                         >
                           {/* The list spans every month, so the year has to be
                               on the row — the heading is off screen by the time
                               you are reading the middle of a long month. */}
                           <EditableCell
-                            className={cx(table.cell, 'pl-3 whitespace-nowrap text-ink-3 tabular', table.pinned)}
+                            className={cx(
+                              table.cell,
+                              'pl-3 whitespace-nowrap text-ink-3 tabular',
+                              table.pinned,
+                              // The pinned column paints its own opaque fill, so
+                              // the row's tint cannot reach it — it has to be
+                              // repeated here or the date cell stays plain.
+                              transfer && 'tint-transfer',
+                            )}
                             editing={open?.field === 'date'}
                             editable={editable}
                             onStart={() => setCell({ id: t.id, field: 'date' })}
@@ -536,7 +596,17 @@ export default function Activity() {
                               />
                             }
                           >
-                            {(looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
+                            {transfer ? (
+                              <span
+                                title="One side of a transfer between accounts — it counts as neither spending nor income."
+                                aria-label="Transfer"
+                                className="mr-1.5 inline-flex shrink-0 items-center rounded-full bg-accent/15 px-1 py-0.5 align-middle text-accent"
+                              >
+                                <ArrowLeftRight size={11} />
+                              </span>
+                            ) : (
+                              (looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />
+                            )}
                             <span className="font-medium">{t.payee}</span>
                             {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
                           </EditableCell>
@@ -560,16 +630,32 @@ export default function Activity() {
                             }
                           >
                             <span className="flex items-center gap-1.5 truncate">
-                              <span
-                                className="shrink-0"
-                                style={{ color: cat ? `var(--series-${parent?.slot ?? cat.slot})` : 'var(--ink-3)' }}
-                              >
-                                <CategoryIcon icon={cat?.icon ?? parent?.icon} size={14} />
-                              </span>
-                              <span className="truncate">
-                                {parent && <span className="text-ink-3">{parent.name} · </span>}
-                                <span className="text-ink-2">{cat?.name ?? 'Uncategorised'}</span>
-                              </span>
+                              {/* Linking strips the category off both legs, so
+                                  for a transfer this column is where the far
+                                  account belongs — "Uncategorised" is true and
+                                  says nothing. A leg that somehow still carries
+                                  a category keeps showing it. */}
+                              {transfer && !cat ? (
+                                <>
+                                  <ArrowLeftRight size={14} className="shrink-0 text-accent" />
+                                  <span className="truncate text-ink-2">
+                                    {transferLine(t, partnerLeg.get(t.id), accMap)}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span
+                                    className="shrink-0"
+                                    style={{ color: cat ? `var(--series-${parent?.slot ?? cat.slot})` : 'var(--ink-3)' }}
+                                  >
+                                    <CategoryIcon icon={cat?.icon ?? parent?.icon} size={14} />
+                                  </span>
+                                  <span className="truncate">
+                                    {parent && <span className="text-ink-3">{parent.name} · </span>}
+                                    <span className="text-ink-2">{cat?.name ?? 'Uncategorised'}</span>
+                                  </span>
+                                </>
+                              )}
                             </span>
                           </EditableCell>
                           {/* A badge, not grey text. This is the column you
@@ -600,7 +686,7 @@ export default function Activity() {
                             className={cx(
                               table.cell,
                               'pr-3 text-right font-semibold tabular',
-                              t.amountMinor > 0 && 'text-good-text',
+                              transfer ? 'text-ink-3' : t.amountMinor > 0 && 'text-good-text',
                             )}
                             editing={open?.field === 'amount'}
                             editable={editable}
@@ -663,6 +749,50 @@ const headings = () =>
   [...document.querySelectorAll<HTMLElement>('[data-month]')].filter((el) => el.offsetParent !== null)
 
 const headingFor = (month: string) => headings().find((el) => el.dataset.month === month)
+
+/**
+ * The badge a confirmed transfer wears where a category would be.
+ *
+ * Deliberately built like `CategoryDot` — same circle, same tinted fill, same
+ * glyph proportion — because it stands in the same place and answers the same
+ * question ("what is this row?"). Accent rather than a palette slot: it is not
+ * one of the twelve, and must not read as whichever category happens to share
+ * that colour this month.
+ */
+function TransferDot({ size = 34 }: { size?: number }) {
+  return (
+    <span
+      className="grid shrink-0 place-items-center rounded-full size-[var(--dot)]"
+      style={{
+        ['--dot' as string]: `${size}px`,
+        background: 'color-mix(in oklab, var(--accent) 16%, var(--surface-2))',
+        color: 'var(--accent)',
+      }}
+      aria-hidden
+    >
+      <ArrowLeftRight size={Math.round(size * 0.5)} />
+    </span>
+  )
+}
+
+/**
+ * What a transfer row says instead of a category: which account the money went
+ * to, or came from.
+ *
+ * `partner` is undefined when the far leg sits in an account this device is not
+ * granted on. That is a real and ordinary state rather than a missing row — see
+ * the privacy model — so it falls back to the bare word rather than inventing a
+ * destination or admitting to a lookup that failed.
+ */
+function transferLine(
+  txn: Transaction,
+  partner: Transaction | undefined,
+  accMap: Map<string, { name: string }>,
+) {
+  const other = partner && accMap.get(partner.accountId)?.name
+  if (!other) return 'Transfer'
+  return txn.amountMinor < 0 ? `Transfer to ${other}` : `Transfer from ${other}`
+}
 
 /**
  * A row the statement calls a movement of money, that nothing has paired.

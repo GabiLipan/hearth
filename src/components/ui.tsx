@@ -495,6 +495,61 @@ function useSheetPhase(open: boolean) {
   return phase
 }
 
+/**
+ * The height of a sheet's body, so a change of shape can be animated.
+ *
+ * A sheet's content is not fixed: an Expense/Income toggle takes a receipt
+ * scanner away, choosing a category grows a "move the other eleven too" prompt,
+ * a transfer picker unfolds a list. Each of those made the sheet jump to its new
+ * size in one frame, which on a bottom-anchored sheet means the whole thing
+ * teleports — the top edge is what moves, so the eye follows the wrong part.
+ *
+ * The natural height is measured on the *content*, and set on the scroller
+ * around it. Two things fall out of that split:
+ *
+ *   - the content is never constrained by the number we write, so there is no
+ *     feedback loop between the measurement and the thing being measured;
+ *   - the scroller keeps `flex-shrink: 1` inside a `max-h-full` dialog, so a
+ *     height taller than the screen is simply capped and scrolls, exactly as it
+ *     did before. The number is a target, not a promise.
+ *
+ * It deliberately does not animate the first measurement: a sheet is already
+ * arriving under its own animation, and starting its body from zero height
+ * would play a second one against it. That "not the first one" flag is a
+ * passive effect rather than a `requestAnimationFrame`, for the reason
+ * `BottomTabs` gives: a backgrounded tab never runs the rAF callback, so the
+ * transition would stay switched off for the whole life of a sheet that
+ * happened to open while the app was away.
+ */
+function useMorphHeight(mounted: boolean) {
+  const content = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState<number>()
+  /** False for the first measurement of each opening — see above. */
+  const [morph, setMorph] = useState(false)
+
+  useLayoutEffect(() => {
+    if (!mounted) {
+      setMorph(false)
+      return
+    }
+    const el = content.current
+    if (!el) return
+    const measure = () => setHeight((prev) => (prev === el.offsetHeight ? prev : el.offsetHeight))
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [mounted])
+
+  // After the first height has been painted, and not before: a passive effect
+  // runs after paint, which is exactly the beat that has to pass.
+  useEffect(() => {
+    if (mounted && height !== undefined) setMorph(true)
+  }, [mounted, height])
+
+  return { content, height, morph }
+}
+
 export function Sheet({
   open,
   onClose,
@@ -520,6 +575,10 @@ export function Sheet({
   const inset = useViewportInset()
   const phase = useSheetPhase(open)
   const shown = phase !== 'closed'
+  // `shown`, not `open`: the sheet renders nothing until its phase has caught
+  // up, so on the render `open` first becomes true there is no content node to
+  // measure — and the effect would never run again to find one.
+  const body = useMorphHeight(shown)
   useEffect(watchTaps, [])
 
   /**
@@ -633,13 +692,18 @@ export function Sheet({
               <X size={16} />
             </button>
           </div>
+          {/* The scroller carries the animated height; the padding moved inside
+              it so what is measured is the whole of what has to fit. */}
           <div
-            className={cx(
-              'overflow-y-auto px-5 md:px-4',
-              view.footer ? 'pb-3' : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]',
-            )}
+            className={cx('overflow-y-auto', body.morph && 'morph-height')}
+            style={{ height: body.height }}
           >
-            {view.children}
+            <div
+              ref={body.content}
+              className={cx('px-5 md:px-4', view.footer ? 'pb-3' : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]')}
+            >
+              {view.children}
+            </div>
           </div>
           {view.footer && (
             // Real bottom padding (not just the safe-area inset, which is 0 on

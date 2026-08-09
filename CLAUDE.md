@@ -336,6 +336,21 @@ the single place a level comes from.
   setEditing(null)}`), and without the freeze the sheet would flip to its "new
   item" form on the way out. A sheet keyed on what it is editing
   (`key={editing?.id ?? 'closed'}`) remounts instead, and so has no exit at all.
+- **The same delay makes `open` the wrong thing to measure a sheet against.**
+  `useMorphHeight` animates the body between the shapes its contents take (the
+  Expense/Income toggle, a prompt appearing under a category), and it keys off
+  `shown` — on the render where `open` first turns true the phase has not caught
+  up, `Sheet` still returns `null`, and a layout effect fires against a content
+  node that does not exist yet and is never scheduled to look again. Its "don't
+  animate the first measurement" flag is a passive effect rather than a
+  `requestAnimationFrame` for the reason `BottomTabs` gives: a sheet opened while
+  the tab is backgrounded would otherwise never switch its transition on.
+- **A row tint cannot reach a sticky column.** `table.pinned` paints an opaque
+  fill of its own, so `bg-accent/5` on the `<tr>` stops dead at the first cell.
+  `.tint-transfer` in `index.css` is plain unlayered CSS mixing the tint into
+  `--surface` — opaque, so it survives being scrolled under, and unlayered, so it
+  beats the `bg-surface` utility whatever the source order — and it goes on the
+  row *and* on the pinned cell.
 - **`bookTotals` selects rows by ACCOUNT, and `paid-for-household` is the one
   exception.** Selecting by account is what stops a contribution being counted
   into both books; that flow genuinely belongs to two at once, so it is admitted
