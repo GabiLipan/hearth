@@ -28,6 +28,7 @@ import {
   TrendWidget,
   BillsWidget,
   RecentWidget,
+  ReimbursementWidget,
   type HomeData,
 } from '../components/widgets'
 
@@ -46,6 +47,7 @@ const WIDGETS: WidgetDef[] = [
   { id: 'donut', label: 'Where it went', component: DonutWidget },
   { id: 'trend', label: 'Spending trend', component: TrendWidget },
   { id: 'accounts', label: 'Accounts', component: AccountsWidget },
+  { id: 'owed', label: 'Owed to you', component: ReimbursementWidget },
   { id: 'recent', label: 'Recent activity', component: RecentWidget },
 ]
 
@@ -176,6 +178,9 @@ export default function Dashboard() {
   const scopedTxns = (txns ?? []).filter((t) => ids.has(t.accountId))
   const data: HomeData = {
     txns: scopedTxns,
+    // Unscoped, for the one widget that straddles two books. See HomeData.
+    allTxns: txns ?? [],
+    allAccounts: accounts,
     categories,
     // Household budgets belong to the household book, personal ones to mine.
     // Under Everything, show the lot rather than an arbitrary half.

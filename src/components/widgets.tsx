@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, ChevronLeft, Eye } from 'lucide-react'
+import { ArrowLeftRight, ArrowRight, ChevronLeft, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
-import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate } from '../lib/dates'
+import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate, todayISO } from '../lib/dates'
 import { monthlySpendByCategory, monthsEndingAt, OTHER_SLICE_ID } from '../lib/stats'
 import {
+  accountsInBook,
   bookSeries,
   bookSlices,
   bookTotals,
@@ -15,16 +16,33 @@ import {
   type BookMap,
   type Flow,
 } from '../lib/books'
+import { settlement } from '../lib/reimbursements'
 import { typicalRange } from '../lib/budgetHistory'
-import { balanceOf, canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { balanceOf, canAddTransactions, canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { transfer } from '../lib/goals'
+import { parseAmount, currencySymbol } from '../lib/money'
+import { syncNow } from '../lib/session'
 import { useApp } from '../state/AppContext'
-import { Card, CategoryDot, Progress, cx } from './ui'
+import { Button, Card, CategoryDot, Field, Progress, Select, Sheet, TextInput, cx } from './ui'
 import { BudgetBullet } from './BudgetBullet'
 import { CategoryIcon } from './CategoryIcon'
 import { CategoryDonut, SpendBars } from './charts'
 
 export interface HomeData {
   txns: Transaction[]
+  /**
+   * Every transaction this device can see, NOT narrowed to the chosen book.
+   *
+   * Almost nothing should want this — `txns` is scoped for a reason, and a
+   * widget adding up rows from outside the book on screen is the double-count
+   * the book model exists to prevent. `ReimbursementWidget` wants it because
+   * what it measures genuinely straddles two books: what I paid out of mine and
+   * what the household has paid back into it. Narrowing to either one would
+   * show half the sum.
+   */
+  allTxns: Transaction[]
+  /** Likewise unscoped: paying yourself back moves money between two books. */
+  allAccounts: Account[]
   categories: Category[]
   /** This month's budgets only — see Dashboard. Widgets must not assume history. */
   budgets: Budget[]
@@ -362,6 +380,221 @@ export function BillsWidget({ data }: { data: HomeData }) {
 }
 
 /* ---------- Recent activity ---------- */
+/* ---------- What the household owes me ---------- */
+
+/**
+ * The other half of migration 13.
+ *
+ * Ticking "paid for the household" on a row already puts the spending in the
+ * right book. This is the consequence nobody was told about: the money is still
+ * mine, the household still has it, and until now nothing in the app said so.
+ *
+ * Deliberately one-sided, and worded that way. My partner's flagged rows are in
+ * accounts I am not on, so this can never be a ledger of the two of us without
+ * showing each of us the other's private spending — see `reimbursements.ts`.
+ * "You" throughout; never "we".
+ *
+ * Hidden entirely until the mechanism has been used, so a household that never
+ * pays for anything out of its own pockets never sees it.
+ */
+export function ReimbursementWidget({ data }: { data: HomeData }) {
+  const { money } = useApp()
+  const [paying, setPaying] = useState(false)
+  const s = useMemo(
+    () => settlement(data.allTxns, data.flows, data.books),
+    [data.allTxns, data.flows, data.books],
+  )
+
+  if (s.paidMinor === 0) return null
+
+  const owed = s.outstandingMinor
+  return (
+    <Card className="p-4 md:p-3">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <h3 className="font-semibold md:text-sm">Owed to you</h3>
+        <Link to="/activity" className="flex items-center gap-1 text-sm font-medium text-accent">
+          Activity <ArrowRight size={13} />
+        </Link>
+      </div>
+
+      <p className={cx('text-2xl font-bold tracking-tight tabular', owed > 0 && 'text-good-text')}>
+        {money(Math.abs(owed))}
+      </p>
+      <p className="mt-0.5 text-xs text-ink-3">
+        {owed > 0
+          ? `You have paid ${money(s.paidMinor)} for the household and had ${money(s.returnedMinor)} back.`
+          : owed === 0
+            ? `Square — all ${money(s.paidMinor)} of it has come back.`
+            : /* Reported rather than hidden: it usually means a withdrawal from
+                 the joint account was something other than paying you back. */
+              'The household has paid you back more than you put in.'}
+      </p>
+
+      {s.items.length > 0 && (
+        <ul className="mt-2 divide-y divide-hairline">
+          {s.items.slice(0, 4).map(({ txn, owedMinor }) => (
+            <li key={txn.id} className="flex items-center gap-2 py-2 md:py-1">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{txn.payee}</p>
+                <p className="text-xs text-ink-3">{fmtDay(txn.date)}</p>
+              </div>
+              <span className="text-sm font-semibold tabular">{money(owedMinor)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {s.items.length > 4 && (
+        <p className="mt-1 text-xs text-ink-3">and {s.items.length - 4} more</p>
+      )}
+
+      {owed > 0 && (
+        <Button size="sm" variant="subtle" className="mt-3 w-full" onClick={() => setPaying(true)}>
+          <ArrowLeftRight size={14} /> Pay it back
+        </Button>
+      )}
+
+      {/* Nothing is "marked settled" — the repayment is an ordinary transfer,
+          and the figure above goes to zero because the sum changed. */}
+      <PayBack
+        open={paying}
+        amountMinor={Math.max(owed, 0)}
+        data={data}
+        onClose={() => setPaying(false)}
+      />
+    </Card>
+  )
+}
+
+/**
+ * Moving the money back: joint account → one of mine.
+ *
+ * The same shape as funding a goal, and the same reason for being online-only —
+ * `create_transfer` writes two rows and they must land together or not at all.
+ * Prefilled with the whole outstanding amount, because paying back all of it is
+ * what usually happens; it is an ordinary editable field for when it is not.
+ */
+function PayBack({
+  open,
+  amountMinor,
+  data,
+  onClose,
+}: {
+  open: boolean
+  amountMinor: number
+  data: HomeData
+  onClose: () => void
+}) {
+  const { currency, money } = useApp()
+  const household = accountsInBook('household', data.books)
+  const mine = accountsInBook('mine', data.books)
+
+  const payable = data.allAccounts.filter(
+    (a) => household.has(a.id) && canAddTransactions(levelOn(a.id, data.levels)),
+  )
+  const receivable = data.allAccounts.filter(
+    (a) => mine.has(a.id) && canAddTransactions(levelOn(a.id, data.levels)),
+  )
+
+  const [fromId, setFromId] = useState('')
+  const [toId, setToId] = useState('')
+  const [amount, setAmount] = useState('')
+  const [date, setDate] = useState(todayISO())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+
+  // Reset on each opening rather than on mount: the sheet outlives `open` by
+  // its exit animation, so it is still rendered when the next open happens.
+  useEffect(() => {
+    if (!open) return
+    setFromId(payable.length === 1 ? payable[0].id : '')
+    setToId(receivable.length === 1 ? receivable[0].id : '')
+    setAmount(amountMinor ? (amountMinor / 100).toFixed(2) : '')
+    setDate(todayISO())
+    setError(undefined)
+    // `open` alone, on purpose. The account lists are rebuilt every render, so
+    // depending on them would wipe what the user has just chosen; `amountMinor`
+    // changes the moment a repayment syncs, which would clear the field
+    // mid-edit.
+  }, [open])
+
+  const minor = parseAmount(amount)
+  const canSave = !!fromId && !!toId && fromId !== toId && minor !== null && minor > 0
+
+  async function save() {
+    if (!canSave) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      await transfer({ fromAccountId: fromId, toAccountId: toId, amountMinor: minor!, date })
+      await syncNow()
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not move the money')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Pay it back"
+      footer={
+        <Button size="lg" className="w-full" disabled={!canSave || busy} onClick={save}>
+          {busy ? 'Moving…' : 'Move money'}
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        {(payable.length === 0 || receivable.length === 0) && (
+          <p className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-2">
+            This needs a household account you can post to and one of your own to receive it.
+          </p>
+        )}
+        <Field label="From">
+          <Select value={fromId} onChange={(e) => setFromId(e.target.value)}>
+            <option value="" disabled>
+              Choose an account…
+            </option>
+            {payable.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="To">
+          <Select value={toId} onChange={(e) => setToId(e.target.value)}>
+            <option value="" disabled>
+              Choose an account…
+            </option>
+            {receivable.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={`Amount (${currencySymbol(currency)})`}>
+            <TextInput value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
+          </Field>
+          <Field label="Date">
+            <TextInput type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+        </div>
+        {minor != null && minor > 0 && (
+          <p className="text-sm text-ink-3">
+            Counts as a withdrawal from the household and takes {money(minor)} off what you are owed.
+          </p>
+        )}
+        {error && <p className="text-sm text-critical-text">{error}</p>}
+      </div>
+    </Sheet>
+  )
+}
+
 export function RecentWidget({ data }: { data: HomeData }) {
   const { money } = useApp()
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
