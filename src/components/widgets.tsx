@@ -22,6 +22,7 @@ import { balanceOf, canAddTransactions, canSeeTransactionsAt, levelOn } from '..
 import { transfer } from '../lib/goals'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { syncNow } from '../lib/session'
+import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { Button, Card, CategoryDot, Field, Progress, Select, Sheet, TextInput, cx } from './ui'
 import { BudgetBullet } from './BudgetBullet'
@@ -409,59 +410,67 @@ export function ReimbursementWidget({ data }: { data: HomeData }) {
 
   const owed = s.outstandingMinor
   return (
-    <Card className="p-4 md:p-3">
-      <div className="mb-1 flex items-baseline justify-between gap-2">
-        <h3 className="font-semibold md:text-sm">Owed to you</h3>
-        <Link to="/activity" className="flex items-center gap-1 text-sm font-medium text-accent">
-          Activity <ArrowRight size={13} />
-        </Link>
-      </div>
+    <>
+      <Card className="p-4 md:p-3">
+        <div className="mb-1 flex items-baseline justify-between gap-2">
+          <h3 className="font-semibold md:text-sm">Owed to you</h3>
+          <Link to="/activity" className="flex items-center gap-1 text-sm font-medium text-accent">
+            Activity <ArrowRight size={13} />
+          </Link>
+        </div>
 
-      <p className={cx('text-2xl font-bold tracking-tight tabular', owed > 0 && 'text-good-text')}>
-        {money(Math.abs(owed))}
-      </p>
-      <p className="mt-0.5 text-xs text-ink-3">
-        {owed > 0
-          ? `You have paid ${money(s.paidMinor)} for the household and had ${money(s.returnedMinor)} back.`
-          : owed === 0
-            ? `Square — all ${money(s.paidMinor)} of it has come back.`
-            : /* Reported rather than hidden: it usually means a withdrawal from
-                 the joint account was something other than paying you back. */
-              'The household has paid you back more than you put in.'}
-      </p>
+        <p className={cx('text-2xl font-bold tracking-tight tabular', owed > 0 && 'text-good-text')}>
+          {money(Math.abs(owed))}
+        </p>
+        <p className="mt-0.5 text-xs text-ink-3">
+          {owed > 0
+            ? `You have paid ${money(s.paidMinor)} for the household and had ${money(s.returnedMinor)} back.`
+            : owed === 0
+              ? `Square — all ${money(s.paidMinor)} of it has come back.`
+              : /* Reported rather than hidden: it usually means a withdrawal from
+                   the joint account was something other than paying you back. */
+                'The household has paid you back more than you put in.'}
+        </p>
 
-      {s.items.length > 0 && (
-        <ul className="mt-2 divide-y divide-hairline">
-          {s.items.slice(0, 4).map(({ txn, owedMinor }) => (
-            <li key={txn.id} className="flex items-center gap-2 py-2 md:py-1">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{txn.payee}</p>
-                <p className="text-xs text-ink-3">{fmtDay(txn.date)}</p>
-              </div>
-              <span className="text-sm font-semibold tabular">{money(owedMinor)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {s.items.length > 4 && (
-        <p className="mt-1 text-xs text-ink-3">and {s.items.length - 4} more</p>
-      )}
+        {s.items.length > 0 && (
+          <ul className="mt-2 divide-y divide-hairline">
+            {s.items.slice(0, 4).map(({ txn, owedMinor }) => (
+              <li key={txn.id} className="flex items-center gap-2 py-2 md:py-1">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{txn.payee}</p>
+                  <p className="text-xs text-ink-3">{fmtDay(txn.date)}</p>
+                </div>
+                <span className="text-sm font-semibold tabular">{money(owedMinor)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {s.items.length > 4 && (
+          <p className="mt-1 text-xs text-ink-3">and {s.items.length - 4} more</p>
+        )}
 
-      {owed > 0 && (
-        <Button size="sm" variant="subtle" className="mt-3 w-full" onClick={() => setPaying(true)}>
-          <ArrowLeftRight size={14} /> Pay it back
-        </Button>
-      )}
+        {owed > 0 && (
+          <Button size="sm" variant="subtle" className="mt-3 w-full" onClick={() => setPaying(true)}>
+            <ArrowLeftRight size={14} /> Pay it back
+          </Button>
+        )}
+      </Card>
 
-      {/* Nothing is "marked settled" — the repayment is an ordinary transfer,
-          and the figure above goes to zero because the sum changed. */}
+      {/* Outside the Card on purpose, the way Goals renders FundGoal. A Sheet
+          is `position: fixed`, and burying one inside a widget puts it under
+          every ancestor that could ever become a containing block for it — a
+          transform on a card, the clip on `main`. Nothing does today, and
+          nothing should have to keep not doing it.
+
+          Nothing is "marked settled" here: the repayment is an ordinary
+          transfer, and the figure above goes to zero because the sum changed. */}
       <PayBack
         open={paying}
         amountMinor={Math.max(owed, 0)}
         data={data}
         onClose={() => setPaying(false)}
       />
-    </Card>
+    </>
   )
 }
 
@@ -485,6 +494,7 @@ function PayBack({
   onClose: () => void
 }) {
   const { currency, money } = useApp()
+  const { online } = useSyncState()
   const household = accountsInBook('household', data.books)
   const mine = accountsInBook('mine', data.books)
 
@@ -518,7 +528,10 @@ function PayBack({
   }, [open])
 
   const minor = parseAmount(amount)
-  const canSave = !!fromId && !!toId && fromId !== toId && minor !== null && minor > 0
+  // `online` is part of it, as in Goals: `create_transfer` writes two legs and
+  // they must land together or not at all, so there is nothing sensible for the
+  // outbox to queue. Said up front rather than as a failure after the press.
+  const canSave = !!fromId && !!toId && fromId !== toId && minor !== null && minor > 0 && online
 
   async function save() {
     if (!canSave) return
@@ -550,6 +563,12 @@ function PayBack({
         {(payable.length === 0 || receivable.length === 0) && (
           <p className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-2">
             This needs a household account you can post to and one of your own to receive it.
+          </p>
+        )}
+        {!online && (
+          <p className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-2">
+            Moving money needs a connection — both halves have to be recorded together, so this one
+            can't be queued.
           </p>
         )}
         <Field label="From">
