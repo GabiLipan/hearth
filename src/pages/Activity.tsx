@@ -2,11 +2,24 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type R
 import { useSearchParams } from 'react-router-dom'
 import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, HelpCircle, Layers } from 'lucide-react'
 import type { Transaction } from '../lib/db'
-import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useMemberMap, useMyLevels } from '../lib/cache'
-import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
+import { canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn } from '../lib/accounts'
+
+import { update } from '../lib/data'
+import {
+  AccountEditor,
+  AmountEditor,
+  CategoryEditor,
+  DateEditor,
+  EditableCell,
+  FIELD_ORDER,
+  TextEditor,
+  useDesktop,
+  type CellRef,
+} from '../components/InlineCell'
 import { accountsInBook, BOOK_LABEL, type BookId } from '../lib/books'
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
-import { fullName, isTopLevel } from '../lib/categories'
+import { fullName, isTopLevel, usableOn } from '../lib/categories'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
@@ -56,7 +69,15 @@ export default function Activity() {
   const [limit, setLimit] = useState(PAGE)
   const [editing, setEditing] = useState<Transaction | undefined>()
   const [importOpen, setImportOpen] = useState(false)
+  /**
+   * The one cell being edited in place, on desktop. Null everywhere else — an
+   * iPad is wide enough for the table and has no cursor, so it keeps the sheet.
+   */
+  const [cell, setCell] = useState<CellRef | null>(null)
+  const desktop = useDesktop()
 
+  const { userId } = useSyncState()
+  const grantsByAccount = useGrantsByAccount()
   const categories = useCategories()
   const catMap = useCategoryMap()
   const accMap = useAccountMap()
@@ -220,6 +241,42 @@ export default function Activity() {
     }
     return out
   }, [visible])
+
+  /**
+   * Save one cell, and decide where the cursor goes.
+   *
+   * `patch` null means nothing changed — a cell tabbed through, or an amount
+   * that did not parse — and must still move on, or Tab would stick on the
+   * first field a typist skipped.
+   *
+   * Writes go through `data.ts` like every other change, so this inherits the
+   * outbox and its dead letters. Which matters here more than usual: inline
+   * editing makes it very easy to change fifty rows quickly, and at
+   * `contribute` you may only change what you added — hence `canEditCell`
+   * below, which greys the cell out rather than letting the write fail
+   * silently a minute later.
+   */
+  const commitCell = (t: Transaction, patch: Record<string, unknown> | null, then: 'close' | 'next' | 'prev' = 'close') => {
+    if (patch) void update('transactions', t.id, patch)
+    if (then === 'close') return setCell(null)
+    const i = FIELD_ORDER.indexOf(cell?.field ?? 'payee')
+    const next = FIELD_ORDER[i + (then === 'next' ? 1 : -1)]
+    setCell(next ? { id: t.id, field: next } : null)
+  }
+
+  /**
+   * Where a row could be moved to. `contribute` and above, matching
+   * `transactions_insert` — offering an account the server would refuse turns a
+   * pick into a dead letter a minute later.
+   */
+  const postable = useMemo(
+    () => accounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
+    [accounts, levels],
+  )
+
+  /** Mirrors `transactions_update`, including the `created_by` half. */
+  const canEditCell = (t: Transaction) =>
+    desktop && canEditTransaction(t, levelOn(t.accountId, levels), userId)
 
   return (
     <div>
@@ -414,7 +471,7 @@ export default function Activity() {
               The month heading is a row of its own so the table stays one
               table — a table per month would give each its own column widths. */}
           <Card className="hidden overflow-hidden md:block">
-            <ScrollTable minWidth={840}>
+            <ScrollTable minWidth={880}>
               <thead>
                 <tr className={table.head}>
                   <th className={cx(table.th, 'w-28 pl-3', table.pinned)}>Date</th>
@@ -422,13 +479,19 @@ export default function Activity() {
                   <th className={cx(table.th, 'w-52')}>Category</th>
                   <th className={cx(table.th, 'w-40')}>Account</th>
                   <th className={cx(table.th, 'w-32 pr-3 text-right')}>Amount</th>
+                  {/* Deliberately unlabelled and nearly nothing wide. Inline
+                      editing takes over every other cell's click, so without a
+                      way through, the sheet — and with it deletion, notes,
+                      receipts and transfer linking — becomes unreachable on
+                      the machine where it is easiest to need. */}
+                  <th className={cx(table.th, 'w-9')} aria-label="Open" />
                 </tr>
               </thead>
               <tbody>
                 {rows.map(({ month, items }) => (
                   <Fragment key={month}>
                     <tr>
-                      <td colSpan={5} className="border-b border-hairline bg-surface-2/40 px-3 py-1.5">
+                      <td colSpan={6} className="border-b border-hairline bg-surface-2/40 px-3 py-1.5">
                         <MonthHeading month={month} stats={months.get(month)} money={money} dense />
                       </td>
                     </tr>
@@ -436,6 +499,8 @@ export default function Activity() {
                       const cat = t.categoryId ? catMap.get(t.categoryId) : undefined
                       const parent = cat?.parentId ? catMap.get(cat.parentId) : undefined
                       const acc = accMap.get(t.accountId)
+                      const editable = canEditCell(t)
+                      const open = cell?.id === t.id ? cell : null
                       return (
                         <tr
                           key={t.id}
@@ -445,21 +510,55 @@ export default function Activity() {
                           {/* The list spans every month, so the year has to be
                               on the row — the heading is off screen by the time
                               you are reading the middle of a long month. */}
-                          <td className={cx(table.cell, 'pl-3 whitespace-nowrap text-ink-3 tabular', table.pinned)}>
+                          <EditableCell
+                            className={cx(table.cell, 'pl-3 whitespace-nowrap text-ink-3 tabular', table.pinned)}
+                            editing={open?.field === 'date'}
+                            editable={editable}
+                            onStart={() => setCell({ id: t.id, field: 'date' })}
+                            onCancel={() => setCell(null)}
+                            editor={<DateEditor value={t.date} commit={(p, then) => commitCell(t, p, then)} />}
+                          >
                             {fmtFullDate(t.date)}
-                          </td>
+                          </EditableCell>
                           {/* Note rides on the same line as the payee — a second
                               line would make row heights uneven and harder to scan. */}
-                          <td className={cx(table.cell, 'max-w-0 truncate pr-3')}>
+                          <EditableCell
+                            className={cx(table.cell, 'max-w-0 truncate pr-3')}
+                            editing={open?.field === 'payee'}
+                            editable={editable}
+                            onStart={() => setCell({ id: t.id, field: 'payee' })}
+                            onCancel={() => setCell(null)}
+                            editor={
+                              <TextEditor
+                                value={t.payee}
+                                commit={(p, then) => commitCell(t, p, then)}
+                                parse={(raw) => (raw.trim() ? { payee: raw.trim() } : null)}
+                              />
+                            }
+                          >
                             {(looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
                             <span className="font-medium">{t.payee}</span>
                             {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
-                          </td>
+                          </EditableCell>
                           {/* Both halves, with the parent dimmed: a row filed
                               under "Supermarket" is unreadable without knowing
                               it is groceries, and one filed under "Groceries"
                               exactly should not look like the same answer. */}
-                          <td className={cx(table.cell, 'pr-3')}>
+                          <EditableCell
+                            className={cx(table.cell, 'pr-3')}
+                            editing={open?.field === 'category'}
+                            editable={editable}
+                            onStart={() => setCell({ id: t.id, field: 'category' })}
+                            onCancel={() => setCell(null)}
+                            editor={
+                              <CategoryEditor
+                                categories={usableOn(categories, grantsByAccount.get(t.accountId) ?? [], userId)}
+                                byId={catMap}
+                                value={t.categoryId}
+                                commit={(p, then) => commitCell(t, p, then)}
+                              />
+                            }
+                          >
                             <span className="flex items-center gap-1.5 truncate">
                               <span
                                 className="shrink-0"
@@ -472,26 +571,59 @@ export default function Activity() {
                                 <span className="text-ink-2">{cat?.name ?? 'Uncategorised'}</span>
                               </span>
                             </span>
-                          </td>
+                          </EditableCell>
                           {/* A badge, not grey text. This is the column you
                               scan to answer "which card was that on", and it
                               was the only one with nothing to catch the eye.
                               A rounded square where a category is a circle, so
                               the two read as different axes at a glance. */}
-                          <td className={cx(table.cell, 'pr-3 text-ink-2')}>
+                          <EditableCell
+                            className={cx(table.cell, 'pr-3 text-ink-2')}
+                            editing={open?.field === 'account'}
+                            editable={editable}
+                            onStart={() => setCell({ id: t.id, field: 'account' })}
+                            onCancel={() => setCell(null)}
+                            editor={
+                              <AccountEditor
+                                accounts={postable}
+                                value={t.accountId}
+                                commit={(p, then) => commitCell(t, p, then)}
+                              />
+                            }
+                          >
                             <span className="flex items-center gap-2 truncate">
                               <AccountDot account={acc} size={22} />
                               <span className="truncate">{acc?.name ?? '—'}</span>
                             </span>
-                          </td>
-                          <td
+                          </EditableCell>
+                          <EditableCell
                             className={cx(
                               table.cell,
                               'pr-3 text-right font-semibold tabular',
                               t.amountMinor > 0 && 'text-good-text',
                             )}
+                            editing={open?.field === 'amount'}
+                            editable={editable}
+                            onStart={() => setCell({ id: t.id, field: 'amount' })}
+                            onCancel={() => setCell(null)}
+                            editor={<AmountEditor amountMinor={t.amountMinor} commit={(p, then) => commitCell(t, p, then)} />}
                           >
                             {money(t.amountMinor, { sign: t.amountMinor > 0 })}
+                          </EditableCell>
+                          <td className={cx(table.cell, 'pr-2 text-right')}>
+                            <button
+                              type="button"
+                              aria-label={`Open ${t.payee}`}
+                              title="Open the full form"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setCell(null)
+                                setEditing(t)
+                              }}
+                              className="rounded-md p-1 text-ink-3 opacity-0 transition hover:bg-surface-2 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                            >
+                              <ChevronRight size={15} />
+                            </button>
                           </td>
                         </tr>
                       )

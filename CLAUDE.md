@@ -373,6 +373,19 @@ the single place a level comes from.
   nothing: quietly moving money out of "spending" on the strength of the word
   "TFR" would make the figures wrong in a way nobody could see, which is worse
   than being visibly approximate.
+- **Inline editing is gated on `useDesktop()`, not a CSS variant.** What
+  changes is behaviour, so it has to be `matchMedia` — over exactly the
+  `desktop:` query, wide AND `pointer: fine`. The second half is the point: an
+  iPad is wide enough to get the table and has no cursor, so it keeps the sheet.
+  Two consequences in `Activity.tsx`: every editable cell must
+  `stopPropagation`, or a click edits inline *and* opens the sheet over it; and
+  because that leaves no way through, the table carries a narrow hover-revealed
+  column whose only job is to open the full form — without it, deletion, notes,
+  receipts and transfer linking become unreachable on the machine where they are
+  easiest to want. Editors are `absolute` over a `relative` cell rather than
+  replacing its content: an input in the flow changes the row height the moment
+  its line-height differs by a fraction, and a table that shifts as you mouse
+  across it is worse than one you cannot edit.
 - **An icon key is permanent.** `icon: 'cart'` lives on rows in the database, so
   a key in `CategoryIcon.tsx` may be ADDED freely and must never be renamed or
   removed — either turns every category using it into the fallback tag, quietly,
