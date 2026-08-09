@@ -13,9 +13,66 @@ import {
   Line,
   ReferenceLine,
 } from 'recharts'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useChartColors } from '../hooks/useChartColors'
 import { useApp } from '../state/AppContext'
+import { distinctShades } from '../lib/shade'
 import { OTHER_SLICE_ID, type CategorySlice, type MonthPoint } from '../lib/stats'
+
+/* ---------- Drawing a ring in ---------- */
+
+const reducedMotion = () =>
+  typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/**
+ * A 0 → 1 sweep that restarts whenever `key` changes.
+ *
+ * The donut used to be drawn outright, with `isAnimationActive={false}` and a
+ * note explaining that Recharts 3.x leaves a PADDED pie frozen at the first
+ * frame of its entrance animation — so the ring never appeared at all. Turning
+ * the flag back on would put that bug back. This drives the sweep from outside
+ * Recharts instead: the pie is always static as far as it is concerned, and
+ * what changes each frame is the angle it is asked to draw to.
+ *
+ * Two things it has to survive, both of which this codebase has been caught by
+ * before:
+ *
+ *   - A BACKGROUNDED TAB never runs the rAF callback, so nothing that has to be
+ *     TRUE may live in one. The timeout is not a tidy-up, it is the guarantee:
+ *     background timers are throttled but they do fire, so the ring always ends
+ *     up complete even if not one frame was ever painted.
+ *   - Reduced motion means no sweep at all, decided before the first paint
+ *     rather than by cancelling one.
+ */
+function useSweep(key: string, duration = 620): number {
+  const [t, setT] = useState(() => (reducedMotion() ? 1 : 0))
+  const raf = useRef(0)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    if (reducedMotion()) {
+      setT(1)
+      return
+    }
+    setT(0)
+    const started = performance.now()
+    const frame = (now: number) => {
+      const p = Math.min(1, (now - started) / duration)
+      // Ease out: a ring that decelerates into place reads as settling rather
+      // than as stopping.
+      setT(1 - (1 - p) ** 3)
+      if (p < 1) raf.current = requestAnimationFrame(frame)
+    }
+    raf.current = requestAnimationFrame(frame)
+    timer.current = setTimeout(() => setT(1), duration + 120)
+    return () => {
+      cancelAnimationFrame(raf.current)
+      clearTimeout(timer.current)
+    }
+  }, [key, duration])
+
+  return t
+}
 
 /* ---------- Shared tooltip ---------- */
 interface TipRow {
@@ -211,7 +268,42 @@ export function CategoryDonut({
   const c = useChartColors()
   const { money } = useApp()
   const otherColor = c.ink3
-  const colorOf = (s: CategorySlice) => (s.categoryId === OTHER_SLICE_ID ? otherColor : c.slot(s.slot))
+
+  /**
+   * One colour per slice, with anything that collided pulled apart.
+   *
+   * Twelve slots and no limit on categories means two slices of identical
+   * colour is the ordinary case, not the edge one — and a subcategory inherits
+   * its parent's slot deliberately, so drilling in is where it bites hardest.
+   * `distinctShades` keeps the FIRST user of a slot exactly as the palette
+   * defined it, and the slices arrive here biggest first, so the arc the eye
+   * goes to is never the one that moved.
+   */
+  const colours = useMemo(
+    () =>
+      distinctShades(slices, (s) =>
+        s.categoryId === OTHER_SLICE_ID ? otherColor : c.slot(s.slot),
+      ),
+    [slices, c, otherColor],
+  )
+  const indexOf = useMemo(
+    () => new Map(slices.map((s, i) => [s.categoryId, i])),
+    [slices],
+  )
+  const colorOf = (s: CategorySlice) => colours[indexOf.get(s.categoryId) ?? 0] ?? otherColor
+
+  /**
+   * Restarts on mount — so the ring draws itself in whenever the tab is opened
+   * — and whenever the slices change, which is what makes drilling into a
+   * category animate rather than swap.
+   */
+  const sweep = useSweep(slices.map((s) => s.categoryId).join('|'))
+  // Clockwise from twelve o'clock: the conventional reading position, and with
+  // the slices sorted biggest first it puts the largest arc where the eye
+  // starts. `paddingAngle` scales with the sweep, or the gaps would be wider
+  // than the arcs for the first few frames.
+  const startAngle = 90
+  const endAngle = 90 - 360 * sweep
   return (
     /* A CONTAINER query, not `sm:`. This chart is a full-width panel on
        Reports and a widget in a 2-to-4 column grid on the home page, so the
@@ -234,12 +326,16 @@ export function CategoryDonut({
                 nameKey="name"
                 innerRadius="68%"
                 outerRadius="96%"
-                paddingAngle={2}
+                startAngle={startAngle}
+                endAngle={endAngle}
+                paddingAngle={2 * sweep}
                 strokeWidth={2}
                 stroke={c.surface}
-                // Recharts 3.x leaves a padded pie frozen at the first frame of
-                // its entrance animation, so the ring never appears. The donut is
-                // a static summary — draw it outright.
+                // Still off, and still for the reason it always was: Recharts
+                // 3.x leaves a PADDED pie frozen at the first frame of its own
+                // entrance animation, so the ring never appears. `useSweep`
+                // drives the angles from outside instead, which this flag does
+                // not interfere with.
                 isAnimationActive={false}
               >
                 {slices.map((s) => (

@@ -95,7 +95,8 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 (suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
-`reimbursements.ts` (what the household owes you),
+`reimbursements.ts` (what the household owes you), `shade.ts` (telling apart
+two categories the palette gave one colour),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
 allow-lists), `session.ts` (auth, household, sync orchestration).
@@ -371,6 +372,23 @@ the single place a level comes from.
   nothing: quietly moving money out of "spending" on the strength of the word
   "TFR" would make the figures wrong in a way nobody could see, which is worse
   than being visibly approximate.
+- **Two categories of the same colour is the ORDINARY case.** Twelve slots, no
+  limit on categories, and a subcategory inherits its parent's slot on purpose —
+  so a donut routinely holds two identical arcs, and drilling in is where it
+  bites hardest. `lib/shade.ts` pulls them apart in lightness only; moving the
+  hue would make a green look like some other category's colour, which is worse
+  than two greens. The FIRST user of a slot always keeps the palette colour
+  exactly, and the shift is per-chart, never stored. Its ladder deliberately
+  never leaves the legible range rather than clamping into it: a clamp hands two
+  shades the same lightness the moment the fan reaches an edge, which is the
+  collision the file exists to remove.
+- **The donut animates from OUTSIDE Recharts.** `isAnimationActive={false}`
+  stays — Recharts 3.x leaves a *padded* pie frozen at frame one of its own
+  entrance animation, so turning it on makes the ring never appear.
+  `useSweep` drives `startAngle`/`endAngle` (and scales `paddingAngle`, or the
+  gaps are wider than the arcs for the first few frames). Its `setTimeout` is
+  not a tidy-up but the guarantee: a backgrounded tab never runs the rAF
+  callback, so the ring would otherwise be stranded part-drawn.
 - **A route is learned, never stored.** `routes.ts` summarises the transfers
   you have already confirmed — three or more between the same two accounts, at
   a cadence it has a word for — and that summary is the only thing that can
