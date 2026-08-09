@@ -47,6 +47,15 @@ export interface Transaction {
    * a transfer crossing between books. See `classifyFlows`.
    */
   paidForHousehold?: boolean
+  /**
+   * Somebody who can see this row has asked whoever holds its other half to
+   * explain it. Server-owned — `request_explanation` and `clear_explanation`
+   * are the only writers — and meaningful only while the row is still unpaired:
+   * linking answers the question without clearing the mark, so every reader
+   * checks `transferId` first. See `lib/unexplained.ts`.
+   */
+  explainRequestedAt?: string
+  explainRequestedBy?: string
   date: string // yyyy-MM-dd (server column `occurred_on`)
   payee: string
   note?: string

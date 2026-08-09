@@ -4,22 +4,25 @@ The plan for reshaping Hearth around how we actually move money: salaries land i
 private accounts, most of each salary moves to the joint account, the household
 spends from there, and some personal spending stays behind.
 
-**How to read this.** **Decided** is the answers we have already given, kept
-because the reasoning behind a rule outlives the rule. **Waiting on code** is
-the work, grouped by what it needs before it can start. What has shipped is not
-here at all: it is in the git log, where it cannot rot, and a plan made mostly
-of finished work stops being read.
+**How to read this.** The work is finished, so what is left is **Decided** — the
+answers we gave, kept because the reasoning behind a rule outlives the rule.
+Anything new goes back under a "Waiting on code" heading, grouped by what it
+needs before it can start. What has shipped is not itemised here: it is in the
+git log, where it cannot rot, and a plan made mostly of finished work stops
+being read.
 
-Right now: **nothing waiting on us**, and **one piece of work left**, which
-needs a migration of its own.
+Right now: **nothing waiting on us**, and **nothing left on this plan**. What
+comes next is whatever we find by using it.
 
-**One migration needs applying by hand**, like the others:
-`supabase/15-purge-account.sql`. Until then the bin in Settings only fills up —
-a deleted account can be restored but never got rid of, and "Delete for good"
-will fail with "could not find the function".
+**Two migrations need applying by hand**, like the others:
+
+- `supabase/15-purge-account.sql` — until then the bin in Settings only fills
+  up, and "Delete for good" fails with "could not find the function".
+- `supabase/16-explain-requests.sql` — until then "Ask about this" does the
+  same.
 
 Run `supabase/00-which-migrations-applied.sql` in the SQL editor when unsure
-what a project has had; it now covers 11 through 15 as well.
+what a project has had; it now covers 11 through 16 as well.
 
 ---
 
@@ -75,7 +78,18 @@ same "counted once on each side" rule that already governs a transfer crossing
 between books.
 
 **Reimbursements between us use the same mechanism**, and are built with it
-rather than after it.
+rather than after it. Built — the figure is a view over what has been paid for
+and not yet returned, and nothing is ever "marked settled": paying somebody back
+is an ordinary transfer, so the figure falls to zero because the sum changed.
+
+**Asking about a row needs less than changing it.** Migration 16. The person who
+can see a puzzling arrival in the joint account is, by definition, the one who
+cannot resolve it — the far leg is in an account they are not on. So
+`request_explanation` takes `view`, below the bar for editing the row, and it is
+safe to be lower only because the row is one both people can already read.
+There is no "declined" state: a row that was linked reads as a transfer and one
+that was dismissed is unmarked and still unpaired, which is a distinction two
+people can draw without the database mediating it.
 
 **A deleted account can be destroyed, but only from the bin.** Built —
 migration 15. Deleting stays reversible and purging is a separate press on a
@@ -87,18 +101,6 @@ epoch is the only signal that survives a row ceasing to exist.
 
 **Multi-currency is out of scope for now.** Foreign amounts stay silently wrong;
 it is written down so nobody rediscovers it as a bug.
-
-# Waiting on code
-
-One item, and it needs a migration of its own.
-
-## Needs a migration of its own
-
-**Tell the person who CAN see the far leg.** `lib/unexplained.ts` names the
-blind spot on my screen — money moved that only my partner can confirm. The
-other half is my device telling theirs "there is an arrival here waiting for
-you to link it", and a note that crosses between us needs somewhere shared to
-live.
 
 ---
 

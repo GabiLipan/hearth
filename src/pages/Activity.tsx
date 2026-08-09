@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, Layers } from 'lucide-react'
+import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, HelpCircle, Layers } from 'lucide-react'
 import type { Transaction } from '../lib/db'
-import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
+import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useMemberMap, useMyLevels } from '../lib/cache'
 import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
 import { accountsInBook, BOOK_LABEL, type BookId } from '../lib/books'
-import { looksLikeTransfer } from '../lib/unexplained'
+import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel } from '../lib/categories'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
@@ -15,6 +15,8 @@ import { BookSwitcher } from '../components/BookSwitcher'
 import { TransactionForm } from '../components/TransactionForm'
 import { ImportWizard } from '../components/ImportWizard'
 import { TransferReview } from '../components/TransferReview'
+import { nameOf } from '../components/PersonDot'
+import { useSyncState } from '../hooks/useSync'
 
 /**
  * Activity is one continuous history, newest first.
@@ -259,6 +261,11 @@ export default function Activity() {
           decide. It renders nothing at all when there is nothing to ask. */}
       <TransferReview />
 
+      {/* The other half of the same problem. TransferReview offers pairs this
+          device can see both sides of; this one carries the questions about
+          rows it cannot. */}
+      <AskedOfMe txns={txns ?? []} onOpen={setEditing} />
+
       {/* What a drill-through narrowed the list to, and the way back out of it.
           A filter this strong has to be visible: without the banner the page
           simply looks like a history that stops. */}
@@ -367,7 +374,7 @@ export default function Activity() {
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate font-medium">{t.payee}</p>
                                     <p className="flex items-center gap-1 truncate text-sm text-ink-3">
-                                      {looksLikeTransfer(t) && <MaybeTransfer />}
+                                      {(looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
                                       <span className="truncate">
                                         {cat ? fullName(cat, catMap) : 'Uncategorised'}
                                         {t.note ? ` · ${t.note}` : ''}
@@ -431,7 +438,7 @@ export default function Activity() {
                           {/* Note rides on the same line as the payee — a second
                               line would make row heights uneven and harder to scan. */}
                           <td className={cx(table.cell, 'max-w-0 truncate pr-3')}>
-                            {looksLikeTransfer(t) && <MaybeTransfer />}
+                            {(looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
                             <span className="font-medium">{t.payee}</span>
                             {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
                           </td>
@@ -513,7 +520,20 @@ const headingFor = (month: string) => headings().find((el) => el.dataset.month =
  * guessing here would be the worse failure. Categorising it, or pairing it with
  * its other half, both make the mark go away.
  */
-function MaybeTransfer() {
+function MaybeTransfer({ txn }: { txn: Transaction }) {
+  // Somebody has actually asked about this one, which is a stronger statement
+  // than "worth a look" and gets a stronger mark.
+  if (isAsking(txn)) {
+    return (
+      <span
+        title="Somebody has asked what this was. If its other side is in one of your accounts, open it and pair them."
+        className="mr-1.5 inline-flex shrink-0 items-center rounded-full bg-warning/40 px-1 py-0.5 align-middle text-ink"
+        aria-label="Somebody has asked about this"
+      >
+        <HelpCircle size={11} />
+      </span>
+    )
+  }
   return (
     <span
       title="This reads like money moved between accounts, and nothing is paired with it. If the other side is in an account you cannot see, only the person who holds it can confirm it."
@@ -522,6 +542,62 @@ function MaybeTransfer() {
     >
       <ArrowLeftRight size={11} />
     </span>
+  )
+}
+
+/**
+ * Questions the other person has left for me.
+ *
+ * The point of the whole mechanism, and the only screen where it is a job
+ * rather than a mark: these are rows they could see and not explain, where the
+ * missing half may be sitting in one of my accounts. Opening one goes to the
+ * ordinary editor, where the transfer picker is already waiting.
+ *
+ * My own asks are not here — see `askedOfMe`. A nudge I wrote, listed back at
+ * me as something to do, is how a nudge becomes noise.
+ */
+function AskedOfMe({ txns, onOpen }: { txns: Transaction[]; onOpen: (t: Transaction) => void }) {
+  const { money } = useApp()
+  const { userId } = useSyncState()
+  const members = useMemberMap()
+  const accMap = useAccountMap()
+  const asked = useMemo(() => askedOfMe(txns, userId), [txns, userId])
+  if (asked.length === 0) return null
+
+  return (
+    <Card className="mb-3 md:mb-2.5">
+      <div className="flex flex-wrap items-baseline gap-x-2 px-4 py-3 pb-1 md:px-3">
+        <h3 className="font-semibold md:text-sm">Asked about</h3>
+        <p className="text-sm text-ink-3 md:text-xs">
+          Rows the other side of which may be in one of your accounts.
+        </p>
+      </div>
+      <ul className="divide-y divide-hairline">
+        {asked.slice(0, 6).map((t) => (
+          <li key={t.id}>
+            <button
+              onClick={() => onOpen(t)}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 md:px-3 md:py-2.5"
+            >
+              <HelpCircle size={16} className="shrink-0 text-ink-3" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium md:text-sm">{t.payee}</p>
+                <p className="truncate text-xs text-ink-3">
+                  {fmtFullDate(t.date)} · {accMap.get(t.accountId)?.name ?? 'an account'} ·{' '}
+                  {t.explainRequestedBy ? nameOf(members.get(t.explainRequestedBy)) : 'Somebody'} asked
+                </p>
+              </div>
+              <span className={cx('shrink-0 text-sm font-semibold tabular', t.amountMinor > 0 && 'text-good-text')}>
+                {money(t.amountMinor, { sign: t.amountMinor > 0 })}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {asked.length > 6 && (
+        <p className="px-4 pb-3 text-xs text-ink-3 md:px-3">and {asked.length - 6} more</p>
+      )}
+    </Card>
   )
 }
 

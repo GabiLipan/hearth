@@ -140,6 +140,18 @@ select '15-purge-account.sql',
        'purge_account() exists'
 
 union all
+-- Until this reads true, the blind spot stays one-sided: your screen can say a
+-- figure is standing in for something it cannot see, and there is no way to
+-- tell the one person who CAN see it.
+select '16-explain-requests.sql',
+       to_regprocedure('public.request_explanation(uuid)') is not null
+   and to_regprocedure('public.clear_explanation(uuid)') is not null
+   and exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'transactions'
+                  and column_name = 'explain_requested_at'),
+       'request_explanation() + clear_explanation() + transactions.explain_requested_at exist'
+
+union all
 -- Not a migration: a state you can only reach by re-running 09 AFTER 10, which
 -- re-creates the two-argument link_transfer beside the three-argument one.
 -- PostgREST cannot then resolve the call — supabase-js drops `undefined`

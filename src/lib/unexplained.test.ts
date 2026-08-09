@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, AccountGrant, Transaction } from './db'
 import { classifyAccounts, classifyFlows, type BookMap } from './books'
-import { looksLikeTransfer, unexplainedLegs, unexplainedTotals } from './unexplained'
+import { askedOfMe, isAsking, looksLikeTransfer, unexplainedLegs, unexplainedTotals } from './unexplained'
 
 /**
  * Same household as books.test.ts, seen from Gabi's device: he is on both joint
@@ -186,5 +186,85 @@ describe('adding them up', () => {
 
   it('is all zeroes for nothing', () => {
     expect(unexplainedTotals([])).toEqual({ inMinor: 0, outMinor: 0, inCount: 0, outCount: 0 })
+  })
+})
+
+/**
+ * Asking the person who can see the other half — migration 16.
+ *
+ * The selectors only. Who is allowed to ask, and about what, is the server's
+ * business and is asserted in `supabase/99j-explain-tests.sql`.
+ */
+describe('a question left on a row', () => {
+  const asked = (over: Partial<Transaction> = {}) =>
+    txn({ accountId: 'joint', amountMinor: 180000, payee: 'TFR FROM S SMITH', ...over })
+
+  it('is nothing until somebody asks', () => {
+    expect(isAsking(asked())).toBe(false)
+  })
+
+  it('is a question on a marked, unpaired row', () => {
+    expect(isAsking(asked({ explainRequestedAt: '2026-04-01T09:00:00Z', explainRequestedBy: ME }))).toBe(true)
+  })
+
+  it('goes quiet once the row is paired, without the mark being cleared', () => {
+    // Load-bearing. `link_transfer` deliberately does not clear the mark —
+    // doing so would have meant a third `create or replace` over its
+    // security-definer body, which is exactly where a dropped check hides. The
+    // mark is inert on an explained row instead, and this is what makes it so.
+    const mark = { explainRequestedAt: '2026-04-01T09:00:00Z', explainRequestedBy: HER }
+    expect(isAsking(asked({ ...mark, transferId: 'x' }))).toBe(false)
+    expect(isAsking(asked({ ...mark, billId: 'b1' }))).toBe(false)
+  })
+})
+
+describe('askedOfMe', () => {
+  const hers = txn({
+    accountId: 'joint',
+    amountMinor: 180000,
+    explainRequestedAt: '2026-04-01T09:00:00Z',
+    explainRequestedBy: HER,
+  })
+  const mine = txn({
+    accountId: 'joint',
+    amountMinor: 5000,
+    explainRequestedAt: '2026-04-02T09:00:00Z',
+    explainRequestedBy: ME,
+  })
+
+  it('is what the other person asked, not what I did', () => {
+    // My own question listed back at me as a job to do is how a nudge becomes
+    // noise.
+    expect(askedOfMe([hers, mine], ME).map((t) => t.id)).toEqual([hers.id])
+  })
+
+  it('still shows an unattributed question', () => {
+    // An older client, or an asker who has since left the household. Still a
+    // question, and still worth answering.
+    const orphan = txn({ accountId: 'joint', amountMinor: 100, explainRequestedAt: '2026-04-03T09:00:00Z' })
+    expect(askedOfMe([orphan], ME)).toHaveLength(1)
+  })
+
+  it('drops one that has since been paired', () => {
+    const answered = txn({
+      accountId: 'joint',
+      amountMinor: 180000,
+      explainRequestedAt: '2026-04-01T09:00:00Z',
+      explainRequestedBy: HER,
+      transferId: 'x',
+    })
+    expect(askedOfMe([answered], ME)).toEqual([])
+  })
+
+  it('puts the newest question first', () => {
+    const older = txn({
+      accountId: 'joint', amountMinor: 100,
+      explainRequestedAt: '2026-03-01T09:00:00Z', explainRequestedBy: HER,
+    })
+    const newer = txn({
+      accountId: 'joint', amountMinor: 100,
+      explainRequestedAt: '2026-05-01T09:00:00Z', explainRequestedBy: HER,
+    })
+    expect(askedOfMe([older, newer], ME).map((t) => t.id)).toEqual([newer.id, older.id])
   })
 })

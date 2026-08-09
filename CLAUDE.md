@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `15`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `16`, then `local/98-grants.sql`, then `exec`
 a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -60,6 +60,7 @@ read-only detector that reports which are present — run it when unsure.
 | `13-paid-for-household.sql` | `transactions.paid_for_household` — household spending paid from a personal account |
 | `14-book-override.sql` | `accounts.book_override` — say which book an account is in, where deriving it from grants is wrong |
 | `15-purge-account.sql` | `purge_account` — the bottom of the bin: destroy a deleted account and its rows for good |
+| `16-explain-requests.sql` | `transactions.explain_requested_*` — ask the one person who can see the other half of a row |
 
 All are re-runnable, with **one ordering trap**: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
@@ -93,6 +94,7 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 `rules.ts` (payee matching, learning, bulk recategorisation), `bills.ts`
 (suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
+`unexplained.ts` (the blind spot, and asking the person who can see past it),
 `reimbursements.ts` (what the household owes you),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
@@ -404,3 +406,12 @@ the single place a level comes from.
   ARE recoverable as of migration 12 — `prior_category_id` holds them between
   link and unlink, and a newer answer set while linked wins over the remembered
   one.
+- **Asking about a row needs LESS than changing it.** `request_explanation`
+  (migration 16) takes `view`, deliberately below the `transactions_update` bar,
+  because the person who can see a puzzling row is by definition the one who
+  cannot resolve it — at `contribute` you may not edit a row your partner
+  imported. It is safe to be lower only because the row is always in a household
+  account both people can already read; nothing new becomes visible. The mark is
+  never cleared by linking: `link_transfer` is untouched (a third
+  `create or replace` over a security-definer body is where a dropped check
+  hides), and `isAsking` ignores a mark on a paired row instead.

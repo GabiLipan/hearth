@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
-import { ScanLine, ArrowLeftRight, CalendarClock, PiggyBank } from 'lucide-react'
+import { ScanLine, ArrowLeftRight, CalendarClock, HelpCircle, PiggyBank } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
 import { useAccounts, useAccountMap, useBills, useBooks, useCategories, useGoals, useMyLevels, useGrantsFor, useMemberMap } from '../lib/cache'
 import { findTransferCandidates, linkTransfer, setTransferGoal, unlinkTransfer } from '../lib/transfers'
 import { unlinkBillPayment } from '../lib/bills'
+import { clearExplanation, isAsking, looksLikeTransfer, requestExplanation } from '../lib/unexplained'
+import { accountsInBook } from '../lib/books'
 import { syncNow } from '../lib/session'
 import { scanReceipt } from '../lib/receipt'
 import { canAddTransactions, canEditTransaction, levelOn } from '../lib/accounts'
@@ -20,6 +22,7 @@ import { create, update, remove } from '../lib/data'
 import { useApp } from '../state/AppContext'
 import { Sheet, Field, TextInput, Select, Segmented, Button } from './ui'
 import { CategoryPicker } from './CategoryPicker'
+import { nameOf } from './PersonDot'
 
 export function TransactionForm({
   open,
@@ -536,6 +539,72 @@ function GoalTag({ txn }: { txn: Transaction }) {
  * window than the automatic detector and ignores dismissals: you have asked, so
  * the app should stop being cautious on your behalf.
  */
+/**
+ * Asking the person who can see the other half.
+ *
+ * Offered only on a household row that reads like a movement of money and has
+ * nothing to pair with here. That combination is precisely the blind spot: the
+ * far leg is in an account this device is not on, so no amount of looking will
+ * find it, and only the person who holds that account can say what it was.
+ *
+ * Not offered on a personal row, because I can see all of my own accounts — an
+ * unpaired movement there is a pairing job, not an unanswerable question, and
+ * the picker above already offers it.
+ */
+function Explain({ txn, onDone }: { txn: Transaction; onDone: () => void }) {
+  const books = useBooks()
+  const members = useMemberMap()
+  const { userId } = useSyncState()
+  const [busy, setBusy] = useState(false)
+
+  const asking = isAsking(txn)
+  const inHousehold = accountsInBook('household', books).has(txn.accountId)
+  if (!asking && (!inHousehold || !looksLikeTransfer(txn))) return null
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true)
+    try {
+      await fn()
+    } finally {
+      setBusy(false)
+      await syncNow()
+      onDone()
+    }
+  }
+
+  if (asking) {
+    const mine = txn.explainRequestedBy === userId
+    const who = txn.explainRequestedBy ? nameOf(members.get(txn.explainRequestedBy)) : 'Somebody'
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-xl bg-warning/15 px-4 py-3">
+        <HelpCircle size={16} className="shrink-0 text-ink-3" />
+        <p className="min-w-0 flex-1 text-sm">
+          {mine
+            ? 'You have asked about this one. It will stay marked until it is paired or the question is withdrawn.'
+            : `${who} asked what this was. If the other side is in one of your accounts, pair it above.`}
+        </p>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => clearExplanation(txn.id))}>
+          {mine ? 'Never mind' : 'It is not a transfer'}
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void run(() => requestExplanation(txn.id))}
+      className="flex w-full items-center gap-2 rounded-xl bg-surface-2 px-4 py-3 text-left text-sm text-ink-2 transition hover:text-ink disabled:opacity-60"
+    >
+      <HelpCircle size={16} className="shrink-0 text-ink-3" />
+      <span className="min-w-0 flex-1">
+        Ask about this — the other side may be in an account only they can see
+      </span>
+    </button>
+  )
+}
+
 function Linkage({ txn, onDone }: { txn: Transaction; onDone: () => void }) {
   const { money } = useApp()
   const { userId } = useSyncState()
@@ -618,14 +687,17 @@ function Linkage({ txn, onDone }: { txn: Transaction; onDone: () => void }) {
 
   if (!picking) {
     return (
-      <button
-        type="button"
-        onClick={() => setPicking(true)}
-        className="flex w-full items-center gap-2 rounded-xl bg-surface-2 px-4 py-3 text-left text-sm text-ink-2 transition hover:text-ink"
-      >
-        <ArrowLeftRight size={16} className="shrink-0 text-ink-3" />
-        <span className="min-w-0 flex-1">This was a transfer between my accounts</span>
-      </button>
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={() => setPicking(true)}
+          className="flex w-full items-center gap-2 rounded-xl bg-surface-2 px-4 py-3 text-left text-sm text-ink-2 transition hover:text-ink"
+        >
+          <ArrowLeftRight size={16} className="shrink-0 text-ink-3" />
+          <span className="min-w-0 flex-1">This was a transfer between my accounts</span>
+        </button>
+        <Explain txn={txn} onDone={onDone} />
+      </div>
     )
   }
 

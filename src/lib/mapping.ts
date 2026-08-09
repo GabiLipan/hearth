@@ -68,7 +68,20 @@ const READABLE: Record<SyncedTable, readonly string[]> = {
   accounts: [...WRITABLE.accounts, 'createdBy', 'updatedAt', 'deletedAt'],
   goals: [...WRITABLE.goals, 'createdBy', 'updatedAt', 'deletedAt'],
   bills: [...WRITABLE.bills, 'createdBy', 'updatedAt', 'deletedAt'],
-  transactions: [...WRITABLE.transactions, 'transferId', 'goalId', 'createdBy', 'createdAt', 'updatedAt', 'deletedAt'],
+  // `explainRequested*` sits with transferId and goalId: readable, never
+  // writable. Asking is an RPC because it needs only `view`, which is LESS than
+  // a PATCH of this table requires — see migration 16.
+  transactions: [
+    ...WRITABLE.transactions,
+    'transferId',
+    'goalId',
+    'explainRequestedAt',
+    'explainRequestedBy',
+    'createdBy',
+    'createdAt',
+    'updatedAt',
+    'deletedAt',
+  ],
   budgets: [...WRITABLE.budgets, 'updatedAt', 'deletedAt'],
   rules: [...WRITABLE.rules, 'createdBy', 'createdAt', 'updatedAt', 'deletedAt'],
 } as const

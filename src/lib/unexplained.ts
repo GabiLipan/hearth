@@ -1,5 +1,6 @@
 import type { Transaction } from './db'
 import { accountsInBook, effectiveMonth, type BookMap, type Flow } from './books'
+import { rpc } from './api'
 
 /**
  * Money that moved between our books, that only the other person can confirm.
@@ -106,6 +107,63 @@ export interface UnexplainedTotals {
   outMinor: number
   inCount: number
   outCount: number
+}
+
+/* ---------- asking the person who can see the other half ---------- */
+
+/**
+ * The half this file could not do on its own.
+ *
+ * Everything above finds rows worth a sentence. None of it can act, and neither
+ * can the person reading it: the fix is linking the two legs, and
+ * `link_transfer` refuses anybody who cannot write both. So the person who can
+ * SEE the problem and the person who can SOLVE it are different people, and
+ * until migration 16 nothing connected them.
+ *
+ * `request_explanation` is the connection. It needs only `view` on the account,
+ * deliberately lower than the bar for changing the row — being able to see a
+ * row is the whole qualification for being confused by it, and at `contribute`
+ * you may not edit a row your partner imported.
+ *
+ * Online-only, and unapologetically: the entire purpose is to reach the other
+ * device.
+ */
+export const requestExplanation = (txnId: string) =>
+  rpc<string>('request_explanation', { p_transaction_id: txnId })
+
+/**
+ * Withdraw the question. Open to either person on purpose — the asker changes
+ * their mind, or the person asked looks and says "no, we really did spend
+ * that", which is a good answer that produces no link.
+ */
+export const clearExplanation = (txnId: string) =>
+  rpc<null>('clear_explanation', { p_transaction_id: txnId })
+
+/**
+ * Is this row still asking a question?
+ *
+ * `transferId` first, always. Linking answers the question and deliberately
+ * does NOT clear the mark — doing that would have meant a third
+ * `create or replace` over `link_transfer`'s security-definer body, which is
+ * exactly where a dropped check hides. A mark on a paired row is inert instead,
+ * and this is the one place that knows it.
+ */
+export function isAsking(txn: Transaction): boolean {
+  return !!txn.explainRequestedAt && !txn.transferId && !txn.billId
+}
+
+/**
+ * Rows somebody ELSE has asked about, newest question first.
+ *
+ * Not my own asks: seeing my own question listed back at me as a job to do is
+ * how a nudge becomes noise. Rows where `explainRequestedBy` is missing — an
+ * older client, or a row whose asker has left the household — are shown, on the
+ * grounds that an unattributed question is still a question.
+ */
+export function askedOfMe(txns: Transaction[], userId?: string): Transaction[] {
+  return txns
+    .filter((t) => isAsking(t) && t.explainRequestedBy !== userId)
+    .sort((a, b) => (b.explainRequestedAt ?? '').localeCompare(a.explainRequestedAt ?? ''))
 }
 
 export function unexplainedTotals(legs: UnexplainedLeg[]): UnexplainedTotals {
