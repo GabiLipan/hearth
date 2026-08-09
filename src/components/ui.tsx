@@ -11,7 +11,9 @@ import {
   type SelectHTMLAttributes,
 } from 'react'
 import { X, ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react'
-import type { Category } from '../lib/db'
+import type { Account, Category } from '../lib/db'
+import { accountFace } from '../lib/accounts'
+import { slotVar } from '../lib/palette'
 import { CategoryIcon } from './CategoryIcon'
 
 export function cx(...parts: (string | false | undefined | null)[]) {
@@ -675,6 +677,40 @@ export function CategoryDot({ category, size = 36, className }: { category?: Cat
       aria-hidden
     >
       <CategoryIcon icon={category?.icon} size={Math.round(size * 0.52)} />
+    </span>
+  )
+}
+
+/**
+ * The same badge for an account.
+ *
+ * Deliberately a rounded SQUARE where a category is a circle. They sit in the
+ * same rows and are the same size, and two circles of similar colour would be
+ * one more thing to read rather than one less — the shape says which axis you
+ * are looking at before the colour says which one.
+ *
+ * `accountFace` rather than `account.slot`: an account nobody has styled has
+ * neither, and reading them raw paints the badge grey, which is the state the
+ * whole feature exists to remove.
+ */
+export function AccountDot({ account, size = 36, className }: { account?: Account; size?: number; className?: string }) {
+  const face = account ? accountFace(account) : undefined
+  const colour = face ? slotVar(face.slot) : 'var(--ink-3)'
+  return (
+    <span
+      className={cx(
+        'grid shrink-0 place-items-center rounded-[calc(var(--dot)*0.3)]',
+        'size-[var(--dot)] [&_svg]:size-[calc(var(--dot)*0.52)]',
+        className,
+      )}
+      style={{
+        ['--dot' as string]: `${size}px`,
+        background: face ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))` : 'var(--surface-2)',
+        color: colour,
+      }}
+      aria-hidden
+    >
+      <CategoryIcon icon={face?.icon} size={Math.round(size * 0.52)} />
     </span>
   )
 }

@@ -166,6 +166,16 @@ export interface Account {
   ownerId?: string
   openingBalanceMinor: number
   /**
+   * A face for the account, matching what categories have had all along: an
+   * index into the `--series-N` palette and a key into the icon set.
+   *
+   * Both undefined on an account nobody has styled, which is the normal state
+   * and is not a gap to fill in — `accountFace` derives a sensible pair from
+   * `kind`, so the Activity table reads properly before anybody opens a form.
+   */
+  slot?: number
+  icon?: string
+  /**
    * Which book this account is in, when deriving it from grants gets it wrong.
    * Undefined — the normal case — means derive. See `classifyAccounts`.
    */

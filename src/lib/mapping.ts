@@ -47,7 +47,10 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   // server. They stay writable for one release so a patch queued by an older
   // tab still matches a row and drains, instead of dead-lettering; 08 removes
   // them from here and from the table.
-  accounts: ['id', 'name', 'kind', 'visibility', 'ownerId', 'openingBalanceMinor', 'sortOrder', 'bookOverride'],
+  accounts: [
+    'id', 'name', 'kind', 'visibility', 'ownerId', 'openingBalanceMinor', 'sortOrder',
+    'bookOverride', 'slot', 'icon',
+  ],
   // Written by upsert_account_grant, so the whole row is the RPC's argument
   // list — see RPC_TABLES in outbox.ts.
   account_grants: ['id', 'accountId', 'userId', 'level'],

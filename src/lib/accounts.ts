@@ -80,6 +80,43 @@ export function canEditTransaction(
 /** The same rule for a bill, which follows its account's ladder. */
 export const canEditBill = canEditTransaction
 
+/* ---------- what an account looks like ---------- */
+
+/**
+ * The face an account wears when nobody has chosen one.
+ *
+ * Derived from `kind` rather than left blank, so the Activity table is readable
+ * the moment migration 17 lands — a household with eight accounts should not
+ * have to visit eight forms before the account column stops being grey text.
+ *
+ * The colours are picked to sit apart from each other rather than to mean
+ * anything: there is no convention that savings is green, and inventing one
+ * would only be wrong for the person whose savings account is their overdraft.
+ */
+const KIND_FACE: Record<Account['kind'], { slot: number; icon: string }> = {
+  current: { slot: 1, icon: 'bank' },
+  savings: { slot: 9, icon: 'piggy' },
+  credit: { slot: 8, icon: 'card' },
+  cash: { slot: 3, icon: 'banknote' },
+}
+
+/**
+ * An account's colour slot and icon key, chosen or derived.
+ *
+ * Every screen goes through this rather than reading `account.slot` — a raw
+ * read gives `undefined` on the common case and paints the row grey, which is
+ * the state this feature exists to remove.
+ */
+export function accountFace(account: Pick<Account, 'kind' | 'slot' | 'icon'>): {
+  slot: number
+  icon: string
+} {
+  const base = KIND_FACE[account.kind] ?? KIND_FACE.current
+  return { slot: account.slot ?? base.slot, icon: account.icon ?? base.icon }
+}
+
+/* ---------- balances ---------- */
+
 /** Balance from the transactions we hold locally. */
 export function computeBalance(account: Account, txns: Transaction[]) {
   const sum = txns.reduce((s, t) => (t.accountId === account.id ? s + t.amountMinor : s), 0)

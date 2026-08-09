@@ -9,7 +9,7 @@ import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel } from '../lib/categories'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { Card, CategoryDot, CONTROL_H, Empty, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
+import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { TransactionForm } from '../components/TransactionForm'
@@ -370,7 +370,19 @@ export default function Activity() {
                                   onClick={() => setEditing(t)}
                                   className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 active:bg-surface-2"
                                 >
-                                  <CategoryDot category={cat} size={34} />
+                                  {/* The account rides on the category badge
+                                      rather than taking a line of its own: a
+                                      phone row has room for two lines and both
+                                      are spoken for, and "which card" is a
+                                      glance question, not a reading one. */}
+                                  <span className="relative shrink-0">
+                                    <CategoryDot category={cat} size={34} />
+                                    <AccountDot
+                                      account={accMap.get(t.accountId)}
+                                      size={16}
+                                      className="absolute -bottom-0.5 -right-0.5 ring-2 ring-surface"
+                                    />
+                                  </span>
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate font-medium">{t.payee}</p>
                                     <p className="flex items-center gap-1 truncate text-sm text-ink-3">
@@ -423,6 +435,7 @@ export default function Activity() {
                     {items.map((t) => {
                       const cat = t.categoryId ? catMap.get(t.categoryId) : undefined
                       const parent = cat?.parentId ? catMap.get(cat.parentId) : undefined
+                      const acc = accMap.get(t.accountId)
                       return (
                         <tr
                           key={t.id}
@@ -460,8 +473,16 @@ export default function Activity() {
                               </span>
                             </span>
                           </td>
-                          <td className={cx(table.cell, 'truncate pr-3 text-ink-3')}>
-                            {t.accountId ? (accMap.get(t.accountId)?.name ?? '—') : '—'}
+                          {/* A badge, not grey text. This is the column you
+                              scan to answer "which card was that on", and it
+                              was the only one with nothing to catch the eye.
+                              A rounded square where a category is a circle, so
+                              the two read as different axes at a glance. */}
+                          <td className={cx(table.cell, 'pr-3 text-ink-2')}>
+                            <span className="flex items-center gap-2 truncate">
+                              <AccountDot account={acc} size={22} />
+                              <span className="truncate">{acc?.name ?? '—'}</span>
+                            </span>
                           </td>
                           <td
                             className={cx(

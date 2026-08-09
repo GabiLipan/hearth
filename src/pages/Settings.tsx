@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, Check, AlertTriangle, ChevronRight, Wand2, ArrowLeftRight, Undo2, type LucideIcon } from 'lucide-react'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronRight, Wand2, ArrowLeftRight, Undo2, type LucideIcon } from 'lucide-react'
 import { db, type AccountGrant, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
@@ -8,6 +8,7 @@ import {
   canAddTransactions,
   canAdministerAccount,
   canManageAccount,
+  accountFace,
   canSeeAccount,
   canSeeTransactionsAt,
   deleteAccount as removeAccount,
@@ -37,7 +38,7 @@ import { grouped, styleOf, topLevel } from '../lib/categories'
 import { discardAllDeadLetters, discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
-import { SLOTS, SLOT_NAMES, slotVar, nextFreeSlot } from '../lib/palette'
+import { slotVar, nextFreeSlot } from '../lib/palette'
 import { seedDemoData } from '../lib/demo'
 import {
   getTransferMode,
@@ -63,7 +64,7 @@ import {
   type DeletedAccount,
   type UnownedAccount,
 } from '../lib/accounts'
-import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
+import { IconPicker, SlotPicker } from '../components/IconPicker'
 import { PersonDot, nameOf } from '../components/PersonDot'
 
 /**
@@ -1450,6 +1451,32 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
   const [kind, setKind] = useState<Account['kind']>(account?.kind ?? 'current')
   /** '' means derive from who is on the account, which is the normal case. */
   const [book, setBook] = useState<'' | 'household' | 'mine'>(account?.bookOverride ?? '')
+  /**
+   * Seeded from what the account currently SHOWS, not from what it stores.
+   *
+   * An account nobody has styled stores neither, and starting the pickers blank
+   * would offer to change something away from a face the user can see on every
+   * other screen. `accountFace` is that face; opening the form and saving
+   * without touching anything writes down what was already true.
+   */
+  const stored = { slot: account?.slot, icon: account?.icon }
+  const [slot, setSlot] = useState(() => accountFace({ kind: account?.kind ?? 'current', ...stored }).slot)
+  const [icon, setIcon] = useState(() => accountFace({ kind: account?.kind ?? 'current', ...stored }).icon)
+  /**
+   * Whether the face is still the one `kind` implies.
+   *
+   * Until somebody picks, changing the type moves the colour and icon with it —
+   * switching Current to Savings and being left with a bank icon looks like the
+   * form ignored you. Once they have picked, `kind` stops touching it, because
+   * their choice is the newer answer.
+   */
+  const [facePicked, setFacePicked] = useState(account?.slot != null || account?.icon != null)
+  useEffect(() => {
+    if (facePicked) return
+    const next = accountFace({ kind })
+    setSlot(next.slot)
+    setIcon(next.icon)
+  }, [kind, facePicked])
   const [sharing, setSharing] = useState(false)
   const [opening, setOpening] = useState(
     account?.openingBalanceMinor ? String(account.openingBalanceMinor / 100) : '',
@@ -1478,6 +1505,8 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         kind,
         openingBalanceMinor: openingMinor,
         bookOverride: book || undefined,
+        slot,
+        icon,
       })
     } else {
       // Nothing about sharing is decided here. Creating an account makes you
@@ -1497,6 +1526,8 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         kind,
         openingBalanceMinor: openingMinor,
         sortOrder: 0,
+        slot,
+        icon,
         createdBy: userId,
       })
     }
@@ -1565,6 +1596,23 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         <Field label={`Opening balance (${currencySymbol(currency)}, optional)`} hint="The balance before the first transaction recorded in Hearth.">
           <TextInput value={opening} onChange={(e) => setOpening(e.target.value)} inputMode="decimal" placeholder="0.00" />
         </Field>
+        <SlotPicker
+          value={slot}
+          onChange={(next) => {
+            setFacePicked(true)
+            setSlot(next)
+          }}
+          hint={facePicked ? undefined : 'from the type'}
+        />
+        <IconPicker
+          value={icon}
+          onChange={(next) => {
+            setFacePicked(true)
+            setIcon(next)
+          }}
+          colour={slotVar(slot)}
+          hint={facePicked ? undefined : 'from the type'}
+        />
         {/* Only when editing. A brand new account has no grants yet, so there is
             nothing to derive from and nothing to override. */}
         {account && (
@@ -1739,60 +1787,18 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
           </label>
         )}
 
-        <div>
-          <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">
-            Colour
-            {parentId && !overriding && <span className="ml-1.5 font-normal text-ink-3">· inherited</span>}
-          </span>
-          <div className="flex flex-wrap gap-2">
-            {SLOTS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSlot(s)}
-                title={SLOT_NAMES[s]}
-                aria-label={SLOT_NAMES[s]}
-                aria-pressed={effectiveSlot === s}
-                className={cx(
-                  'grid size-8 place-items-center rounded-full transition desktop:size-7',
-                  effectiveSlot === s ? 'ring-2 ring-ink ring-offset-2 ring-offset-surface' : 'hover:scale-110',
-                )}
-                style={{ background: slotVar(s) }}
-              >
-                {effectiveSlot === s && <Check size={15} className="text-white drop-shadow" />}
-              </button>
-            ))}
-          </div>
-        </div>
+        <SlotPicker
+          value={effectiveSlot}
+          onChange={setSlot}
+          hint={parentId && !overriding ? 'inherited' : undefined}
+        />
 
-        <div>
-          <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">
-            Icon
-            {parentId && !overriding && <span className="ml-1.5 font-normal text-ink-3">· inherited</span>}
-          </span>
-          <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8 md:grid-cols-10">
-            {CATEGORY_ICON_KEYS.map((key) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setIcon(key)}
-                aria-label={key}
-                aria-pressed={icon === key}
-                className={cx(
-                  'grid aspect-square place-items-center rounded-xl ring-1 transition md:rounded-lg',
-                  icon === key ? 'ring-2 ring-ink' : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
-                )}
-                style={
-                  icon === key
-                    ? { background: `color-mix(in oklab, ${slotVar(effectiveSlot)} 16%, var(--surface-2))`, color: slotVar(effectiveSlot) }
-                    : undefined
-                }
-              >
-                <CategoryIcon icon={key} size={17} />
-              </button>
-            ))}
-          </div>
-        </div>
+        <IconPicker
+          value={icon}
+          onChange={setIcon}
+          colour={slotVar(effectiveSlot)}
+          hint={parentId && !overriding ? 'inherited' : undefined}
+        />
 
         {!category && (
           <Segmented

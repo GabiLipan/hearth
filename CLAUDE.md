@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `16`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `17`, then `local/98-grants.sql`, then `exec`
 a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -61,6 +61,7 @@ read-only detector that reports which are present — run it when unsure.
 | `14-book-override.sql` | `accounts.book_override` — say which book an account is in, where deriving it from grants is wrong |
 | `15-purge-account.sql` | `purge_account` — the bottom of the bin: destroy a deleted account and its rows for good |
 | `16-explain-requests.sql` | `transactions.explain_requested_*` — ask the one person who can see the other half of a row |
+| `17-account-appearance.sql` | `accounts.slot` + `accounts.icon` — an account gets a colour and an icon, like a category |
 
 All are re-runnable, with **one ordering trap**: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
@@ -372,6 +373,21 @@ the single place a level comes from.
   nothing: quietly moving money out of "spending" on the strength of the word
   "TFR" would make the figures wrong in a way nobody could see, which is worse
   than being visibly approximate.
+- **An icon key is permanent.** `icon: 'cart'` lives on rows in the database, so
+  a key in `CategoryIcon.tsx` may be ADDED freely and must never be renamed or
+  removed — either turns every category using it into the fallback tag, quietly,
+  on both devices. `CategoryIcon.test.ts` pins the forty-three the app shipped
+  with. Two keys must also never point at the same component: harmless, but a
+  picker offering one picture twice looks broken and nobody can tell which they
+  chose. And an icon whose Lucide name is a JS global (`Map`, `Infinity`) has to
+  be imported under an alias, or it shadows the global for the whole module.
+- **An account's colour and icon are derived when unset.** `accountFace` maps
+  `kind` to a slot and an icon key, so the Activity table reads properly before
+  anybody opens a form and nothing has to be backfilled. Read `accountFace(a)`,
+  never `a.slot` — a raw read is `undefined` on the common case and paints the
+  badge grey, which is the state the feature exists to remove. The badge is a
+  rounded SQUARE where a category is a circle: they share rows, and the shape
+  says which axis you are reading before the colour says which one.
 - **Two categories of the same colour is the ORDINARY case.** Twelve slots, no
   limit on categories, and a subcategory inherits its parent's slot on purpose —
   so a donut routinely holds two identical arcs, and drilling in is where it

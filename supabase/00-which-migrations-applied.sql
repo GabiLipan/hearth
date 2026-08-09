@@ -152,6 +152,17 @@ select '16-explain-requests.sql',
        'request_explanation() + clear_explanation() + transactions.explain_requested_at exist'
 
 union all
+-- Until this reads true, the colour and icon pickers on an account save
+-- nothing. Accounts still show a face — it is derived from the account type —
+-- but choosing your own does not stick.
+select '17-account-appearance.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'accounts' and column_name = 'slot')
+   and exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'accounts' and column_name = 'icon'),
+       'accounts.slot + accounts.icon exist'
+
+union all
 -- Not a migration: a state you can only reach by re-running 09 AFTER 10, which
 -- re-creates the two-argument link_transfer beside the three-argument one.
 -- PostgREST cannot then resolve the call — supabase-js drops `undefined`
