@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, HelpCircle, Layers } from 'lucide-react'
-import type { Transaction } from '../lib/db'
+import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, HelpCircle, Layers, Shapes, MoreHorizontal } from 'lucide-react'
+import type { Category, Transaction } from '../lib/db'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
 import { canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn } from '../lib/accounts'
 
@@ -22,7 +22,7 @@ import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
+import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, FilterBar, FilterChip, Popover, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { TransactionForm } from '../components/TransactionForm'
@@ -307,12 +307,14 @@ export default function Activity() {
 
   return (
     <div>
-      <Toolbar>
+      {/* Wide screens keep the toolbar: there is room for every control at
+          full size, and each one is visible without being opened. */}
+      <Toolbar className="hidden md:flex">
         {/* Same lens as Reports, Home and Budgets. Activity is a ledger rather
             than an account of what happened, so `all` is a perfectly ordinary
             answer here — but "show me the joint account's rows" is the question
             behind most trips to this page. */}
-        <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto" />
+        <BookSwitcher book={book} onChange={setBook} className="hidden md:flex md:w-auto" />
 
         {/* Not "all transactions" any more: a search runs inside the book and
             the filters on screen, and saying otherwise would make an empty
@@ -340,6 +342,16 @@ export default function Activity() {
           </p>
         )}
       </Toolbar>
+
+      {/* Phones get one scrolling row instead. The lens is not in it — it lives
+          in the header now, on every page at once. */}
+      <FilterBar>
+        <SearchChip value={query} onChange={setQuery} />
+        <CategoryChip parents={parents} value={catFilter} onChange={setCatFilter} />
+        <AccountFilter accounts={accounts} value={accountFilter} onChange={setAccountFilter} variant="chip" />
+        {!monthFilter && <MonthJump current={atMonth} months={months} onPick={jumpTo} variant="chip" />}
+        <MoreChip onImport={() => setImportOpen(true)} />
+      </FilterBar>
 
       {/* Above the list, so both legs of a proposed pair are visible while you
           decide. It renders nothing at all when there is nothing to ask. */}
@@ -376,7 +388,10 @@ export default function Activity() {
       )}
 
       {/* Category filter chips — top-level only, matching the picker. */}
-      <div className="no-scrollbar -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 py-1 md:mx-0 md:mb-2 md:flex-wrap md:gap-1.5 md:overflow-visible md:px-0">
+      {/* Every top-level category, visible at once — worth the row on a wide
+          screen, where the colours are half of what makes it scannable. A phone
+          gets `CategoryChip` in the bar above instead. */}
+      <div className="mb-3 hidden gap-2 md:mx-0 md:mb-2 md:flex md:flex-wrap md:gap-1.5 md:px-0">
         <button
           onClick={() => setCatFilter(null)}
           className={cx(
@@ -400,13 +415,6 @@ export default function Activity() {
           </button>
         ))}
       </div>
-
-      {/* Phone-only summary line — desktop shows it in the toolbar. */}
-      {filtered.length > 0 && (
-        <p className="mb-2 px-1 text-sm text-ink-3 md:hidden">
-          {filtered.length} transaction{filtered.length === 1 ? '' : 's'}
-        </p>
-      )}
 
       {/* `undefined` is the cache still opening, not an empty history — telling
           somebody they have no transactions for one frame is worse than a
@@ -947,78 +955,214 @@ function MonthHeading({
       <h2 className={cx('font-semibold', dense ? 'text-xs uppercase tracking-wide text-ink-2' : 'text-base')}>
         {monthLabel(month)}
       </h2>
-      {stats && stats.spendMinor > 0 && (
-        <p className="shrink-0 text-xs text-ink-3 tabular">{money(stats.spendMinor)} spent</p>
+      {stats && (
+        <p className="shrink-0 text-xs text-ink-3 tabular">
+          {stats.spendMinor > 0 && `${money(stats.spendMinor)} spent`}
+          {/* The row count used to be a line of its own above the list, saying
+              the same thing about the whole filtered set. On a phone it belongs
+              here, where the heading is already carrying the month's figures
+              and is already stuck to the top of the screen. */}
+          {sticky && (
+            <span className={stats.spendMinor > 0 ? 'before:content-["_·_"]' : undefined}>
+              {stats.count} row{stats.count === 1 ? '' : 's'}
+            </span>
+          )}
+        </p>
       )}
     </div>
   )
 }
 
 /* ---------- Toolbar controls ---------- */
-
-/**
- * A button that opens a panel under itself.
- *
- * Deliberately not a `Sheet`: these two are filters you adjust and re-adjust
- * while reading the list behind them, and a full-screen sheet for "tick two
- * accounts" hides the thing you are filtering.
+/*
+ * Each of these renders as a `CONTROL_H` toolbar button on a wide screen and as
+ * a chip in the phone's `FilterBar`. Same panel either way — what changes is
+ * only what you press to open it, so the two form factors cannot drift apart in
+ * behaviour, only in size.
  */
-function Popover({
+type Variant = 'control' | 'chip'
+
+/** The wide-screen trigger: a `CONTROL_H` button matching the search box beside it. */
+function ControlTrigger({
   label,
   icon,
-  width,
-  children,
+  open,
+  toggle,
 }: {
   label: ReactNode
   icon: ReactNode
-  /** Tailwind width class for the panel. */
-  width: string
-  children: (close: () => void) => ReactNode
+  open: boolean
+  toggle: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  return (
+    <button
+      onClick={toggle}
+      aria-expanded={open}
+      className={cx(
+        CONTROL_H,
+        'flex max-w-52 items-center gap-1.5 rounded-xl bg-surface-2 px-3 text-sm font-medium text-ink-2',
+        'transition-colors hover:text-ink desktop:px-2.5 md:rounded-lg',
+      )}
+    >
+      <span className="shrink-0 text-ink-3">{icon}</span>
+      <span className="truncate">{label}</span>
+      <ChevronDown size={14} className={cx('shrink-0 text-ink-3 transition-transform', open && 'rotate-180')} />
+    </button>
+  )
+}
 
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
-    // Capture, so a click that lands on another control still closes this.
-    document.addEventListener('pointerdown', onDown, true)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('pointerdown', onDown, true)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+/**
+ * Search, which is an icon until it is wanted.
+ *
+ * It expands inside the bar rather than replacing it: the other chips are still
+ * there, scrolled off to the right, so a search never hides what is filtering
+ * the results it returns. A chip bar that has to become a different bar to take
+ * a query is two bars.
+ *
+ * A query keeps it open, because collapsing a field that is still narrowing the
+ * list would hide the reason the list is short.
+ */
+function SearchChip({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const input = useRef<HTMLInputElement>(null)
+  const showing = open || value.length > 0
+
+  if (!showing) {
+    return (
+      <FilterChip
+        aria-label="Search transactions"
+        chevron={false}
+        icon={<Search size={16} />}
+        onClick={() => {
+          setOpen(true)
+          // After the field exists. The focus is what puts the keyboard up, so
+          // it has to happen from the same tap rather than on a later effect.
+          setTimeout(() => input.current?.focus(), 30)
+        }}
+      />
+    )
+  }
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative flex h-9 min-w-52 flex-1 shrink-0 items-center">
+      <Search size={15} className="pointer-events-none absolute left-3 text-ink-3" />
+      <input
+        ref={input}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search transactions"
+        aria-label="Search transactions"
+        className="h-9 w-full rounded-full bg-surface-2 pl-9 pr-9 text-sm text-ink outline-none ring-1 ring-transparent transition-shadow placeholder:text-ink-3 focus:ring-2 focus:ring-accent/60"
+      />
       <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className={cx(
-          CONTROL_H,
-          'flex max-w-52 items-center gap-1.5 rounded-xl bg-surface-2 px-3 text-sm font-medium text-ink-2',
-          'transition-colors hover:text-ink desktop:px-2.5 md:rounded-lg',
-        )}
+        aria-label="Close search"
+        onClick={() => {
+          onChange('')
+          setOpen(false)
+        }}
+        className="absolute right-2 grid size-6 place-items-center rounded-full text-ink-3 hover:text-ink"
       >
-        <span className="shrink-0 text-ink-3">{icon}</span>
-        <span className="truncate">{label}</span>
-        <ChevronDown size={14} className={cx('shrink-0 text-ink-3 transition-transform', open && 'rotate-180')} />
+        <X size={14} />
       </button>
-      {open && (
-        <div
-          className={cx(
-            'animate-fade absolute left-0 top-full z-30 mt-1.5 rounded-xl bg-surface p-2 shadow-xl ring-1 ring-hairline',
-            width,
-          )}
-        >
-          {children(() => setOpen(false))}
+    </div>
+  )
+}
+
+/**
+ * The category filter, folded into one chip on a phone.
+ *
+ * On a wide screen this is still a visible row of every top-level category,
+ * which is worth its space there — the colours are half of what makes it
+ * scannable. On a phone that row was 40px plus a margin for something that is
+ * set on a minority of visits, so it becomes a chip that reports the one
+ * chosen. Top-level only, matching the picker and the way budgets count.
+ */
+function CategoryChip({
+  parents,
+  value,
+  onChange,
+}: {
+  parents: Category[]
+  value: string | null
+  onChange: (next: string | null) => void
+}) {
+  const chosen = parents.find((c) => c.id === value)
+  return (
+    <Popover
+      width="w-60"
+      trigger={({ open, toggle }) => (
+        <FilterChip
+          open={open}
+          onClick={toggle}
+          active={!!chosen}
+          onClear={chosen ? () => onChange(null) : undefined}
+          icon={chosen ? <CategoryIcon icon={chosen.icon} size={15} /> : <Shapes size={15} />}
+          label={chosen?.name ?? 'Category'}
+        />
+      )}
+    >
+      {(close) => (
+        <div className="max-h-72 overflow-y-auto">
+          <button
+            onClick={() => {
+              onChange(null)
+              close()
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
+          >
+            <Check size={15} className={cx('shrink-0', value === null ? 'text-accent' : 'opacity-0')} />
+            <span className="font-medium">All categories</span>
+          </button>
+          <div className="my-1 border-t border-hairline" />
+          {parents.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => {
+                onChange(c.id === value ? null : c.id)
+                close()
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
+            >
+              <Check size={15} className={cx('shrink-0', value === c.id ? 'text-accent' : 'opacity-0')} />
+              <span className="shrink-0" style={{ color: `var(--series-${c.slot})` }}>
+                <CategoryIcon icon={c.icon} size={15} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{c.name}</span>
+            </button>
+          ))}
         </div>
       )}
-    </div>
+    </Popover>
+  )
+}
+
+/**
+ * Everything that is an action rather than a filter.
+ *
+ * One chip at the end of the bar, because importing a statement is something
+ * you do twice a month and it was costing a full 44px row every other day.
+ */
+function MoreChip({ onImport }: { onImport: () => void }) {
+  return (
+    <Popover
+      align="right"
+      width="w-52"
+      trigger={({ open, toggle }) => (
+        <FilterChip aria-label="More" chevron={false} open={open} onClick={toggle} icon={<MoreHorizontal size={17} />} />
+      )}
+    >
+      {(close) => (
+        <button
+          onClick={() => {
+            onImport()
+            close()
+          }}
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
+        >
+          <Upload size={15} className="shrink-0 text-ink-3" /> Import CSV
+        </button>
+      )}
+    </Popover>
   )
 }
 
@@ -1033,14 +1177,18 @@ function AccountFilter({
   accounts,
   value,
   onChange,
+  variant = 'control',
 }: {
   accounts: { id: string; name: string }[]
   value: Set<string> | null
   onChange: (next: Set<string> | null) => void
+  variant?: Variant
 }) {
   const label =
     value === null
-      ? 'All accounts'
+      ? variant === 'chip'
+        ? 'Accounts'
+        : 'All accounts'
       : value.size === 1
         ? (accounts.find((a) => value.has(a.id))?.name ?? '1 account')
         : `${value.size} accounts`
@@ -1055,7 +1203,23 @@ function AccountFilter({
   }
 
   return (
-    <Popover label={label} icon={<Wallet size={15} />} width="w-64">
+    <Popover
+      width="w-64"
+      trigger={({ open, toggle: press }) =>
+        variant === 'chip' ? (
+          <FilterChip
+            open={open}
+            onClick={press}
+            active={value !== null}
+            onClear={value !== null ? () => onChange(null) : undefined}
+            icon={<Wallet size={15} />}
+            label={label}
+          />
+        ) : (
+          <ControlTrigger label={label} icon={<Wallet size={15} />} open={open} toggle={press} />
+        )
+      }
+    >
       {() => (
         <div className="max-h-72 overflow-y-auto">
           <button
@@ -1095,10 +1259,12 @@ function MonthJump({
   current,
   months,
   onPick,
+  variant = 'control',
 }: {
   current: string | null
   months: Map<string, { at: number }>
   onPick: (month: string) => void
+  variant?: Variant
 }) {
   const keys = useMemo(() => [...months.keys()].sort(), [months])
   const newest = keys[keys.length - 1] ?? thisMonthKey()
@@ -1113,9 +1279,23 @@ function MonthJump({
 
   const firstYear = Number(oldest.slice(0, 4))
   const lastYear = Number(newest.slice(0, 4))
+  const label = current ? monthLabel(current) : 'Jump to'
+  const icon = <CalendarDays size={15} />
 
   return (
-    <Popover label={current ? monthLabel(current) : 'Jump to'} icon={<CalendarDays size={15} />} width="w-64">
+    <Popover
+      width="w-64"
+      trigger={({ open, toggle }) =>
+        variant === 'chip' ? (
+          // Never "active": this moves you through the list rather than
+          // narrowing it, so a dark fill would say something untrue about why
+          // the list looks the way it does.
+          <FilterChip open={open} onClick={toggle} icon={icon} label={label} />
+        ) : (
+          <ControlTrigger label={label} icon={icon} open={open} toggle={toggle} />
+        )
+      }
+    >
       {(close) => (
         <div>
           <div className="mb-1.5 flex items-center justify-between">

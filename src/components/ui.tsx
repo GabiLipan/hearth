@@ -10,7 +10,8 @@ import {
   type InputHTMLAttributes,
   type SelectHTMLAttributes,
 } from 'react'
-import { X, ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { X, ChevronLeft, ChevronRight, ChevronDown, type LucideIcon } from 'lucide-react'
 import type { Account, Category } from '../lib/db'
 import { accountFace } from '../lib/accounts'
 import { slotVar } from '../lib/palette'
@@ -868,6 +869,208 @@ export function Empty({ icon: Icon, title, hint, action }: { icon: LucideIcon; t
 export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className={cx('mb-3 flex flex-wrap items-center gap-2 md:mb-2.5 md:gap-1.5', className)}>{children}</div>
+  )
+}
+
+/* ---------- Filter bar (phones) ---------- */
+/**
+ * What a phone gets instead of a toolbar: one scrolling row of chips.
+ *
+ * A `Toolbar` shares out `CONTROL_H` controls across the width and wraps what
+ * does not fit, which is right under a cursor and ruinous on a 375px screen —
+ * Activity spent about 290px, roughly two fifths of what was visible, before
+ * the first transaction. Four wrapped rows became one that scrolls.
+ *
+ * The bar is the state, which is the reason it is chips and not a single
+ * "Filters (2)" button: an active filter fills dark and carries a cross, so
+ * what is narrowing the list can be read and undone without opening anything.
+ * That is the whole trade against the tidier pattern, and it is the right one
+ * on a page you re-filter constantly.
+ *
+ * The negative margin lets the row scroll edge to edge while the chips still
+ * line up with the page's padding at rest.
+ */
+export function FilterBar({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cx('no-scrollbar -mx-4 mb-3 flex items-center gap-1.5 overflow-x-auto px-4 py-1 md:hidden', className)}>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * One chip in that row.
+ *
+ * `h-9` — 36px — rather than the 44px every other control wears. It is under
+ * the usual touch minimum on purpose and only here: these sit in a scrolling
+ * secondary row where the alternative is not a bigger target but no room for
+ * the list, and both iOS and Android ship this control at about this size. A
+ * chip that DOES something irreversible does not belong in this row.
+ */
+export function FilterChip({
+  icon,
+  label,
+  active,
+  onClick,
+  /** Present on an active chip: clears the filter without opening the panel. */
+  onClear,
+  /** A chip that opens a panel says so; one that toggles does not. */
+  chevron = true,
+  open,
+  className,
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  icon?: ReactNode
+  label?: ReactNode
+  active?: boolean
+  onClear?: () => void
+  chevron?: boolean
+  open?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-expanded={chevron ? !!open : undefined}
+      className={cx(
+        'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors',
+        label ? '' : 'w-9 justify-center px-0',
+        active ? 'bg-ink text-page' : 'bg-surface-2 text-ink-2',
+        className,
+      )}
+      {...rest}
+    >
+      {icon && <span className="shrink-0">{icon}</span>}
+      {label && <span className="max-w-40 truncate">{label}</span>}
+      {onClear && active ? (
+        // A span, not a nested button — a button inside a button is invalid and
+        // Safari drops the inner one's clicks. The chip's own handler is
+        // suppressed instead.
+        <span
+          role="button"
+          tabIndex={-1}
+          aria-label="Clear"
+          onClick={(e) => {
+            e.stopPropagation()
+            onClear()
+          }}
+          className="-mr-1 grid size-5 shrink-0 place-items-center rounded-full hover:bg-page/20"
+        >
+          <X size={12} />
+        </span>
+      ) : (
+        chevron && <ChevronDown size={14} className={cx('shrink-0 opacity-60 transition-transform', open && 'rotate-180')} />
+      )}
+    </button>
+  )
+}
+
+/**
+ * A button that opens a panel under itself.
+ *
+ * Deliberately not a `Sheet`: these are filters you adjust and re-adjust while
+ * reading the list behind them, and a full-screen sheet for "tick two accounts"
+ * hides the thing you are filtering.
+ *
+ * `trigger` is a render prop rather than a set of appearance flags because the
+ * same panel hangs off two quite different controls — a `CONTROL_H` toolbar
+ * button on a wide screen, a chip on a phone — and the panel does not care
+ * which.
+ *
+ * ## Why the panel is a portal
+ *
+ * It used to be `absolute` inside the trigger's own box, which worked until the
+ * triggers moved into `FilterBar`. That bar is `overflow-x-auto`, and an
+ * overflow container clips absolutely positioned descendants on BOTH axes — so
+ * the panel opened, the chevron turned, and nothing appeared. There is no way
+ * to keep a bar that scrolls and a panel that escapes it in the same box.
+ *
+ * The cost of a portal is that position has to be maintained by hand. It is
+ * measured from the trigger on open and re-measured on scroll — in the capture
+ * phase, so the bar's own sideways scroll counts as well as the page's — and
+ * clamped after the fact so a panel hanging off the last chip in the row does
+ * not run off the right of the screen.
+ */
+export function Popover({
+  align = 'left',
+  width,
+  trigger,
+  children,
+}: {
+  align?: 'left' | 'right'
+  /** Tailwind width class for the panel. */
+  width: string
+  trigger: (state: { open: boolean; toggle: () => void }) => ReactNode
+  children: (close: () => void) => ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null)
+  const anchor = useRef<HTMLDivElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setAt(null)
+      return
+    }
+    const place = () => {
+      const a = anchor.current?.getBoundingClientRect()
+      if (!a) return
+      // The panel's own width is only knowable once it exists, so the first
+      // pass uses the trigger's edge and the second corrects it. `w-64` and
+      // friends are classes, not numbers — there is nothing to read ahead.
+      const w = panel.current?.offsetWidth ?? 0
+      const wanted = align === 'right' ? a.right - w : a.left
+      const max = window.innerWidth - w - 8
+      setAt({ top: a.bottom + 6, left: Math.max(8, Math.min(wanted, max)) })
+    }
+    place()
+    // Capture, so this also fires for the filter bar scrolling sideways
+    // underneath the panel — a scroll event on an inner element does not bubble.
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [open, align])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node
+      // Both halves: the panel is not a descendant of the trigger any more.
+      if (!anchor.current?.contains(t) && !panel.current?.contains(t)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('pointerdown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={anchor} className="relative shrink-0">
+      {trigger({ open, toggle: () => setOpen((o) => !o) })}
+      {open &&
+        createPortal(
+          <div
+            ref={panel}
+            // z-40 rather than z-50: above the sticky header and the tab bar,
+            // below a Sheet, which is the one thing that must cover it.
+            className={cx(
+              'animate-fade fixed z-40 max-w-[calc(100vw-1rem)] rounded-xl bg-surface p-2 shadow-xl ring-1 ring-hairline',
+              width,
+            )}
+            // Off screen until measured, rather than flashing at 0,0 first.
+            style={at ? { top: at.top, left: at.left } : { top: -9999, left: -9999 }}
+          >
+            {children(() => setOpen(false))}
+          </div>,
+          document.body,
+        )}
+    </div>
   )
 }
 

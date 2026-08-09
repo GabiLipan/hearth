@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Table2, ChartPie, ChevronLeft, Receipt, Download } from 'lucide-react'
+import { Table2, ChartPie, ChevronLeft, Check, Receipt, Download } from 'lucide-react'
 import {
   useAccounts,
   useAllTransactions,
@@ -33,7 +33,7 @@ import {
   type BookId,
 } from '../lib/books'
 import { useApp } from '../state/AppContext'
-import { Card, Segmented, Empty, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, cx } from '../components/ui'
+import { Card, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { CategoryDonut, SpendBars, IncomeSpendBars, NetLine } from '../components/charts'
@@ -57,10 +57,71 @@ import {
   topPayees,
 } from '../lib/insights'
 
+/* ---------- The four decisions this page offers ---------- */
+/*
+ * Written once and shared by both bars. A wide screen shows them as segmented
+ * controls, all options visible; a phone shows the same lists behind chips.
+ * Keeping the options here is what stops the two drifting into offering
+ * different answers to the same question.
+ */
+type ReportView = 'charts' | 'table'
+type ReportRange = '6' | '12'
+type ReportPeriod = 'month' | 'year' | 'custom'
+
+const VIEW_OPTIONS: { value: ReportView; label: ReactNode }[] = [
+  { value: 'charts', label: <span className="flex items-center justify-center gap-1"><ChartPie size={14} /> Charts</span> },
+  { value: 'table', label: <span className="flex items-center justify-center gap-1"><Table2 size={14} /> Table</span> },
+]
+const RANGE_OPTIONS: { value: ReportRange; label: string }[] = [
+  { value: '6', label: '6 mo' },
+  { value: '12', label: '12 mo' },
+]
+const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
+  { value: 'month', label: 'Month' },
+  { value: 'year', label: 'Year' },
+  { value: 'custom', label: 'Range' },
+]
+
+/** A chip that opens a short list and reports which of it is chosen. */
+function ChoiceChip<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (next: T) => void
+}) {
+  return (
+    <Popover
+      width="w-40"
+      trigger={({ open, toggle }) => (
+        <FilterChip open={open} onClick={toggle} label={options.find((o) => o.value === value)?.label ?? ''} />
+      )}
+    >
+      {(close) =>
+        options.map((o) => (
+          <button
+            key={o.value}
+            onClick={() => {
+              onChange(o.value)
+              close()
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
+          >
+            <Check size={15} className={cx('shrink-0', o.value === value ? 'text-accent' : 'opacity-0')} />
+            {o.label}
+          </button>
+        ))
+      }
+    </Popover>
+  )
+}
+
 export default function Reports() {
   const { money } = useApp()
   const [month, setMonth] = useState(thisMonthKey())
-  const [range, setRange] = useState<'6' | '12'>('6')
+  const [range, setRange] = useState<ReportRange>('6')
   /**
    * A month at a time, or a whole year.
    *
@@ -71,7 +132,7 @@ export default function Reports() {
    * adding them, since both are derived and adding them would count the same
    * money twice.
    */
-  const [period, setPeriod] = useState<'month' | 'year' | 'custom'>('month')
+  const [period, setPeriod] = useState<ReportPeriod>('month')
   /**
    * A range drawn by hand. Held as two dates rather than derived, and defaulted
    * to the month in view so switching to it starts somewhere recognisable
@@ -79,7 +140,7 @@ export default function Reports() {
    */
   const [from, setFrom] = useState(() => `${thisMonthKey()}-01`)
   const [to, setTo] = useState(() => todayISO())
-  const [view, setView] = useState<'charts' | 'table'>('charts')
+  const [view, setView] = useState<ReportView>('charts')
   const [book, setBook] = useBook()
   /** The category being drilled into, or null for the top level. */
   const [drill, setDrill] = useState<string | null>(null)
@@ -321,28 +382,64 @@ export default function Reports() {
     return <Empty icon={ChartPie} title="Nothing to report yet" hint="Add or import some transactions and your charts will appear here." />
   }
 
+  /**
+   * One stepper, stepping whichever unit is being shown. A year is held as its
+   * January, so everything downstream still receives a month key and nothing
+   * else has to know which mode this is.
+   *
+   * Built once and rendered into both bars, so the two form factors cannot
+   * disagree about what "Range" means.
+   */
+  const stepper =
+    period === 'custom' ? (
+      <div className="flex shrink-0 items-center gap-1.5">
+        <TextInput
+          type="date"
+          value={from}
+          max={to}
+          aria-label="From"
+          onChange={(e) => setFrom(e.target.value)}
+          className="w-40"
+        />
+        <span className="text-sm text-ink-3">to</span>
+        <TextInput
+          type="date"
+          value={to}
+          min={from}
+          max={todayISO()}
+          aria-label="To"
+          onChange={(e) => setTo(e.target.value)}
+          className="w-40"
+        />
+      </div>
+    ) : period === 'month' ? (
+      <div className="shrink-0">
+        <MonthStepper month={month} onChange={changeMonth} label={monthLabel} canGoForward={month < thisMonthKey()} />
+      </div>
+    ) : (
+      <div className="shrink-0">
+        <MonthStepper
+          month={month}
+          onChange={changeMonth}
+          label={(k) => k.slice(0, 4)}
+          step={12}
+          canGoForward={year < thisMonthKey().slice(0, 4)}
+        />
+      </div>
+    )
+
   return (
     <div>
-      <Toolbar>
-        <BookSwitcher book={book} onChange={changeBook} className="w-full md:w-auto" />
+      {/* Wide screens keep every control visible at once. */}
+      <Toolbar className="hidden md:flex">
+        <BookSwitcher book={book} onChange={changeBook} className="hidden md:flex md:w-auto" />
         <Segmented
           value={view}
           onChange={setView}
           className="w-40"
-          options={[
-            { value: 'charts', label: <span className="flex items-center justify-center gap-1"><ChartPie size={14} /> Charts</span> },
-            { value: 'table', label: <span className="flex items-center justify-center gap-1"><Table2 size={14} /> Table</span> },
-          ]}
+          options={VIEW_OPTIONS}
         />
-        <Segmented
-          value={range}
-          onChange={setRange}
-          className="w-36"
-          options={[
-            { value: '6', label: '6 mo' },
-            { value: '12', label: '12 mo' },
-          ]}
-        />
+        <Segmented value={range} onChange={setRange} className="w-36" options={RANGE_OPTIONS} />
         <Segmented
           value={period}
           onChange={(p) => {
@@ -350,48 +447,38 @@ export default function Reports() {
             setPeriod(p)
           }}
           className="w-52"
-          options={[
-            { value: 'month', label: 'Month' },
-            { value: 'year', label: 'Year' },
-            { value: 'custom', label: 'Range' },
-          ]}
+          options={PERIOD_OPTIONS}
         />
-        {/* One stepper, stepping whichever unit is being shown. A year is held
-            as its January, so everything downstream still receives a month key
-            and nothing else has to know which mode this is. */}
-        {period === 'custom' ? (
-          <div className="flex items-center gap-1.5">
-            <TextInput
-              type="date"
-              value={from}
-              max={to}
-              aria-label="From"
-              onChange={(e) => setFrom(e.target.value)}
-              className="w-40"
-            />
-            <span className="text-sm text-ink-3">to</span>
-            <TextInput
-              type="date"
-              value={to}
-              min={from}
-              max={todayISO()}
-              aria-label="To"
-              onChange={(e) => setTo(e.target.value)}
-              className="w-40"
-            />
-          </div>
-        ) : period === 'month' ? (
-          <MonthStepper month={month} onChange={changeMonth} label={monthLabel} canGoForward={month < thisMonthKey()} />
-        ) : (
-          <MonthStepper
-            month={month}
-            onChange={changeMonth}
-            label={(k) => k.slice(0, 4)}
-            step={12}
-            canGoForward={year < thisMonthKey().slice(0, 4)}
-          />
-        )}
+        {stepper}
       </Toolbar>
+
+      {/* A phone gets the same four decisions in one scrolling row. Three
+          segmented controls stacked to about 250px before a single chart, which
+          on this page is most of what there was room for. The stepper stays at
+          full height inside the bar: it is the one control here that is pressed
+          repeatedly rather than set once. */}
+      <FilterBar>
+        {/* Two states, so a toggle rather than a menu — it shows where you are
+            and one tap is the whole interaction. */}
+        <FilterChip
+          chevron={false}
+          aria-pressed={view === 'table'}
+          title="Switch between charts and the table"
+          onClick={() => setView(view === 'charts' ? 'table' : 'charts')}
+          icon={view === 'charts' ? <ChartPie size={15} /> : <Table2 size={15} />}
+          label={view === 'charts' ? 'Charts' : 'Table'}
+        />
+        <ChoiceChip
+          value={period}
+          options={PERIOD_OPTIONS}
+          onChange={(p) => {
+            setDrill(null)
+            setPeriod(p)
+          }}
+        />
+        <ChoiceChip value={range} options={RANGE_OPTIONS} onChange={setRange} />
+        {stepper}
+      </FilterBar>
 
       {/* The month in figures, in this book's own words. On the household book
           the contributions line is the one that does not exist anywhere else:

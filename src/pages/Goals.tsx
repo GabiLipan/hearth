@@ -79,8 +79,10 @@ export default function Goals() {
         </Button>
       </Toolbar>
 
-      <Toolbar>
-        <BookSwitcher book={book} onChange={setBook} className="w-full md:w-auto" />
+      {/* Wide screens only: on a phone the lens lives in the header, so this
+          whole row would be an empty margin. */}
+      <Toolbar className="hidden md:flex">
+        <BookSwitcher book={book} onChange={setBook} className="hidden md:flex md:w-auto" />
       </Toolbar>
 
       {rows.length === 0 ? (

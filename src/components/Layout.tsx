@@ -12,6 +12,7 @@ import { cx, useViewportInset } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
+import { BookLens } from './BookSwitcher'
 
 const NAV = [
   { to: '/', label: 'Home', icon: Home },
@@ -21,6 +22,14 @@ const NAV = [
   { to: '/goals', label: 'Goals', icon: Target },
   { to: '/reports', label: 'Reports', icon: ChartPie },
 ]
+
+/**
+ * Pages whose figures depend on which book you are looking at.
+ *
+ * Settings and Rules are not about money, so a lens in their header would be a
+ * control with nothing to act on.
+ */
+const LENS_PATHS = new Set(['/', '/activity', '/budgets', '/bills', '/goals', '/reports'])
 
 const TITLES: Record<string, string> = {
   '/': 'Home',
@@ -187,8 +196,12 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* Mobile top bar */}
       <header ref={headerRef} className="pt-safe sticky top-0 z-30 border-b border-hairline bg-page/80 backdrop-blur-md md:hidden">
-        <div className="flex h-13 items-center justify-between px-4 py-2.5">
-          <h1 className="text-xl font-bold tracking-tight">{title}</h1>
+        <div className="flex h-13 items-center gap-2 px-4 py-2.5">
+          <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight">{title}</h1>
+          {/* The book lens, on the pages that have one. It used to be a
+              full-width row inside each page; here it costs nothing and is
+              always in the same place. */}
+          {LENS_PATHS.has(pathname) && <BookLens />}
           <NavLink
             to="/settings"
             aria-label="Settings"

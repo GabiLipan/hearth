@@ -345,6 +345,30 @@ the single place a level comes from.
   animate the first measurement" flag is a passive effect rather than a
   `requestAnimationFrame` for the reason `BottomTabs` gives: a sheet opened while
   the tab is backgrounded would otherwise never switch its transition on.
+- **An `overflow-x-auto` bar clips an `absolute` panel on BOTH axes.** The
+  filter chips scroll sideways, so a dropdown positioned inside one opened,
+  turned its chevron, and showed nothing. There is no way to have a bar that
+  scrolls and a panel that escapes it in the same box, so `Popover` portals its
+  panel to `document.body` and maintains the position by hand — measured on
+  open, re-measured on scroll **in the capture phase** (a scroll on the bar does
+  not bubble to `window`), and clamped afterwards against the panel's own
+  measured width, which is only knowable once it exists because `w-64` is a
+  class and not a number. Outside-click has to test the anchor *and* the panel:
+  the panel is no longer a descendant of the trigger.
+- **`useBook` is one value for the whole app, not one per component.** It was
+  `useState` inside the hook, which was fine while the switcher and the figures
+  were the same screen. On a phone the lens is in the header and the figures are
+  in the page, so that would have meant changing the lens and watching nothing
+  happen. It is a module-level value with subscribers, read through
+  `useSyncExternalStore`. Anything else that becomes a lens rather than a page's
+  own state needs the same treatment.
+- **A phone gets `FilterBar`, a wide screen gets `Toolbar`.** Both are rendered,
+  one is hidden — `Toolbar className="hidden md:flex"` and `FilterBar` is
+  `md:hidden`. The controls behind them are shared and take a `variant`, so the
+  two cannot drift apart in behaviour, only in size. `hidden` beats a base
+  `flex` in Tailwind's generated order, and `md:flex` beats both inside its
+  media query; that ordering is load-bearing and worth re-checking rather than
+  assuming if the utilities ever change.
 - **A row tint cannot reach a sticky column.** `table.pinned` paints an opaque
   fill of its own, so `bg-accent/5` on the `<tr>` stops dead at the first cell.
   `.tint-transfer` in `index.css` is plain unlayered CSS mixing the tint into

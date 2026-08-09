@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { classifyAccounts, classifyFlows, type BookId, type BookMap, type Flow } from './books'
 import {
   db,
@@ -237,29 +237,56 @@ const BOOK_KEY = 'book'
  * enough that the page does not paint the household's figures and then flip to
  * yours, which would be alarming on a page full of money.
  */
-export function useBook(): [BookId, (next: BookId) => void] {
-  const [book, setBook] = useState<BookId>('household')
-  /**
-   * Whether this page has already said which book it wants.
-   *
-   * The stored value arrives asynchronously, so anything choosing a book while
-   * the page is mounting — a drill-through from Reports carrying `?book=` — is
-   * otherwise overwritten a tick later by whatever was on the device before.
-   * An explicit choice always wins over the one being loaded.
-   */
-  const chosen = useRef(false)
+/**
+ * One value for the whole app, not one per component.
+ *
+ * This used to be `useState` inside the hook, which was fine while the switcher
+ * and the page that read it were the same screen. They are not any more: on a
+ * phone the lens lives in the header and the figures live in the page below it,
+ * so two `useState`s would have meant changing the lens and watching nothing
+ * happen. A module-level value with subscribers keeps every reader on the same
+ * answer, and `useSyncExternalStore` is the supported way to read one.
+ *
+ * The stored value still arrives asynchronously, and an explicit choice still
+ * wins over the one being loaded — but both facts are now single, rather than
+ * one copy per mounted component.
+ */
+let bookValue: BookId = 'household'
+let bookChosen = false
+let bookLoading = false
+const bookSubs = new Set<() => void>()
 
-  useEffect(() => {
-    void getSetting(BOOK_KEY).then((raw) => {
-      if (chosen.current) return
-      if (raw === 'household' || raw === 'mine' || raw === 'all') setBook(raw)
-    })
-  }, [])
+const emitBook = () => bookSubs.forEach((fn) => fn())
+
+function loadBookOnce() {
+  if (bookLoading) return
+  bookLoading = true
+  void getSetting(BOOK_KEY).then((raw) => {
+    if (bookChosen) return
+    if (raw === 'household' || raw === 'mine' || raw === 'all') {
+      bookValue = raw
+      emitBook()
+    }
+  })
+}
+
+export function useBook(): [BookId, (next: BookId) => void] {
+  const book = useSyncExternalStore(
+    useCallback((fn: () => void) => {
+      bookSubs.add(fn)
+      return () => {
+        bookSubs.delete(fn)
+      }
+    }, []),
+    () => bookValue,
+  )
+  useEffect(loadBookOnce, [])
 
   const choose = useCallback((next: BookId) => {
-    chosen.current = true
-    setBook(next)
+    bookChosen = true
+    bookValue = next
     void setSetting(BOOK_KEY, next)
+    emitBook()
   }, [])
 
   return [book, choose]
