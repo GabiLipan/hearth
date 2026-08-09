@@ -37,8 +37,16 @@ import { Card, CategoryDot, cx } from './ui'
  * rather than where the finger is.
  */
 
-/** How far right you drag to make something a subcategory. */
-const INDENT_PX = 26
+/**
+ * How far sideways you drag to change a row's level.
+ *
+ * Short, because the handle is on the trailing edge: there are only about 38px
+ * between it and the side of a 375px screen, so a threshold much past this is
+ * one a thumb cannot reach without lifting off. It does not need to be long —
+ * the level defaults to whatever the row above implies, so the gesture is only
+ * for the cases where that guess is wrong.
+ */
+const INDENT_PX = 18
 /** How close to the edge of the screen starts an auto-scroll. */
 const EDGE = 84
 
@@ -268,8 +276,11 @@ export function CategoryTree({
                 <div
                   data-row={row.id}
                   className={cx(
-                    'relative flex items-center gap-2 pr-2 transition-colors',
-                    row.depth === 1 ? 'pl-8 md:pl-7' : 'pl-2',
+                    'relative flex items-center gap-2 pr-1 transition-colors',
+                    // The indent is now the padding alone, the handle having
+                    // moved out of the left edge — 24px between the two levels,
+                    // the same step as before.
+                    row.depth === 1 ? 'pl-9' : 'pl-3',
                     lifted && 'z-20 rounded-xl bg-surface/95 shadow-lg ring-1 ring-accent/40 backdrop-blur-sm',
                     travelling && 'opacity-40',
                   )}
@@ -282,22 +293,8 @@ export function CategoryTree({
                   }
                 >
                   <button
-                    aria-label={`Move ${category.name}`}
-                    // `touch-action: none` only here: the browser must not treat
-                    // a drag off the handle as a scroll, but the rest of the
-                    // list has to keep scrolling normally.
-                    className="grid size-9 shrink-0 cursor-grab touch-none place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-ink-2 active:cursor-grabbing"
-                    onPointerDown={(e) => begin(e, row.id)}
-                    onPointerMove={track}
-                    onPointerUp={finish}
-                    onPointerCancel={stop}
-                    onKeyDown={(e) => onKey(e, row.id)}
-                  >
-                    <GripVertical size={16} />
-                  </button>
-                  <button
                     onClick={() => onOpen(category)}
-                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2.5 pr-2 text-left desktop:py-1.5"
+                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2.5 text-left desktop:py-1.5"
                   >
                     <CategoryDot
                       category={{ ...category, ...style }}
@@ -313,6 +310,24 @@ export function CategoryTree({
                       {category.name}
                     </span>
                     {category.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
+                  </button>
+                  {/* On the trailing edge, where a list you can reorder puts it
+                      on both phone platforms — and where it does not push the
+                      badges out of the column they share with every other list
+                      in the app. */}
+                  <button
+                    aria-label={`Move ${category.name}`}
+                    // `touch-action: none` only here: the browser must not treat
+                    // a drag off the handle as a scroll, but the rest of the
+                    // list has to keep scrolling normally.
+                    className="grid size-9 shrink-0 cursor-grab touch-none place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-ink-2 active:cursor-grabbing"
+                    onPointerDown={(e) => begin(e, row.id)}
+                    onPointerMove={track}
+                    onPointerUp={finish}
+                    onPointerCancel={stop}
+                    onKeyDown={(e) => onKey(e, row.id)}
+                  >
+                    <GripVertical size={16} />
                   </button>
                 </div>
                 </div>
@@ -345,7 +360,9 @@ function Line({ depth }: { depth: Depth }) {
   return (
     // Above the lifted row (z-20), which would otherwise pass straight over the
     // one thing the drag is being aimed at.
-    <div className={cx('pointer-events-none relative z-30 h-0', depth === 1 ? 'ml-14 md:ml-13' : 'ml-3')} aria-hidden>
+    // Aligned with the badge at each level — the same `pl-3` / `pl-9` the rows
+    // carry, so the line reads as "this deep" rather than as its own margin.
+    <div className={cx('pointer-events-none relative z-30 h-0', depth === 1 ? 'ml-9' : 'ml-3')} aria-hidden>
       <div className="absolute inset-x-0 -top-px h-0.5 rounded-full bg-accent">
         <span className="absolute -left-1 -top-[3px] size-2 rounded-full bg-accent" />
       </div>
