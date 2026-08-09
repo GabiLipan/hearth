@@ -13,10 +13,13 @@ of finished work stops being read.
 Right now: **nothing waiting on us**, and **3 pieces of work left** — two of
 them needing nothing at all.
 
-**Two migrations need applying by hand**, like the others:
-`supabase/13-paid-for-household.sql` and `supabase/14-book-override.sql`.
-Until then the tick box on a transaction and the book picker on an account both
-save nothing.
+**One migration needs applying by hand**, like the others:
+`supabase/15-purge-account.sql`. Until then the bin in Settings only fills up —
+a deleted account can be restored but never got rid of, and "Delete for good"
+will fail with "could not find the function".
+
+Run `supabase/00-which-migrations-applied.sql` in the SQL editor when unsure
+what a project has had; it now covers 11 through 15 as well.
 
 ---
 
@@ -73,6 +76,14 @@ between books.
 
 **Reimbursements between us use the same mechanism**, and are built with it
 rather than after it.
+
+**A deleted account can be destroyed, but only from the bin.** Built —
+migration 15. Deleting stays reversible and purging is a separate press on a
+separate screen, because the bin is the entire safety net: there is no argument
+to `delete_account()` that skips it. Purging bumps the visibility epoch, which
+looks wrong (nobody's access changes) and is not: it removes the tombstone a
+device that has been offline since the delete was going to learn from, and the
+epoch is the only signal that survives a row ceasing to exist.
 
 **Multi-currency is out of scope for now.** Foreign amounts stay silently wrong;
 it is written down so nobody rediscovers it as a bug.

@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `14`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `15`, then `local/98-grants.sql`, then `exec`
 a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -59,6 +59,7 @@ read-only detector that reports which are present — run it when unsure.
 | `12-transfer-categories.sql` | `transactions.prior_category_id`, so unlinking a transfer gives each leg back the category linking took off it |
 | `13-paid-for-household.sql` | `transactions.paid_for_household` — household spending paid from a personal account |
 | `14-book-override.sql` | `accounts.book_override` — say which book an account is in, where deriving it from grants is wrong |
+| `15-purge-account.sql` | `purge_account` — the bottom of the bin: destroy a deleted account and its rows for good |
 
 All are re-runnable, with **one ordering trap**: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
@@ -163,13 +164,20 @@ Five rules that follow:
   `unlink_transfer()`, from the other direction.
 - **There are no DELETE policies anywhere.** Deletion is `set deleted_at`, an
   UPDATE. A hard delete would leave the other device's cache holding the row
-  forever with nothing left to replicate.
+  forever with nothing left to replicate. `purge_account()` (migration 15) is
+  the single exception and shows what one costs: it is reachable only from the
+  bin, so the row has already been tombstoned once; it is owner-only, checked by
+  hand because no policy is going to do it; and it bumps the epoch — not because
+  anyone's access changed, but because destroying the tombstone leaves a device
+  that has been offline since the delete with nothing to learn it from.
 - **Grants outlive the accounts they point at.** `delete_account()` and
   `wipe_household()` deliberately leave `account_grants` alone: `accounts_select`
   needs a grant, so revoking one would leave every other device holding the
   account forever with no tombstone it is allowed to read. Migration 11 depends
   on this a second time — `restore_account()` can recognise an owner *after* the
-  account is gone only because the grant is still there.
+  account is gone only because the grant is still there. `purge_account()` is
+  where they finally go, by cascade — there is no row left for them to
+  authorise, and no device left that could be told about one.
 - **An ownerless account is invisible, so listing one needs its own function.**
   `accounts_select` needs a grant, so an account whose grants have all gone —
   what `depart_household()` can leave behind — cannot be seen by anybody,

@@ -55,6 +55,7 @@ import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Fi
 import {
   claimAccount,
   deletedAccounts,
+  purgeAccount,
   restoreAccount,
   unownedAccounts,
   type DeletedAccount,
@@ -205,11 +206,20 @@ const COLUMN_STEPS: [number, number][] = [[1280, 2], [1536, 3]]
  * Fetched on mount rather than watched. Neither list changes without somebody
  * on this device doing something, and polling for a bin nobody has put anything
  * in is a request per minute for nothing.
+ *
+ * The bin also has a bottom now. Without one it only ever fills up — every
+ * account either of us has ever deleted, listed for ever — and it quietly
+ * misrepresents what is stored, because "deleted" reads as gone while every
+ * transaction is still in the table.
  */
 function Recoverable() {
   const [bin, setBin] = useState<DeletedAccount[]>([])
   const [orphans, setOrphans] = useState<UnownedAccount[]>([])
   const [busy, setBusy] = useState<string | null>(null)
+  // Which row has had its destroy button pressed once. An inline second press
+  // rather than a `confirm()`: this is the only irreversible thing in the app,
+  // and a browser dialog is the kind of thing people dismiss without reading.
+  const [arming, setArming] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -235,6 +245,7 @@ function Recoverable() {
       alert(e instanceof Error ? e.message : 'That did not work.')
     } finally {
       setBusy(null)
+      setArming(null)
     }
   }
 
@@ -248,20 +259,57 @@ function Recoverable() {
           <div key={a.id} className="flex flex-wrap items-center gap-2 px-4 py-3 md:px-3">
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium md:text-sm">{a.name}</p>
+              {/* Once armed the line says what goes, not what comes back. The
+                  same count, read the other way round, is the whole warning. */}
               <p className="truncate text-xs text-ink-3">
-                Deleted {fmtFullDate(a.deletedAt.slice(0, 10))}
-                {a.transactionCount > 0 &&
-                  ` · ${a.transactionCount} transaction${a.transactionCount === 1 ? '' : 's'} would come back`}
+                {arming === a.id ? (
+                  <span className="text-critical-text">
+                    Destroy this and its {a.transactionCount} transaction
+                    {a.transactionCount === 1 ? '' : 's'} for good? This cannot be undone.
+                  </span>
+                ) : (
+                  <>
+                    Deleted {fmtFullDate(a.deletedAt.slice(0, 10))}
+                    {a.transactionCount > 0 &&
+                      ` · ${a.transactionCount} transaction${a.transactionCount === 1 ? '' : 's'} would come back`}
+                  </>
+                )}
               </p>
             </div>
-            <Button
-              size="sm"
-              variant="subtle"
-              disabled={busy !== null}
-              onClick={() => void run(a.id, () => restoreAccount(a.id))}
-            >
-              <Undo2 size={14} /> Restore
-            </Button>
+            {arming === a.id ? (
+              <>
+                <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setArming(null)}>
+                  Keep it
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={busy !== null}
+                  onClick={() => void run(a.id, () => purgeAccount(a.id))}
+                >
+                  <Trash2 size={14} /> Destroy
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy !== null}
+                  onClick={() => setArming(a.id)}
+                >
+                  <Trash2 size={14} /> Delete for good
+                </Button>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  disabled={busy !== null}
+                  onClick={() => void run(a.id, () => restoreAccount(a.id))}
+                >
+                  <Undo2 size={14} /> Restore
+                </Button>
+              </>
+            )}
           </div>
         ))}
 

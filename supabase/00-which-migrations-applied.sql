@@ -91,6 +91,55 @@ select '10-goal-transfers.sql',
        'set_transfer_goal() + three-argument link_transfer() exist'
 
 union all
+-- Until this reads true, a deleted account is gone for good as far as the app
+-- is concerned (the rows are all still there, but only the SQL editor can unset
+-- `deleted_at`), and an account whose last owner departed is invisible to
+-- everybody including the admin entitled to claim it.
+select '11-account-recovery.sql',
+       to_regprocedure('public.restore_account(uuid)') is not null
+   and to_regprocedure('public.deleted_accounts()') is not null
+   and to_regprocedure('public.claim_account(uuid)') is not null
+   and to_regprocedure('public.unowned_accounts()') is not null,
+       'restore_account() + deleted_accounts() + claim_account() + unowned_accounts() exist'
+
+union all
+-- Until this reads true, unlinking a transfer leaves both legs uncategorised:
+-- linking clears the category and there is nowhere to have remembered it.
+select '12-transfer-categories.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'transactions'
+                  and column_name = 'prior_category_id'),
+       'transactions.prior_category_id exists'
+
+union all
+-- Until this reads true, the tick box on a transaction saves nothing: household
+-- spending paid from a personal account stays personal spending, and the
+-- household's figure for it stays short.
+select '13-paid-for-household.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'transactions'
+                  and column_name = 'paid_for_household'),
+       'transactions.paid_for_household exists'
+
+union all
+-- Until this reads true, the book picker on an account saves nothing and the
+-- book stays derived from the grants, which is right by default and wrong for
+-- the handful of accounts the derivation cannot know about.
+select '14-book-override.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'accounts'
+                  and column_name = 'book_override'),
+       'accounts.book_override exists'
+
+union all
+-- Until this reads true, the bin only fills up: an account you deleted can be
+-- restored but never got rid of, so Settings lists every account either of you
+-- has ever deleted, for ever.
+select '15-purge-account.sql',
+       to_regprocedure('public.purge_account(uuid)') is not null,
+       'purge_account() exists'
+
+union all
 -- Not a migration: a state you can only reach by re-running 09 AFTER 10, which
 -- re-creates the two-argument link_transfer beside the three-argument one.
 -- PostgREST cannot then resolve the call — supabase-js drops `undefined`

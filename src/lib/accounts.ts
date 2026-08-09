@@ -224,6 +224,18 @@ export async function unownedAccounts(): Promise<UnownedAccount[]> {
 export const restoreAccount = (accountId: string) =>
   rpc<number>('restore_account', { p_account_id: accountId })
 
+/**
+ * Destroy a deleted account and everything on it. Returns how many transactions
+ * went with it.
+ *
+ * The one call in the app that removes rows rather than tombstoning them, and
+ * the only one that cannot be undone — the bin is the whole safety net, so the
+ * server refuses this on an account that is not already in it. Owner only, like
+ * restoring.
+ */
+export const purgeAccount = (accountId: string) =>
+  rpc<number>('purge_account', { p_account_id: accountId })
+
 /** A household admin takes ownership of an account nobody owns. */
 export const claimAccount = (accountId: string) =>
   rpc<string>('claim_account', { p_account_id: accountId })
