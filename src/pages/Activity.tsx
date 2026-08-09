@@ -9,7 +9,7 @@ import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel } from '../lib/categories'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { Card, CategoryDot, Empty, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
+import { Card, CategoryDot, CONTROL_H, Empty, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { TransactionForm } from '../components/TransactionForm'
@@ -716,8 +716,9 @@ function Popover({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className={cx(
-          'flex h-11 max-w-52 items-center gap-1.5 rounded-xl bg-surface-2 px-3 text-sm font-medium text-ink-2',
-          'transition-colors hover:text-ink desktop:h-9 desktop:px-2.5 md:rounded-lg',
+          CONTROL_H,
+          'flex max-w-52 items-center gap-1.5 rounded-xl bg-surface-2 px-3 text-sm font-medium text-ink-2',
+          'transition-colors hover:text-ink desktop:px-2.5 md:rounded-lg',
         )}
       >
         <span className="shrink-0 text-ink-3">{icon}</span>

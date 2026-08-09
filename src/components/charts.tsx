@@ -213,61 +213,80 @@ export function CategoryDonut({
   const otherColor = c.ink3
   const colorOf = (s: CategorySlice) => (s.categoryId === OTHER_SLICE_ID ? otherColor : c.slot(s.slot))
   return (
-    <div className="grid items-center gap-3 sm:grid-cols-[220px_minmax(0,1fr)]">
-      <div className="relative mx-auto w-full max-w-[220px]" style={{ height }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={slices}
-              dataKey="totalMinor"
-              nameKey="name"
-              innerRadius="68%"
-              outerRadius="96%"
-              paddingAngle={2}
-              strokeWidth={2}
-              stroke={c.surface}
-              // Recharts 3.x leaves a padded pie frozen at the first frame of
-              // its entrance animation, so the ring never appears. The donut is
-              // a static summary — draw it outright.
-              isAnimationActive={false}
-            >
-              {slices.map((s) => (
-                <Cell key={s.categoryId} fill={colorOf(s)} />
-              ))}
-            </Pie>
-            <Tooltip
-              content={({ active, payload }) => {
-                const p = payload?.[0]
-                const s = p?.payload as CategorySlice | undefined
-                return (
-                  <ChartTip
-                    active={active}
-                    rows={s ? [{ name: s.name, value: s.totalMinor, color: colorOf(s) }] : []}
-                  />
-                )
-              }}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-        {centerLabel && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-xs text-ink-3">{centerLabel.title}</span>
-            <span className="text-xl font-bold tracking-tight tabular">{centerLabel.value}</span>
-          </div>
-        )}
+    /* A CONTAINER query, not `sm:`. This chart is a full-width panel on
+       Reports and a widget in a 2-to-4 column grid on the home page, so the
+       viewport says nothing useful about how much room it actually has —
+       `sm:` put the legend beside a 220px donut inside a 340px card, and the
+       figures ran off the edge. `@container` asks the card instead.
+
+       The wrapper is not decoration: an element cannot query ITSELF, so
+       `@container` and the `@md:` that reads it have to be on different
+       elements. Putting both on the grid silently leaves it one column for
+       ever, which looks like a layout choice rather than a broken query. */
+    <div className="@container">
+      <div className="grid items-center gap-3 @md:grid-cols-[200px_minmax(0,1fr)] [&>*]:min-w-0">
+        <div className="relative mx-auto w-full max-w-[220px]" style={{ height }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={slices}
+                dataKey="totalMinor"
+                nameKey="name"
+                innerRadius="68%"
+                outerRadius="96%"
+                paddingAngle={2}
+                strokeWidth={2}
+                stroke={c.surface}
+                // Recharts 3.x leaves a padded pie frozen at the first frame of
+                // its entrance animation, so the ring never appears. The donut is
+                // a static summary — draw it outright.
+                isAnimationActive={false}
+              >
+                {slices.map((s) => (
+                  <Cell key={s.categoryId} fill={colorOf(s)} />
+                ))}
+              </Pie>
+              <Tooltip
+                content={({ active, payload }) => {
+                  const p = payload?.[0]
+                  const s = p?.payload as CategorySlice | undefined
+                  return (
+                    <ChartTip
+                      active={active}
+                      rows={s ? [{ name: s.name, value: s.totalMinor, color: colorOf(s) }] : []}
+                    />
+                  )
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+          {centerLabel && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-xs text-ink-3">{centerLabel.title}</span>
+              <span className="text-xl font-bold tracking-tight tabular">{centerLabel.value}</span>
+            </div>
+          )}
+        </div>
+        {/* The legend wraps into columns on a wide card rather than stretching
+            each row until the name and its figure sit an inch apart. */}
+        <ul className="grid gap-x-6 gap-y-1.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))]">
+          {slices.map((s) => (
+            <li key={s.categoryId} className="flex min-w-0 items-center gap-2.5 text-sm">
+              <span className="size-3 shrink-0 rounded-[4px]" style={{ background: colorOf(s) }} />
+              {/* `min-w-0` is what makes `truncate` do anything here. A flex
+                  item's min-width is auto — its CONTENT's width — so without it
+                  the name refuses to shrink, the row stays as wide as the longest
+                  category, and the amount and percentage are pushed off the card
+                  rather than the name being shortened. */}
+              <span className="min-w-0 flex-1 truncate text-ink-2">{s.name}</span>
+              <span className="shrink-0 font-medium text-ink tabular">{money(s.totalMinor)}</span>
+              <span className="w-10 shrink-0 text-right text-xs text-ink-3 tabular">
+                {Math.round(s.fraction * 100)}%
+              </span>
+            </li>
+          ))}
+        </ul>
       </div>
-      {/* The legend wraps into columns on a wide card rather than stretching
-          each row until the name and its figure sit an inch apart. */}
-      <ul className="grid gap-x-6 gap-y-1.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))]">
-        {slices.map((s) => (
-          <li key={s.categoryId} className="flex items-center gap-2.5 text-sm">
-            <span className="size-3 shrink-0 rounded-[4px]" style={{ background: colorOf(s) }} />
-            <span className="truncate text-ink-2">{s.name}</span>
-            <span className="ml-auto font-medium text-ink tabular">{money(s.totalMinor)}</span>
-            <span className="w-10 text-right text-xs text-ink-3 tabular">{Math.round(s.fraction * 100)}%</span>
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }

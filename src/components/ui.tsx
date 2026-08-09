@@ -169,6 +169,20 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
   )
 }
 
+/**
+ * The height of anything that can sit in a row with anything else.
+ *
+ * Toolbars mix a search box, a select, a segmented control, a month stepper and
+ * a button, and each of those used to arrive at its height its own way — some
+ * from `h-*`, some from padding plus a line box. They landed 4px apart, which
+ * is not enough to look deliberate and is plenty to look broken.
+ *
+ * So: one token, and every control in that list wears it. A control sized by
+ * padding is the thing to avoid — its height then depends on the font, the
+ * label and the breakpoint, and it drifts the moment any of those change.
+ */
+export const CONTROL_H = 'h-11 desktop:h-9'
+
 /* ---------- Buttons ---------- */
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'ghost' | 'danger' | 'subtle'
@@ -183,7 +197,9 @@ export function Button({ variant = 'primary', size = 'md', className, ...rest }:
         'disabled:opacity-40 disabled:pointer-events-none',
         // Touch targets on mobile, tighter hit areas for a precise cursor.
         size === 'sm' && 'h-8 px-3 text-sm desktop:h-7 desktop:px-2.5 desktop:text-xs',
-        size === 'md' && 'h-10 px-4 text-sm desktop:h-9 desktop:px-3.5',
+        // `md` is the toolbar size, so it is CONTROL_H exactly. `sm` (inline in
+        // a list) and `lg` (a sheet's action bar) never sit beside an input.
+        size === 'md' && 'h-11 px-4 text-sm desktop:h-9 desktop:px-3.5',
         size === 'lg' && 'h-12 px-5 text-base desktop:h-10 desktop:px-4 desktop:text-sm',
         variant === 'primary' && 'bg-accent text-accent-ink hover:brightness-110 active:brightness-95',
         variant === 'ghost' && 'text-ink-2 hover:bg-surface-2',
@@ -212,8 +228,9 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       className={cx(
-        'h-11 w-full rounded-xl bg-surface-2 px-3.5 text-ink placeholder:text-ink-3',
-        'desktop:h-9 md:rounded-lg desktop:px-3 md:text-sm',
+        CONTROL_H,
+        'w-full rounded-xl bg-surface-2 px-3.5 text-ink placeholder:text-ink-3',
+        'md:rounded-lg desktop:px-3 md:text-sm',
         'ring-1 ring-transparent outline-none focus:ring-2 focus:ring-accent/60 transition-shadow',
         className,
       )}
@@ -227,8 +244,9 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       className={cx(
-        'h-11 w-full appearance-none rounded-xl bg-surface-2 px-3.5 text-ink',
-        'desktop:h-9 md:rounded-lg desktop:px-3 md:text-sm',
+        CONTROL_H,
+        'w-full appearance-none rounded-xl bg-surface-2 px-3.5 text-ink',
+        'md:rounded-lg desktop:px-3 md:text-sm',
         'ring-1 ring-transparent outline-none focus:ring-2 focus:ring-accent/60',
         className,
       )}
@@ -297,6 +315,10 @@ export function Segmented<T extends string>({
     <div
       ref={trackRef}
       className={cx(
+        // Height from the token, not from the options' padding: this control
+        // sits next to a search box in four different toolbars, and deriving
+        // its height from a line box put it 4px short of one.
+        CONTROL_H,
         'relative flex rounded-xl bg-surface-2 p-1 [--seg-pad:0.25rem] md:rounded-lg md:p-0.5 md:[--seg-pad:0.125rem]',
         className,
       )}
@@ -334,7 +356,11 @@ export function Segmented<T extends string>({
             // `flex-auto` (1 1 auto), not `flex-1` (1 1 0%): width starts from
             // the label and the slack is shared, so a long option is wider than
             // a short one instead of every option being as wide as the longest.
-            'relative min-w-0 flex-auto truncate whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:rounded-md md:px-2.5 desktop:py-1',
+            // `h-full` rather than vertical padding — the track owns the
+            // height now. Left as a plain button rather than a flex box so
+            // `truncate` still applies to the label; a button centres its own
+            // content vertically without being told to.
+            'relative h-full min-w-0 flex-auto truncate whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors md:rounded-md md:px-2.5',
             value === o.value ? 'text-ink' : 'text-ink-3 hover:text-ink-2',
           )}
         >
@@ -749,7 +775,7 @@ export function MonthStepper({
     onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
   return (
-    <div className="flex h-11 items-center rounded-xl bg-surface-2 desktop:h-9 md:rounded-lg">
+    <div className={cx(CONTROL_H, 'flex items-center rounded-xl bg-surface-2 md:rounded-lg')}>
       <button
         className="grid h-full w-9 place-items-center rounded-l-xl text-ink-2 hover:text-ink desktop:w-7 md:rounded-l-lg"
         aria-label={months === 12 ? 'Previous year' : 'Previous month'}
