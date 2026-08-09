@@ -11,6 +11,7 @@ import { useSyncState } from '../hooks/useSync'
 import { cx, useViewportInset } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
+import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
 
 const NAV = [
   { to: '/', label: 'Home', icon: Home },
@@ -30,6 +31,9 @@ const TITLES: Record<string, string> = {
   '/reports': 'Reports',
   '/settings': 'Settings',
   '/settings/rules': 'Rules',
+  // Settings' six groups each get their own screen on a phone, and the top bar
+  // is where they are named — the pages render no heading of their own.
+  ...SETTINGS_GROUP_TITLES,
 }
 
 /**

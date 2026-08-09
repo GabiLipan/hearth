@@ -8,7 +8,7 @@ import Budgets from './pages/Budgets'
 import Bills from './pages/Bills'
 import Goals from './pages/Goals'
 import Reports from './pages/Reports'
-import SettingsPage from './pages/Settings'
+import SettingsPage, { SettingsGroupPage } from './pages/Settings'
 import RulesPage from './pages/Rules'
 
 export default function App() {
@@ -24,7 +24,10 @@ export default function App() {
             <Route path="/goals" element={<Goals />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<SettingsPage />} />
+            {/* Static beats dynamic in React Router's ranking, so `rules`
+                keeps its own page whichever order these two are written in. */}
             <Route path="/settings/rules" element={<RulesPage />} />
+            <Route path="/settings/:group" element={<SettingsGroupPage />} />
           </Routes>
         </Layout>
       </AuthGate>

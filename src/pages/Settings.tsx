@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronRight, Wand2, ArrowLeftRight, Undo2, type LucideIcon } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
+import { Link, Navigate, useParams } from 'react-router-dom'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronLeft, ChevronRight, Wand2, ArrowLeftRight, Undo2, Users, Wallet, Shapes, Palette, Database, type LucideIcon } from 'lucide-react'
 import { db, type AccountGrant, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
@@ -54,7 +54,7 @@ import { rpc } from '../lib/api'
 import { fmtFullDate } from '../lib/dates'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
-import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, cx } from '../components/ui'
+import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, useWide, cx } from '../components/ui'
 import {
   claimAccount,
   deletedAccounts,
@@ -487,12 +487,43 @@ function KnownRoutes() {
 }
 
 
-export default function SettingsPage() {
+/* ---------- The sections, and how they are grouped ---------- */
+
+function AppearanceSection() {
   const { themePref, setThemePref, currency, setCurrency } = useApp()
+  return (
+    <section>
+      <SectionTitle>Appearance</SectionTitle>
+      <Card className="p-4 md:p-3">
+        <Segmented
+          value={themePref}
+          onChange={setThemePref}
+          options={[
+            { value: 'light', label: <span className="flex items-center justify-center gap-1.5"><Sun size={15} /> Light</span> },
+            { value: 'dark', label: <span className="flex items-center justify-center gap-1.5"><Moon size={15} /> Dark</span> },
+            { value: 'system', label: <span className="flex items-center justify-center gap-1.5"><MonitorSmartphone size={15} /> Auto</span> },
+          ]}
+        />
+        <div className="mt-3">
+          <Field label="Currency">
+            <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      </Card>
+    </section>
+  )
+}
+
+function CategoriesSection() {
   const categories = useCategories()
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
-  const rules = useRules()
-  const [editingCat, setEditingCat] = useState<Category | 'new' | null>(null)
+  const [editing, setEditing] = useState<Category | 'new' | null>(null)
   /**
    * Bumped every time the form is opened, and used as its key.
    *
@@ -502,141 +533,104 @@ export default function SettingsPage() {
    * could animate out. A counter changes when a form opens and never when it
    * closes, which is exactly the distinction wanted.
    */
-  const [catOpened, setCatOpened] = useState(0)
-  const openCat = (what: Category | 'new') => {
-    setEditingCat(what)
-    setCatOpened((n) => n + 1)
+  const [opened, setOpened] = useState(0)
+  const open = (what: Category | 'new') => {
+    setEditing(what)
+    setOpened((n) => n + 1)
   }
-  const [demoOpen, setDemoOpen] = useState(false)
-  const columnCount = useColumnCount(COLUMN_STEPS)
-  const fileRef = useRef<HTMLInputElement>(null)
 
-  // Settings are independent blocks, so on a wide screen they flow into columns
-  // rather than one long ribbon down the left edge. `Columns` rather than CSS
-  // `columns`, because Safari fragments cards across a column boundary there
-  // whatever `break-inside` says.
-  //
-  // The gap between sections lives here too. It used to come from a top margin
-  // on SectionTitle, which stopped working the day each section was wrapped in
-  // its own element — see SectionTitle.
   return (
-    <>
-    <Columns count={columnCount} gap="gap-6 md:gap-5" className="max-w-2xl xl:max-w-none">
-      <section>
-        <SectionTitle>Household</SectionTitle>
-        <HouseholdCard />
-      </section>
+    <section>
+      <SectionTitle
+        action={
+          <button onClick={() => open('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
+            <Plus size={14} /> Add
+          </button>
+        }
+      >
+        Categories
+      </SectionTitle>
+      <Card>
+        <ul className="divide-y divide-hairline">
+          {grouped(categories).map(({ parent, children }) => (
+            <li key={parent.id}>
+              <button
+                onClick={() => open(parent)}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-1.5"
+              >
+                <CategoryDot category={{ ...parent, ...styleOf(parent, catMap) }} size={32} className="md:[--dot:24px]" />
+                <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{parent.name}</span>
+                {parent.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
+                <span className="text-xs uppercase tracking-wide text-ink-3">{parent.kind}</span>
+              </button>
+              {children.length > 0 && (
+                <ul className="border-t border-hairline/60 bg-surface-2/30">
+                  {children.map((child) => (
+                    <li key={child.id}>
+                      <button
+                        onClick={() => open(child)}
+                        className="flex w-full items-center gap-3 py-2 pl-11 pr-4 text-left hover:bg-surface-2/60 md:gap-2.5 md:pl-10 md:pr-3 desktop:py-1.5"
+                      >
+                        <CategoryDot category={{ ...child, ...styleOf(child, catMap) }} size={22} />
+                        <span className="min-w-0 flex-1 truncate text-sm">{child.name}</span>
+                        {child.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Card>
 
-      <section>
-        <SectionTitle>People</SectionTitle>
-        <MembersCard />
-      </section>
+      <CategoryForm
+        key={opened}
+        category={editing === 'new' ? undefined : (editing ?? undefined)}
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+      />
+    </section>
+  )
+}
 
-      <UnsavedChanges />
-
-      <Recoverable />
-
-      <section>
-        <SectionTitle>Appearance</SectionTitle>
-        <Card className="p-4 md:p-3">
-          <Segmented
-            value={themePref}
-            onChange={setThemePref}
-            options={[
-              { value: 'light', label: <span className="flex items-center justify-center gap-1.5"><Sun size={15} /> Light</span> },
-              { value: 'dark', label: <span className="flex items-center justify-center gap-1.5"><Moon size={15} /> Dark</span> },
-              { value: 'system', label: <span className="flex items-center justify-center gap-1.5"><MonitorSmartphone size={15} /> Auto</span> },
-            ]}
-          />
-          <div className="mt-3">
-            <Field label="Currency">
-              <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                {CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-        </Card>
-      </section>
-
-      <AccountsSection />
-
-      <section>
-        <SectionTitle
-          action={
-            <button onClick={() => openCat('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
-              <Plus size={14} /> Add
-            </button>
-          }
+function AutomationSection() {
+  const rules = useRules()
+  return (
+    <section>
+      <SectionTitle>Automation</SectionTitle>
+      <Card className="divide-y divide-hairline">
+        {/* Rules moved to their own page. The list here could say what a rule
+            was but never what it had done to your data, which is the only
+            question worth asking of one. */}
+        <Link
+          to="/settings/rules"
+          className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-2.5"
         >
-          Categories
-        </SectionTitle>
-        <Card>
-          <ul className="divide-y divide-hairline">
-            {grouped(categories).map(({ parent, children }) => (
-              <li key={parent.id}>
-                <button
-                  onClick={() => openCat(parent)}
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-1.5"
-                >
-                  <CategoryDot category={{ ...parent, ...styleOf(parent, catMap) }} size={32} className="md:[--dot:24px]" />
-                  <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{parent.name}</span>
-                  {parent.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
-                  <span className="text-xs uppercase tracking-wide text-ink-3">{parent.kind}</span>
-                </button>
-                {children.length > 0 && (
-                  <ul className="border-t border-hairline/60 bg-surface-2/30">
-                    {children.map((child) => (
-                      <li key={child.id}>
-                        <button
-                          onClick={() => openCat(child)}
-                          className="flex w-full items-center gap-3 py-2 pl-11 pr-4 text-left hover:bg-surface-2/60 md:gap-2.5 md:pl-10 md:pr-3 desktop:py-1.5"
-                        >
-                          <CategoryDot category={{ ...child, ...styleOf(child, catMap) }} size={22} />
-                          <span className="min-w-0 flex-1 truncate text-sm">{child.name}</span>
-                          {child.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      </section>
+          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 md:size-8">
+            <Wand2 size={16} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium md:text-sm">Categorisation rules</p>
+            <p className="truncate text-sm text-ink-3 md:text-xs">
+              {rules.length === 0
+                ? 'Nothing learned yet — categorise a payee and it is remembered'
+                : `${rules.length} learned · apply them to transactions you have already recorded`}
+            </p>
+          </div>
+          <ChevronRight size={16} className="shrink-0 text-ink-3" />
+        </Link>
+        <TransferModeRow />
+      </Card>
+    </section>
+  )
+}
 
-      <section>
-        <SectionTitle>Automation</SectionTitle>
-        <Card className="divide-y divide-hairline">
-          {/* Rules moved to their own page. The list here could say what a rule
-              was but never what it had done to your data, which is the only
-              question worth asking of one. */}
-          <Link
-            to="/settings/rules"
-            className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-2.5"
-          >
-            <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 md:size-8">
-              <Wand2 size={16} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-medium md:text-sm">Categorisation rules</p>
-              <p className="truncate text-sm text-ink-3 md:text-xs">
-                {rules.length === 0
-                  ? 'Nothing learned yet — categorise a payee and it is remembered'
-                  : `${rules.length} learned · apply them to transactions you have already recorded`}
-              </p>
-            </div>
-            <ChevronRight size={16} className="shrink-0 text-ink-3" />
-          </Link>
-          <TransferModeRow />
-        </Card>
-      </section>
-
-      <section>
+function DataSection() {
+  const [demoOpen, setDemoOpen] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  return (
+    <section>
       <SectionTitle>Your data</SectionTitle>
       <Card className="space-y-3 p-4 md:p-3">
         <p className="text-sm text-ink-2">
@@ -683,7 +677,7 @@ export default function SettingsPage() {
             onClick={async () => {
               if (
                 confirm(
-                  'Delete every account you own and everything on it, along with your own budgets, goals and categories, and the household\u2019s shared ones? Accounts other people own are untouched, and so is anything private to them. Export a backup first if you want a copy.',
+                  'Delete every account you own and everything on it, along with your own budgets, goals and categories, and the household’s shared ones? Accounts other people own are untouched, and so is anything private to them. Export a backup first if you want a copy.',
                 ) &&
                 confirm('Really erase everything of yours? This cannot be undone.')
               ) {
@@ -696,23 +690,236 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      <p className="mt-4 px-1 text-xs text-ink-3">
-        Hearth · a private family finance app. Install it from your browser's share / install menu for the full app
-        experience.
-      </p>
-      </section>
-      </Columns>
-
-      {/* Modals live outside the columns — they are not blocks on the page. */}
-      <CategoryForm
-        key={catOpened}
-        category={editingCat === 'new' ? undefined : (editingCat ?? undefined)}
-        open={editingCat !== null}
-        onClose={() => setEditingCat(null)}
-      />
-
       <DemoDataForm open={demoOpen} onClose={() => setDemoOpen(false)} />
-    </>
+    </section>
+  )
+}
+
+/**
+ * Settings, in six groups.
+ *
+ * It had grown to nine sections in one flat list, which a wide screen could
+ * absorb — they flow into columns — and a phone could not: appearance sat
+ * between the people who share your money and the accounts they share, and
+ * "Erase everything" was a long scroll below things nobody visits twice.
+ *
+ * So the same six groups serve both, in the same order, and only the shape
+ * differs. A tablet or a desktop gets every group at once, which is the whole
+ * point of having the width. A phone gets an index and walks into one, the way
+ * Rules already works — and the summary line under each is live, so the index
+ * answers "how many accounts do we have" without being opened.
+ *
+ * Two things deliberately sit outside the grouping. `UnsavedChanges` is an
+ * alert rather than a place, so it is pinned above the index at both widths and
+ * is never something you have to go and find. `Recoverable` is inside Accounts,
+ * because a deleted account is an account.
+ */
+type Group = {
+  slug: string
+  title: string
+  icon: LucideIcon
+  /** The live line under the title on the phone index. */
+  Summary: () => ReactNode
+  Body: () => ReactNode
+}
+
+const GROUPS: Group[] = [
+  {
+    slug: 'household',
+    title: 'Household & people',
+    icon: Users,
+    Summary: () => {
+      const members = useMembers()
+      const admins = members.filter((m) => m.role === 'admin').length
+      return members.length === 0
+        ? 'Who you share with, and what they can reach'
+        : `${members.length} ${members.length === 1 ? 'person' : 'people'} · ${admins} ${admins === 1 ? 'admin' : 'admins'}`
+    },
+    Body: () => (
+      <div className="space-y-6 md:space-y-5">
+        <section>
+          <SectionTitle>Household</SectionTitle>
+          <HouseholdCard />
+        </section>
+        <section>
+          <SectionTitle>People</SectionTitle>
+          <MembersCard />
+        </section>
+      </div>
+    ),
+  },
+  {
+    slug: 'accounts',
+    title: 'Accounts',
+    icon: Wallet,
+    Summary: () => {
+      const accounts = useAccounts()
+      return accounts.length === 0
+        ? 'Add the accounts your money moves through'
+        : `${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'} · who can see each one`
+    },
+    Body: () => (
+      <div className="space-y-6 md:space-y-5">
+        <AccountsSection />
+        <Recoverable />
+      </div>
+    ),
+  },
+  {
+    slug: 'categories',
+    title: 'Categories',
+    icon: Shapes,
+    Summary: () => {
+      const categories = useCategories()
+      const parents = categories.filter((c) => !c.parentId).length
+      const subs = categories.length - parents
+      return subs === 0
+        ? `${parents} ${parents === 1 ? 'category' : 'categories'}`
+        : `${parents} ${parents === 1 ? 'category' : 'categories'} · ${subs} sub`
+    },
+    Body: () => <CategoriesSection />,
+  },
+  {
+    slug: 'automation',
+    title: 'Automation',
+    icon: Wand2,
+    Summary: () => {
+      const rules = useRules()
+      return rules.length === 0
+        ? 'Categorisation rules, and spotting transfers'
+        : `${rules.length} ${rules.length === 1 ? 'rule' : 'rules'} learned · transfer detection`
+    },
+    Body: () => <AutomationSection />,
+  },
+  {
+    slug: 'appearance',
+    title: 'Appearance',
+    icon: Palette,
+    Summary: () => {
+      const { themePref, currency } = useApp()
+      const theme = themePref === 'system' ? 'Auto' : themePref === 'dark' ? 'Dark' : 'Light'
+      return `${theme} · ${currency}`
+    },
+    Body: () => <AppearanceSection />,
+  },
+  {
+    slug: 'data',
+    title: 'Your data',
+    icon: Database,
+    Summary: () => 'Backups, demo data, erase everything',
+    Body: () => <DataSection />,
+  },
+]
+
+/**
+ * What the header calls each group's own screen.
+ *
+ * Exported so `Layout`'s title map does not have to keep its own copy of these
+ * six words and drift from them. The subpage renders no heading of its own for
+ * the same reason: the top bar already says where you are.
+ */
+export const SETTINGS_GROUP_TITLES: Record<string, string> = Object.fromEntries(
+  GROUPS.map(({ slug, title }) => [`/settings/${slug}`, title]),
+)
+
+/** The line under the app, on whichever screen is the bottom of Settings. */
+function Colophon() {
+  return (
+    <p className="mt-6 px-1 text-xs text-ink-3">
+      Hearth · a private family finance app. Install it from your browser's share / install menu for the full app
+      experience.
+    </p>
+  )
+}
+
+export default function SettingsPage() {
+  const columnCount = useColumnCount(COLUMN_STEPS)
+  const wide = useWide()
+
+  // Settings are independent blocks, so on a wide screen they flow into columns
+  // rather than one long ribbon down the left edge. `Columns` rather than CSS
+  // `columns`, because Safari fragments cards across a column boundary there
+  // whatever `break-inside` says.
+  //
+  // The gap between sections lives here too. It used to come from a top margin
+  // on SectionTitle, which stopped working the day each section was wrapped in
+  // its own element — see SectionTitle.
+  if (wide) {
+    return (
+      <div className="max-w-2xl xl:max-w-none">
+        {/* `empty:hidden` so the gap goes with it: UnsavedChanges renders
+            nothing at all when there is nothing that failed to save, and a
+            wrapper carrying a margin around nothing is a stray gap. */}
+        <div className="mb-6 empty:hidden md:mb-5">
+          <UnsavedChanges />
+        </div>
+        <Columns count={columnCount} gap="gap-6 md:gap-5">
+          {GROUPS.map(({ slug, Body }) => (
+            <Body key={slug} />
+          ))}
+        </Columns>
+        <Colophon />
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="mb-4 empty:hidden">
+        <UnsavedChanges />
+      </div>
+      <Card>
+        <ul className="divide-y divide-hairline">
+          {GROUPS.map(({ slug, title, icon: Icon, Summary }) => (
+            <li key={slug}>
+              <Link
+                to={`/settings/${slug}`}
+                className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface-2/50 active:bg-surface-2"
+              >
+                <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2">
+                  <Icon size={17} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{title}</p>
+                  <p className="truncate text-sm text-ink-3">
+                    <Summary />
+                  </p>
+                </div>
+                <ChevronRight size={16} className="shrink-0 text-ink-3" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      <Colophon />
+    </div>
+  )
+}
+
+/**
+ * One group, on its own screen.
+ *
+ * Reached from the phone index, and a perfectly valid page at any width — the
+ * back link is the only thing that assumes where you came from, and it is true
+ * wherever you came from. An unknown slug goes back to the index rather than
+ * rendering an empty page: these come from typed URLs and old bookmarks, and
+ * "nothing here" is a worse answer than the list of what there is.
+ */
+export function SettingsGroupPage() {
+  const { group } = useParams()
+  const found = GROUPS.find((g) => g.slug === group)
+  if (!found) return <Navigate to="/settings" replace />
+  const { Body } = found
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2 md:mb-2.5">
+        <Link to="/settings" className="flex shrink-0 items-center gap-1 text-sm font-medium text-ink-3 hover:text-ink">
+          <ChevronLeft size={16} /> Settings
+        </Link>
+      </div>
+      <Body />
+      <Colophon />
+    </div>
   )
 }
 

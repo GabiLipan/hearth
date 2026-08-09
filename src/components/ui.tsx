@@ -49,6 +49,28 @@ export function useColumnCount(steps: [number, number][], base = 1) {
 }
 
 /**
+ * A screen wide enough for the `md:` layouts — a tablet or a desktop.
+ *
+ * Deliberately width only, where `useDesktop` is width AND a precise pointer.
+ * The two answer different questions: `useDesktop` gates hit targets and
+ * hover-driven behaviour, so an iPad must fail it; this gates *how much fits on
+ * one screen*, where an iPad is on the roomy side of the line. Settings is the
+ * case that needs the distinction — a tablet gets the whole page in columns, a
+ * phone gets an index of sections it can walk into.
+ */
+export function useWide(): boolean {
+  const query = '(min-width: 768px)'
+  const [is, setIs] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const on = () => setIs(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return is
+}
+
+/**
  * Lay children out in balanced columns, shortest column first.
  *
  * This replaced CSS `columns`, which was the right tool and worked everywhere
