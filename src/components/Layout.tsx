@@ -121,6 +121,12 @@ export function Layout({ children }: { children: ReactNode }) {
       <aside
         className={cx(
           'sticky top-0 z-40 hidden h-dvh shrink-0 flex-col gap-0.5 self-start border-r border-hairline bg-surface p-2.5 md:flex',
+          // The status bar sits over the app on an installed iPad, where the
+          // phone header that normally absorbs it is hidden (`md:hidden`) and
+          // there is nothing else between the clock and the first nav item.
+          // `env()` is its own media query — it resolves to 0 in a desktop
+          // browser and in Safari's tabs, so this needs no breakpoint of its own.
+          'pt-[calc(0.625rem_+_env(safe-area-inset-top))]',
           'transition-[width] duration-200 ease-out motion-reduce:transition-none',
           collapsed ? 'w-[3.75rem] items-stretch' : 'w-52 xl:w-56',
         )}
@@ -201,7 +207,10 @@ export function Layout({ children }: { children: ReactNode }) {
           <html>, it does not propagate to the viewport and take the fixed tab
           bar's positioning with it. Desktop needs no clip: its page padding is
           wider than the travel, and nothing there is full-bleed. */}
-      <main className="w-full min-w-0 flex-1 px-4 pb-32 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-4 xl:px-6">
+      {/* Same inset on the content column: the sidebar is only half the top
+          edge, and the page title would otherwise sit under the clock. Left off
+          below `md`, where the sticky header already carries `pt-safe`. */}
+      <main className="w-full min-w-0 flex-1 px-4 pb-32 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-[calc(1rem_+_env(safe-area-inset-top))] xl:px-6">
         {/* Desktop page title. Mobile gets the same title in its top bar. */}
         <h1 className="mb-3 hidden text-xl font-bold tracking-tight md:block">{title}</h1>
         {/* Keyed on the path so the animation restarts on every page change:
