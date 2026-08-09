@@ -564,6 +564,28 @@ function useMorphHeight(mounted: boolean) {
     return () => ro.disconnect()
   }, [mounted])
 
+  /**
+   * Re-measure on every commit, as well as when the observer notices.
+   *
+   * The observer alone is a frame slower than it looks. Its callback does run
+   * before paint, but the `setState` inside it is not in a React event, so the
+   * re-render it schedules is ordinary priority and can land in the *next*
+   * frame — which on a control you have just pressed reads as the sheet
+   * thinking about it before it moves. A layout effect with no dependencies
+   * runs synchronously in the same commit as the content change, so the new
+   * height is written before the browser paints the old one.
+   *
+   * It cannot loop: `measure` only sets state when the number actually differs,
+   * and the height it writes is on the scroller, never on the content it reads.
+   * The observer stays for everything that changes size WITHOUT re-rendering
+   * this component — an image arriving, a query landing inside a child.
+   */
+  useLayoutEffect(() => {
+    const el = content.current
+    if (!mounted || !el) return
+    setHeight((prev) => (prev === el.offsetHeight ? prev : el.offsetHeight))
+  })
+
   // After the first height has been painted, and not before: a passive effect
   // runs after paint, which is exactly the beat that has to pass.
   useEffect(() => {

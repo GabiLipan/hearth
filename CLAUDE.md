@@ -345,6 +345,15 @@ the single place a level comes from.
   animate the first measurement" flag is a passive effect rather than a
   `requestAnimationFrame` for the reason `BottomTabs` gives: a sheet opened while
   the tab is backgrounded would otherwise never switch its transition on.
+- **Anticipation reads as latency on anything you pressed.** `--ease-settle`
+  started life with a negative first control point, so the sheet's resize dipped
+  backwards for its first fifth before setting off — which on a bottom-anchored
+  sheet moves the top edge the wrong way and then jolts to catch up. All the
+  character belongs at the END, where nobody is waiting for it: the curve is
+  half way to its target by ~40ms and overshoots ~3% on arrival. The same goes
+  for the frame budget — `useMorphHeight` re-measures in a dependency-less
+  layout effect as well as in its ResizeObserver, because a `setState` from an
+  observer callback is ordinary priority and can land a frame late.
 - **An `overflow-x-auto` bar clips an `absolute` panel on BOTH axes.** The
   filter chips scroll sideways, so a dropdown positioned inside one opened,
   turned its chevron, and showed nothing. There is no way to have a bar that
