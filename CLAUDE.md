@@ -96,6 +96,7 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 (suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
+`categoryTree.ts` (what a drag on the category list means, and what it writes),
 `reimbursements.ts` (what the household owes you), `shade.ts` (telling apart
 two categories the palette gave one colour),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
@@ -345,6 +346,25 @@ the single place a level comes from.
   animate the first measurement" flag is a passive effect rather than a
   `requestAnimationFrame` for the reason `BottomTabs` gives: a sheet opened while
   the tab is backgrounded would otherwise never switch its transition on.
+- **A promoted subcategory has no style of its own to promote.** A subcategory
+  stores `icon` and `slot` as null — null means "inherit", which is what keeps a
+  parent and its children looking like a set — but
+  `categories_top_level_has_style` requires a top-level row to carry both. So
+  clearing `parentId` alone produces a row the check constraint rejects, minutes
+  later, as a dead letter. `writesFor` in `categoryTree.ts` resolves the
+  inherited style with `styleOf` and writes it alongside, which also means the
+  category looks exactly the same after being promoted as before. Demotion is
+  the mirror: clear both, so it inherits its new parent.
+- **The category drag mirrors the server's rules rather than discovering them.**
+  A parent travels with its children, nothing crosses between spending and
+  income, and a parent with children cannot become one — all three are
+  `categories_hierarchy_guard`, restated in `move()` so a drop the database
+  would refuse is never offered. The drag's geometry is frozen at pick-up in
+  DOCUMENT coordinates, so auto-scrolling does not invalidate it, and the
+  insertion line is drawn from `move`'s own answer rather than from the pointer:
+  when a drop is clamped, the line goes where the row will actually land.
+  `pointercancel` must NOT commit — it is the system taking the gesture away,
+  not a drop.
 - **Anticipation reads as latency on anything you pressed.** `--ease-settle`
   started life with a negative first control point, so the sheet's resize dipped
   backwards for its first fifth before setting off — which on a bottom-anchored

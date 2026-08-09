@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronLeft, ChevronRight, Wand2, ArrowLeftRight, Undo2, Users, Wallet, Shapes, Palette, Database, type LucideIcon } from 'lucide-react'
+import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Wand2, ArrowLeftRight, Undo2, Users, Wallet, Shapes, Palette, Database, type LucideIcon } from 'lucide-react'
 import { db, type AccountGrant, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
@@ -34,7 +34,7 @@ import {
   useRemoteBalances,
   useRules,
 } from '../lib/cache'
-import { grouped, styleOf, topLevel } from '../lib/categories'
+import { styleOf, topLevel } from '../lib/categories'
 import { discardAllDeadLetters, discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
@@ -64,6 +64,7 @@ import {
   type DeletedAccount,
   type UnownedAccount,
 } from '../lib/accounts'
+import { CategoryTree } from '../components/CategoryTree'
 import { IconPicker, SlotPicker } from '../components/IconPicker'
 import { PersonDot, nameOf } from '../components/PersonDot'
 
@@ -91,30 +92,6 @@ function HouseholdCard() {
 
   return (
     <Card className="space-y-3 p-4 md:p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {sync.online ? (
-          <span className="flex items-center gap-1.5 rounded-full bg-good/10 px-3 py-1 text-sm font-medium text-good-text">
-            <Cloud size={14} /> Synced
-          </span>
-        ) : (
-          <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-ink-2">
-            <CloudOff size={14} /> Offline
-          </span>
-        )}
-        <span className="text-sm text-ink-2">{sync.email}</span>
-        {sync.syncing && <RefreshCw size={14} className="animate-spin text-ink-3" />}
-        {sync.lastSyncAt && !sync.syncing && (
-          <span className="text-xs text-ink-3">updated {new Date(sync.lastSyncAt).toLocaleTimeString()}</span>
-        )}
-      </div>
-
-      {sync.pending > 0 && (
-        <p className="text-sm text-ink-3">
-          {sync.pending} change{sync.pending === 1 ? '' : 's'} waiting to be saved
-          {sync.online ? '…' : ' — they will go up when you are back online.'}
-        </p>
-      )}
-
       {sync.joinCode && (
         <div className="flex items-center gap-2 rounded-xl bg-surface-2 px-4 py-3">
           <div className="min-w-0 flex-1">
@@ -135,7 +112,6 @@ function HouseholdCard() {
         </div>
       )}
 
-      {sync.error && <p className="text-sm text-critical-text">Last sync problem: {sync.error}</p>}
       {error && <p className="text-sm text-critical-text">{error}</p>}
 
       <details className="text-sm">
@@ -165,13 +141,10 @@ function HouseholdCard() {
         </div>
       </details>
 
+      {/* Syncing and signing out are about this DEVICE rather than about the
+          household, so they live with the data — see `SyncAndAccount`. What is
+          left here is the household itself: who can join it, and how to go. */}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="subtle" disabled={sync.syncing || !sync.online} onClick={() => void syncNow()}>
-          <RefreshCw size={14} /> Sync now
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => void signOut()}>
-          <LogOut size={14} /> Sign out
-        </Button>
         <Button
           size="sm"
           variant="ghost"
@@ -522,7 +495,6 @@ function AppearanceSection() {
 
 function CategoriesSection() {
   const categories = useCategories()
-  const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const [editing, setEditing] = useState<Category | 'new' | null>(null)
   /**
    * Bumped every time the form is opened, and used as its key.
@@ -550,39 +522,7 @@ function CategoriesSection() {
       >
         Categories
       </SectionTitle>
-      <Card>
-        <ul className="divide-y divide-hairline">
-          {grouped(categories).map(({ parent, children }) => (
-            <li key={parent.id}>
-              <button
-                onClick={() => open(parent)}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2/50 md:gap-2.5 md:px-3 desktop:py-1.5"
-              >
-                <CategoryDot category={{ ...parent, ...styleOf(parent, catMap) }} size={32} className="md:[--dot:24px]" />
-                <span className="min-w-0 flex-1 truncate font-medium md:text-sm">{parent.name}</span>
-                {parent.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
-                <span className="text-xs uppercase tracking-wide text-ink-3">{parent.kind}</span>
-              </button>
-              {children.length > 0 && (
-                <ul className="border-t border-hairline/60 bg-surface-2/30">
-                  {children.map((child) => (
-                    <li key={child.id}>
-                      <button
-                        onClick={() => open(child)}
-                        className="flex w-full items-center gap-3 py-2 pl-11 pr-4 text-left hover:bg-surface-2/60 md:gap-2.5 md:pl-10 md:pr-3 desktop:py-1.5"
-                      >
-                        <CategoryDot category={{ ...child, ...styleOf(child, catMap) }} size={22} />
-                        <span className="min-w-0 flex-1 truncate text-sm">{child.name}</span>
-                        {child.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
-        </ul>
-      </Card>
+      <CategoryTree categories={categories} onOpen={open} />
 
       <CategoryForm
         key={opened}
@@ -627,6 +567,7 @@ function AutomationSection() {
 }
 
 function DataSection() {
+  const wide = useWide()
   const [demoOpen, setDemoOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   return (
@@ -690,8 +631,146 @@ function DataSection() {
         </div>
       </Card>
 
+      {/* Wide screens only: on a phone this is on the Settings index itself,
+          in the same box as the link to this page, which is where it was asked
+          for and where it is one tap rather than two. */}
+      {wide && (
+        <Card className="mt-3 md:mt-2.5">
+          <SyncAndAccount />
+        </Card>
+      )}
+
       <DemoDataForm open={demoOpen} onClose={() => setDemoOpen(false)} />
     </section>
+  )
+}
+
+/**
+ * The settings worth having in your hand rather than behind a chevron.
+ *
+ * An index of six words was tidier than the flat list it replaced and hid the
+ * two things people actually come here to do — flip the theme, and check who
+ * they are signed in as. Both are one control, so both sit at the top, usable
+ * where they are.
+ *
+ * Phone only. A wide screen already shows every section at once, and putting
+ * the theme in two places there would be two controls for one setting.
+ */
+function QuickSettings() {
+  const { themePref, setThemePref, currency, setCurrency } = useApp()
+  const { userId } = useSyncState()
+  const members = useMembers()
+  const me = members.find((m) => m.userId === userId)
+
+  return (
+    <div className="mb-4 space-y-2">
+      <Card className="space-y-3 p-4">
+        <Segmented
+          value={themePref}
+          onChange={setThemePref}
+          options={[
+            { value: 'light', label: <span className="flex items-center justify-center gap-1.5"><Sun size={15} /> Light</span> },
+            { value: 'dark', label: <span className="flex items-center justify-center gap-1.5"><Moon size={15} /> Dark</span> },
+            { value: 'system', label: <span className="flex items-center justify-center gap-1.5"><MonitorSmartphone size={15} /> Auto</span> },
+          ]}
+        />
+        <Field label="Currency">
+          <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            {CURRENCIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </Card>
+
+      {/* Editing the name and photo lives with the people it is shown to, so
+          this is a way in rather than a second copy of the form. */}
+      <Card>
+        <Link
+          to="/settings/household"
+          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 active:bg-surface-2"
+        >
+          <PersonDot member={me} size={38} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium">{me ? nameOf(me) : 'Your profile'}</p>
+            <p className="truncate text-sm text-ink-3">Your name and photo, as everyone else sees them</p>
+          </div>
+          <ChevronRight size={16} className="shrink-0 text-ink-3" />
+        </Link>
+      </Card>
+    </div>
+  )
+}
+
+/**
+ * Signing in, syncing, and getting out — folded away under the data it belongs
+ * with.
+ *
+ * These used to be three buttons at the bottom of the household card, which is
+ * where you would look for them only if you already knew. They are about this
+ * DEVICE's connection rather than about the household, so they sit with the
+ * backups: the group of things you do to the copy of the data in your hand.
+ *
+ * Expandable rather than a seventh row, because the state — synced or not, and
+ * as whom — is the part that is worth reading at a glance, and it fits on the
+ * closed row.
+ */
+function SyncAndAccount() {
+  const sync = useSyncState()
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface-2/50 active:bg-surface-2"
+      >
+        <div
+          className={cx(
+            'grid size-9 shrink-0 place-items-center rounded-xl',
+            sync.online ? 'bg-good/10 text-good-text' : 'bg-surface-2 text-ink-2',
+          )}
+        >
+          {sync.online ? <Cloud size={17} /> : <CloudOff size={17} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">{sync.online ? 'Synced' : 'Offline'}</p>
+          <p className="truncate text-sm text-ink-3">
+            {sync.pending > 0
+              ? `${sync.pending} change${sync.pending === 1 ? '' : 's'} waiting${sync.online ? '…' : ' for a connection'}`
+              : (sync.email ?? 'Signed in')}
+          </p>
+        </div>
+        <ChevronDown size={16} className={cx('shrink-0 text-ink-3 transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        // `grid-template-rows` from `0fr` is the one way to open to a height
+        // nobody has measured; the inner element must carry `min-h-0` and
+        // `overflow: hidden` or the content refuses to be squashed.
+        <div className="animate-drawer grid">
+          <div className="min-h-0 overflow-hidden">
+            <div className="flex flex-wrap gap-2 border-t border-hairline px-4 py-3">
+              {sync.lastSyncAt && (
+                <p className="basis-full text-xs text-ink-3">
+                  Last updated {new Date(sync.lastSyncAt).toLocaleTimeString()}
+                </p>
+              )}
+              {sync.error && <p className="basis-full text-xs text-critical-text">Last sync problem: {sync.error}</p>}
+              <Button size="sm" variant="subtle" disabled={sync.syncing || !sync.online} onClick={() => void syncNow()}>
+                <RefreshCw size={14} className={sync.syncing ? 'animate-spin' : undefined} /> Sync now
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void signOut()}>
+                <LogOut size={14} /> Sign out
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -863,14 +942,23 @@ export default function SettingsPage() {
     )
   }
 
+  // Appearance is inlined at the top on a phone rather than listed, so it must
+  // not also appear as a row you can walk into — that would be two ways to the
+  // same two controls, one of them a detour.
+  const rows = GROUPS.filter((g) => g.slug !== 'appearance' && g.slug !== 'data')
+  const data = GROUPS.find((g) => g.slug === 'data')!
+
   return (
     <div>
       <div className="mb-4 empty:hidden">
         <UnsavedChanges />
       </div>
+
+      <QuickSettings />
+
       <Card>
         <ul className="divide-y divide-hairline">
-          {GROUPS.map(({ slug, title, icon: Icon, Summary }) => (
+          {rows.map(({ slug, title, icon: Icon, Summary }) => (
             <li key={slug}>
               <Link
                 to={`/settings/${slug}`}
@@ -891,6 +979,30 @@ export default function SettingsPage() {
           ))}
         </ul>
       </Card>
+
+      {/* This device's copy of the data, and this device's connection to the
+          household that holds it — the same subject from two sides. */}
+      <Card className="mt-4">
+        <div className="divide-y divide-hairline">
+          <Link
+            to={`/settings/${data.slug}`}
+            className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface-2/50 active:bg-surface-2"
+          >
+            <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2">
+              <data.icon size={17} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">{data.title}</p>
+              <p className="truncate text-sm text-ink-3">
+                <data.Summary />
+              </p>
+            </div>
+            <ChevronRight size={16} className="shrink-0 text-ink-3" />
+          </Link>
+          <SyncAndAccount />
+        </div>
+      </Card>
+
       <Colophon />
     </div>
   )
