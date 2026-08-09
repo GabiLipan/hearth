@@ -15,6 +15,7 @@ import {
 import { syncNow } from '../lib/session'
 import { useSyncState } from '../hooks/useSync'
 import { fmtDay } from '../lib/dates'
+import { FREQ_WORD } from '../lib/routes'
 import { useApp } from '../state/AppContext'
 import { Button, Card, Chip, cx } from './ui'
 
@@ -78,7 +79,12 @@ export function TransferReview() {
         // at the level of rows — my one outgoing leg matches both arrivals —
         // and permanently unambiguous at the level of books, which is the only
         // level any figure is computed at.
-        const clear = found.filter((c) => c.unambiguous || c.bookSafe)
+        //
+        // `onRoute` covers the mirror image, which books cannot rescue: two
+        // outgoing legs and one arrival, where the leg left behind would be
+        // stranded as personal spending. A habit confirmed three times says
+        // which leg it was. See `routes.ts`.
+        const clear = found.filter((c) => c.unambiguous || c.bookSafe || c.onRoute)
         if (clear.length > 0) {
           for (const c of clear) {
             handled.current.add(c.out.id)
@@ -90,7 +96,7 @@ export function TransferReview() {
           await syncNow()
         }
         // What is left is genuinely ambiguous, and still needs a person.
-        setCandidates(found.filter((c) => !c.unambiguous && !c.bookSafe))
+        setCandidates(found.filter((c) => !c.unambiguous && !c.bookSafe && !c.onRoute))
         return
       }
       setCandidates(found)
@@ -169,7 +175,8 @@ export function TransferReview() {
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {crossing(c) && <Chip tone="accent">into the household</Chip>}
-                {!c.unambiguous && !c.bookSafe && (
+                {c.onRoute && <Chip tone="accent">your usual {FREQ_WORD[c.onRoute.freq]} move</Chip>}
+                {!c.unambiguous && !c.bookSafe && !c.onRoute && (
                   <Chip tone="warn">
                     <HelpCircle size={11} className="mr-1" /> more than one match
                   </Chip>

@@ -41,11 +41,13 @@ import { SLOTS, SLOT_NAMES, slotVar, nextFreeSlot } from '../lib/palette'
 import { seedDemoData } from '../lib/demo'
 import {
   getTransferMode,
+  knownRoutes,
   setTransferMode,
   TRANSFER_MODE_HINT,
   TRANSFER_MODE_LABEL,
   type TransferMode,
 } from '../lib/transfers'
+import { FREQ_WORD, type TransferRoute } from '../lib/routes'
 import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
 import { rpc } from '../lib/api'
 import { fmtFullDate } from '../lib/dates'
@@ -433,11 +435,56 @@ function TransferModeRow() {
             }))}
           />
           <p className="mt-1.5 text-xs text-ink-3">{TRANSFER_MODE_HINT[mode]}</p>
+          {mode !== 'manual' && <KnownRoutes />}
         </div>
       )}
     </div>
   )
 }
+
+/**
+ * The habits the app has picked up, said out loud.
+ *
+ * A route is the only thing in the transfer path that acts on something other
+ * than the two rows in front of it, and it is what lets payday be linked
+ * without being asked about. Automation nobody can see is automation people
+ * turn off, so it is listed — read-only, because there is nothing to configure:
+ * a route is a summary of transfers you have already confirmed, and the way to
+ * change one is to unlink them.
+ */
+function KnownRoutes() {
+  const { money } = useApp()
+  const accounts = useAccounts()
+  const [routes, setRoutes] = useState<TransferRoute[]>([])
+
+  useEffect(() => {
+    void knownRoutes().then(setRoutes)
+  }, [])
+
+  if (routes.length === 0) return null
+  const nameOfAccount = (id: string) => accounts.find((a) => a.id === id)?.name ?? 'an account'
+
+  return (
+    <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2">
+      <p className="text-xs font-medium text-ink-2">Movements it has learned</p>
+      <ul className="mt-1 space-y-1">
+        {routes.map((r) => (
+          <li key={`${r.fromAccountId}>${r.toAccountId}`} className="text-xs text-ink-3">
+            {money(r.typicalMinor)} from {nameOfAccount(r.fromAccountId)} to{' '}
+            {nameOfAccount(r.toAccountId)}, {FREQ_WORD[r.freq]} · seen {r.count} times, next around{' '}
+            {fmtFullDate(r.nextOn)}
+          </li>
+        ))}
+      </ul>
+      {/* The distinction that matters, and the one a bill does not make. */}
+      <p className="mt-1.5 text-xs text-ink-3">
+        Nothing is recorded from these. They only help Hearth tell which pair of rows belongs
+        together when more than one reading fits.
+      </p>
+    </div>
+  )
+}
+
 
 export default function SettingsPage() {
   const { themePref, setThemePref, currency, setCurrency } = useApp()

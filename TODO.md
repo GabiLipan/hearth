@@ -10,8 +10,8 @@ the work, grouped by what it needs before it can start. What has shipped is not
 here at all: it is in the git log, where it cannot rot, and a plan made mostly
 of finished work stops being read.
 
-Right now: **nothing waiting on us**, and **3 pieces of work left** — two of
-them needing nothing at all.
+Right now: **nothing waiting on us**, and **one piece of work left**, which
+needs a migration of its own.
 
 **One migration needs applying by hand**, like the others:
 `supabase/15-purge-account.sql`. Until then the bin in Settings only fills up —
@@ -90,19 +90,7 @@ it is written down so nobody rediscovers it as a bug.
 
 # Waiting on code
 
-Three items. Two need nothing at all; the third needs a migration of its own.
-
-## Ready
-
-**Recurring transfer routes.** Learn "£2,000, my private → joint, monthly" the
-way a bill is learned, so payday stops needing confirmation every month.
-
-**Reimbursements between us.** The mechanism from migration 13 exists — one
-person can already pay for the household out of their own pocket and have it
-land in the right books. What is left is the other direction: paying somebody
-back, a figure for what is outstanding between us, and a way to mark it
-settled. No new column; it is a view over what has been paid for and not yet
-returned.
+One item, and it needs a migration of its own.
 
 ## Needs a migration of its own
 

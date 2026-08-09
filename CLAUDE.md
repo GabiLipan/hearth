@@ -92,6 +92,8 @@ UI  →  data.ts (create/update/remove)  →  Dexie cache   (instant paint)
 Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 `rules.ts` (payee matching, learning, bulk recategorisation), `bills.ts`
 (suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
+`routes.ts` (recurring movements, derived from confirmed transfers),
+`reimbursements.ts` (what the household owes you),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
 allow-lists), `session.ts` (auth, household, sync orchestration).
@@ -367,6 +369,16 @@ the single place a level comes from.
   nothing: quietly moving money out of "spending" on the strength of the word
   "TFR" would make the figures wrong in a way nobody could see, which is worse
   than being visibly approximate.
+- **A route is learned, never stored.** `routes.ts` summarises the transfers
+  you have already confirmed — three or more between the same two accounts, at
+  a cadence it has a word for — and that summary is the only thing that can
+  resolve the ambiguity `bookSafe` cannot: two outgoing legs and one arrival,
+  where the leg left behind is stranded as personal *spending*. There is no
+  table and there must not be, because a route is a second reading of rows that
+  already exist; unlinking a transfer un-teaches the habit, which is the
+  behaviour you would otherwise have to build. A route never posts anything: a
+  bill records money that has not moved, a route only recognises money that
+  has, and `nextOn` is a sentence rather than a row.
 - **Transfer pairing is the one matcher with no tolerance.** Every other
   comparison in the app is fuzzy — `payeeSimilar`, the bill amount window, the
   duplicate check. `findTransferCandidates` requires `out === -in` exactly, and

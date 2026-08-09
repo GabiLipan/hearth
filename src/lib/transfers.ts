@@ -3,6 +3,7 @@ import { db, getSetting, setSetting, type Transaction } from './db'
 import type { BookMap } from './books'
 import { rpc } from './api'
 import { normalizePayee } from './rules'
+import { learnRoutes, routeFor, type TransferRoute } from './routes'
 
 /**
  * Spotting money you moved between your own accounts.
@@ -107,6 +108,21 @@ export interface TransferCandidate {
   bookSafe: boolean
   /** The payee text names the other account, or says "transfer" outright. */
   namedTransfer: boolean
+  /**
+   * The habit this pair repeats, when recognising it settles the question.
+   *
+   * Set only where the route RESOLVES an ambiguity rather than merely being
+   * present: this pair must be the only routed reading of its arrival, and the
+   * only routed reading of its outgoing leg. Without the first, a route explains
+   * two candidates equally and has decided nothing; without the second, auto
+   * mode would try to spend one outgoing leg on two different arrivals and the
+   * server would refuse the second.
+   *
+   * This is what stops payday needing an answer every month — see `routes.ts`
+   * for why the mirror image of the `bookSafe` case could not be rescued any
+   * other way.
+   */
+  onRoute?: TransferRoute
 }
 
 /** Words a bank writes on a leg of a transfer. Weak evidence on their own. */
@@ -136,7 +152,13 @@ function eligible(t: Transaction): boolean {
  */
 export function findTransferCandidates(
   txns: Transaction[],
-  opts: { dismissed?: Set<string>; maxDaysApart?: number; books?: BookMap } = {},
+  opts: {
+    dismissed?: Set<string>
+    maxDaysApart?: number
+    books?: BookMap
+    /** Learned habits, for resolving the ambiguity `bookSafe` cannot. */
+    routes?: TransferRoute[]
+  } = {},
 ): TransferCandidate[] {
   const dismissed = opts.dismissed ?? new Set<string>()
   const maxDays = opts.maxDaysApart ?? MAX_DAYS_APART
@@ -191,6 +213,28 @@ export function findTransferCandidates(
     else partnersOfOut.set(c.out.id, [c.in])
   }
 
+  // Which readings a known habit explains, and — separately — which of those it
+  // actually SETTLES. A route that fits two competing readings of the same
+  // arrival has recognised something and decided nothing, so it must not be
+  // allowed to pick one; the counting below is the whole difference.
+  const routed = new Map<string, TransferRoute>()
+  if (opts.routes?.length) {
+    const routedPerIn = new Map<string, number>()
+    const routedPerOut = new Map<string, number>()
+    for (const c of links) {
+      const r = routeFor(opts.routes, c.out.accountId, c.in.accountId, c.out.amountMinor)
+      if (!r) continue
+      routed.set(pairKey(c.out.id, c.in.id), r)
+      routedPerIn.set(c.in.id, (routedPerIn.get(c.in.id) ?? 0) + 1)
+      routedPerOut.set(c.out.id, (routedPerOut.get(c.out.id) ?? 0) + 1)
+    }
+    for (const c of links) {
+      if (routedPerIn.get(c.in.id) !== 1 || routedPerOut.get(c.out.id) !== 1) {
+        routed.delete(pairKey(c.out.id, c.in.id))
+      }
+    }
+  }
+
   return links
     .map((c) => ({
       ...c,
@@ -198,6 +242,7 @@ export function findTransferCandidates(
       bookSafe: opts.books
         ? isBookSafe(c, partnersOfOut.get(c.out.id) ?? [], inDegree.get(c.in.id) ?? 1, opts.books)
         : false,
+      onRoute: routed.get(pairKey(c.out.id, c.in.id)),
     }))
     .sort(
       (a, b) =>
@@ -245,12 +290,24 @@ function isBookSafe(
   return partners.every((p) => bookOf(p) === there)
 }
 
-/** The same, read from the cache and with dismissals applied. */
+/**
+ * The same, read from the cache and with dismissals applied.
+ *
+ * Routes are learned from the same rows the pairing runs over, on every call.
+ * That is deliberate: what has already been confirmed is the entire input, so
+ * there is nothing to keep in step and nothing to invalidate — unlink a
+ * transfer and the habit it taught is simply not there next time.
+ */
 export async function detectTransfers(books?: BookMap): Promise<TransferCandidate[]> {
   const mode = await getTransferMode()
   if (mode === 'manual') return []
   const [txns, dismissed] = await Promise.all([db.transactions.toArray(), dismissedPairs()])
-  return findTransferCandidates(txns, { dismissed, books })
+  return findTransferCandidates(txns, { dismissed, books, routes: learnRoutes(txns) })
+}
+
+/** Every habit this device can see, for the screen that lists them. */
+export async function knownRoutes(): Promise<TransferRoute[]> {
+  return learnRoutes(await db.transactions.toArray())
 }
 
 /* ---------- acting on it ---------- */
@@ -304,6 +361,11 @@ export async function unlinkTransfer(transferId: string) {
  * resolved by picking the nearest date — being asked once is a small cost, and
  * silently choosing wrong is money going missing from two totals at once.
  *
+ * `onRoute` is the third way in, and the only one that uses anything beyond the
+ * two rows in front of it: the pair repeats a habit you have already confirmed
+ * three times or more, and it is the only reading of either leg that does. That
+ * is not a guess at the nearest date — it is the answer you already gave.
+ *
  * A failure is swallowed per pair rather than aborting the run: the usual cause
  * is the other device having linked the same pair a moment earlier, which is
  * not an error worth showing anybody.
@@ -311,7 +373,7 @@ export async function unlinkTransfer(transferId: string) {
 export async function autoLinkTransfers(
   candidates: TransferCandidate[],
 ): Promise<{ linked: number; left: number }> {
-  const clear = candidates.filter((c) => c.unambiguous || c.bookSafe)
+  const clear = candidates.filter((c) => c.unambiguous || c.bookSafe || c.onRoute)
   let linked = 0
   for (const c of clear) {
     try {
