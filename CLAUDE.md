@@ -506,6 +506,21 @@ the single place a level comes from.
   it in exactly the same way — on a phone it ate a whole bar, which then read as
   a month that had barely started. `MonthScroller` therefore has no edge fade at
   all; the scrollbar and a caption carry the hint instead.
+- **A tooltip inside a scrolling chart is wrong twice over.** It lives in
+  `.recharts-wrapper`, which is inside `overflow-x: auto` — a box that clips on
+  BOTH axes, so anything outside the visible window is cut off and reads as the
+  tooltip sliding under the pinned value axis. And Recharts places it against
+  the chart's viewBox, which for a windowed chart is all twelve months rather
+  than the six on screen, so it flips away from edges nobody can see. Both
+  charts and the Sankey therefore position their own: `MonthScroller` portals
+  the Recharts tooltip into a layer over the card (`Tooltip portal=` — note
+  `TooltipBoundingBox` then applies NO positioning of its own, so the whole job
+  comes with the whole control), and places it from `clientX/clientY` against
+  the card's rect, never `offsetX`, which is measured inside a box that scrolls.
+  Placement must also re-run from a `ResizeObserver`: the panel does not exist
+  on the pointer move that first activates it, so that placement measures a
+  width of zero, cannot tell there is no room to the right, and the pointer may
+  never move again to correct it.
 - **A scrolling chart's axis is drawn by hand, not by a second chart.** Two
   Recharts charts agree about where their plot areas are only by accident, and
   the accident stops holding the first time a margin changes. `ValueAxis` is

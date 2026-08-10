@@ -51,8 +51,23 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
   const c = useChartColors()
   const { money } = useApp()
   const box = useRef<HTMLDivElement>(null)
+  /** The card, which is what the panel is kept inside — not the scrolling box. */
+  const frame = useRef<HTMLDivElement>(null)
   const [available, setAvailable] = useState(MIN_WIDTH)
   const [hovered, setHovered] = useState<{ id: string; x: number; y: number } | null>(null)
+
+  /**
+   * Where the pointer is, in the card's coordinates.
+   *
+   * Taken from the pointer event and the frame's own rect rather than from
+   * `offsetX`, which is measured inside the SVG — and the SVG scrolls
+   * sideways, so on a narrow screen a band hovered after scrolling would have
+   * put its panel a scrollbar's worth of travel away from the band it names.
+   */
+  const at = (e: { clientX: number; clientY: number }) => {
+    const r = frame.current?.getBoundingClientRect()
+    return r ? { x: e.clientX - r.left, y: e.clientY - r.top } : { x: 0, y: 0 }
+  }
 
   useEffect(() => {
     const el = box.current
@@ -94,7 +109,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
   }
 
   return (
-    <div className="relative">
+    <div ref={frame} className="relative">
       <div ref={box} className="overflow-x-auto overscroll-x-contain">
         <svg
           width={width}
@@ -115,9 +130,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
                   fill={node ? colourOf(node) : c.ink3}
                   fillOpacity={on ? (hovered ? 0.62 : 0.34) : 0.1}
                   className="transition-[fill-opacity] duration-150"
-                  onPointerMove={(e) =>
-                    setHovered({ id: r.colourFrom, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })
-                  }
+                  onPointerMove={(e) => setHovered({ id: r.colourFrom, ...at(e) })}
                 />
               )
             })}
@@ -133,9 +146,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
                 fill={colourOf(b.node)}
                 fillOpacity={lit(b.node.id) ? 1 : 0.25}
                 className="transition-[fill-opacity] duration-150"
-                onPointerMove={(e) =>
-                  setHovered({ id: b.node.id, x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY })
-                }
+                onPointerMove={(e) => setHovered({ id: b.node.id, ...at(e) })}
               />
             ))}
 
@@ -178,10 +189,13 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
         <div
           // Follows the pointer, clamped to the card so a band near the right
           // edge does not open a panel off it.
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline"
+          // Above the diagram and outside the scrolling box, so nothing clips
+          // it and nothing is drawn over it. Clamped to the card rather than to
+          // the SVG: the SVG is wider than the card whenever this scrolls.
+          className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline"
           style={{
-            left: Math.min(Math.max(80, hovered.x + LABEL), width - 80),
-            top: Math.max(36, hovered.y - 8),
+            left: Math.min(Math.max(90, hovered.x), Math.max(90, (frame.current?.clientWidth ?? width) - 90)),
+            top: Math.max(44, hovered.y - 10),
           }}
         >
           <div className="flex items-center gap-2">

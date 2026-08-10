@@ -15,7 +15,7 @@ import {
   Area,
   ReferenceLine,
 } from 'recharts'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useChartColors } from '../hooks/useChartColors'
 import { useApp } from '../state/AppContext'
 import { distinctShades } from '../lib/shade'
@@ -183,6 +183,26 @@ function ValueAxis({ scale, height }: { scale: Scale; height: number }) {
 }
 
 /**
+ * Where a tooltip goes, once its chart can scroll.
+ *
+ * A Recharts tooltip normally lives inside `.recharts-wrapper`, and that is
+ * fine for a chart that is entirely on screen. Here it is fatal twice over.
+ * The wrapper is inside a box with `overflow-x: auto`, which clips on BOTH
+ * axes — so anything the tooltip puts outside the visible window is simply cut
+ * off, which looks exactly like it sliding under the pinned value axis. And
+ * Recharts positions it against the chart's viewBox, which for a windowed
+ * chart is the whole twelve months rather than the six you can see, so it has
+ * no idea where the edges it should flip away from actually are.
+ *
+ * So the tooltip is portalled out of the scroller into a layer over the card,
+ * and placed here. Recharts deliberately applies NO positioning of its own
+ * once `portal` is set (see `TooltipBoundingBox`) — the whole job comes with
+ * the whole control.
+ */
+/** How far from the pointer the panel sits. */
+const TIP_GAP = 14
+
+/**
  * `visible` months across the width, the rest reachable by scrolling.
  *
  * The inner width is a PERCENTAGE of the scroller, so nothing has to be
@@ -201,9 +221,17 @@ export function MonthScroller({
   visible: number
   height: number
   scale: Scale
-  children: ReactElement
+  /**
+   * The chart, given the element its `Tooltip` should portal into. A render
+   * prop rather than a plain child because the portal has to reach a `Tooltip`
+   * nested inside a Recharts chart, and Recharts finds its own children by
+   * type — a wrapper component around `Tooltip` would simply not be seen.
+   */
+  children: (portal: HTMLElement | null) => ReactElement
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLDivElement>(null)
+  const [tip, setTip] = useState<HTMLDivElement | null>(null)
   const scrolls = count > visible
 
   useLayoutEffect(() => {
@@ -215,13 +243,56 @@ export function MonthScroller({
     el.scrollLeft = el.scrollWidth
   }, [count, visible, scrolls])
 
+  /**
+   * Follow the pointer, in the card's coordinates rather than the chart's.
+   *
+   * Written straight to the style rather than held in state: this fires on
+   * every pointer move over the chart, and a re-render per move would re-run
+   * every `useMemo` in the chart under it.
+   */
+  const pointer = useRef({ x: 0, y: 0 })
+  const place = useCallback(() => {
+    const outer = box.current
+    const layer = tip
+    const panel = layer?.firstElementChild as HTMLElement | null
+    if (!outer || !layer) return
+    const r = outer.getBoundingClientRect()
+    const x = pointer.current.x - r.left
+    const y = pointer.current.y - r.top
+    const w = panel?.offsetWidth ?? 0
+    const h = panel?.offsetHeight ?? 0
+    // Right of the pointer, unless that would run off the card — then left of
+    // it. The card's edge is the boundary that matters, and it is the one
+    // Recharts cannot see from inside the scroller.
+    const left = Math.max(0, x + TIP_GAP + w > r.width ? x - TIP_GAP - w : x + TIP_GAP)
+    const top = Math.max(0, Math.min(y - h / 2, Math.max(0, r.height - h)))
+    layer.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`
+  }, [tip])
+
+  /**
+   * Place it again whenever it changes size.
+   *
+   * The panel does not exist on the pointer move that first activates it, so
+   * that placement measures nothing and cannot know whether there is room to
+   * the right — which is exactly the case where flipping matters, and the
+   * pointer may never move again to correct it. The same observer covers the
+   * panel growing or shrinking as it moves between months with longer figures
+   * in them.
+   */
+  useEffect(() => {
+    if (!tip) return
+    const ro = new ResizeObserver(place)
+    ro.observe(tip)
+    return () => ro.disconnect()
+  }, [tip, place])
+
   return (
     /* No fade at the scrolling edge, deliberately. Every gradient that would
        hint at more to the left also washes out the bar under it — and a faded
        bar already MEANS something here: a month that has not finished. The
        scrollbar and the caption say it instead, in a vocabulary that is not
        already spoken for. */
-    <div className="flex">
+    <div ref={box} className="relative flex">
       <ValueAxis scale={scale} height={height} />
       <div
         ref={ref}
@@ -230,13 +301,25 @@ export function MonthScroller({
         // straight through the month labels and strikes them out.
         className={cx('min-w-0 flex-1', scrolls && 'overflow-x-auto overscroll-x-contain pb-2')}
         style={{ scrollbarWidth: 'thin' }}
+        onPointerMove={(e) => {
+          pointer.current = { x: e.clientX, y: e.clientY }
+          place()
+        }}
       >
         <div style={{ width: scrolls ? `${(count / visible) * 100}%` : '100%' }}>
           <ResponsiveContainer width="100%" height={height}>
-            {children}
+            {children(tip)}
           </ResponsiveContainer>
         </div>
       </div>
+      {/* Outside the scroller, so nothing clips it, and above the axis, so it
+          is never behind the figures it is explaining. Recharts hides and shows
+          the panel inside it; this layer only ever moves. */}
+      <div
+        ref={setTip}
+        aria-hidden
+        className="pointer-events-none absolute left-0 top-0 z-30"
+      />
     </div>
   )
 }
@@ -297,8 +380,9 @@ export function SpendBars({
   const c = useChartColors()
   const scale = useMemo(() => niceScale(0, Math.max(...data.map((d) => d.spend), 0)), [data])
   const a = axisProps(c, scale)
-  const tip = (
+  const tip = (portal: HTMLElement | null) => (
     <Tooltip
+      portal={portal}
       cursor={shape === 'bars' ? { fill: c.ink3, fillOpacity: 0.08 } : { stroke: c.ink3, strokeOpacity: 0.3 }}
       content={({ active, payload, label }) => (
         <ChartTip
@@ -312,12 +396,12 @@ export function SpendBars({
 
   return (
     <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
-      {shape === 'bars' ? (
+      {(portal) => (shape === 'bars' ? (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%">
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip}
+          {tip(portal)}
           <Bar dataKey="spend" fill={c.series[0]} radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false}>
             {bars(data, c.series[0], 'spend')}
           </Bar>
@@ -333,7 +417,7 @@ export function SpendBars({
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip}
+          {tip(portal)}
           <Area
             type="monotone"
             dataKey="spend"
@@ -350,7 +434,7 @@ export function SpendBars({
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip}
+          {tip(portal)}
           <Line
             type="monotone"
             dataKey="spend"
@@ -361,7 +445,7 @@ export function SpendBars({
             isAnimationActive={false}
           />
         </LineChart>
-      )}
+      ))}
     </MonthScroller>
   )
 }
@@ -387,11 +471,13 @@ export function IncomeSpendBars({
   return (
     <div>
       <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
+        {(portal) => (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="30%" barGap={2}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           <Tooltip
+            portal={portal}
             cursor={{ fill: c.ink3, fillOpacity: 0.08 }}
             content={({ active, payload, label }) => (
               <ChartTip
@@ -412,6 +498,7 @@ export function IncomeSpendBars({
             {bars(data, spend, 'spend')}
           </Bar>
         </BarChart>
+        )}
       </MonthScroller>
       <div className="mt-1 flex flex-wrap justify-center gap-x-5 gap-y-1 text-sm text-ink-2">
         <span className="flex items-center gap-1.5">
@@ -449,8 +536,9 @@ export function NetLine({
     [data],
   )
   const a = axisProps(c, scale)
-  const tip = (
+  const tip = (portal: HTMLElement | null) => (
     <Tooltip
+      portal={portal}
       cursor={shape === 'bars' ? { fill: c.ink3, fillOpacity: 0.08 } : { stroke: c.ink3, strokeOpacity: 0.3 }}
       content={({ active, payload, label }) => (
         <ChartTip
@@ -470,13 +558,13 @@ export function NetLine({
   )
   return (
     <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
-      {shape === 'bars' ? (
+      {(portal) => (shape === 'bars' ? (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%">
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           <ReferenceLine y={0} stroke={c.baseline} strokeWidth={1} />
-          {tip}
+          {tip(portal)}
           {/* A month that went the other way is not a small good month, so it
               is not the good colour. The bars have to be coloured one at a time
               for that — a single fill cannot say which side of zero it is on. */}
@@ -496,7 +584,7 @@ export function NetLine({
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           <ReferenceLine y={0} stroke={c.baseline} strokeWidth={1} />
-          {tip}
+          {tip(portal)}
           <Line
             type="monotone"
             dataKey="net"
@@ -507,7 +595,7 @@ export function NetLine({
             isAnimationActive={false}
           />
         </LineChart>
-      )}
+      ))}
     </MonthScroller>
   )
 }
