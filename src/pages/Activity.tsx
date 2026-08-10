@@ -20,6 +20,7 @@ import {
 import { accountsInBook, BOOK_LABEL, type BookId } from '../lib/books'
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
+import { useSticky, useStickyIds } from '../lib/sticky'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, FilterBar, FilterChip, Popover, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
@@ -56,17 +57,30 @@ const SCROLL_OFFSET = 76
 export default function Activity() {
   const { money } = useApp()
   const [params, setParams] = useSearchParams()
-  const [query, setQuery] = useState('')
-  /** null = every category; a set = just those, top-level, subcategories included. */
-  const [catFilter, setCatFilter] = useState<Set<string> | null>(null)
+  /**
+   * Every filter on this page is sticky for the session — see `lib/sticky.ts`.
+   *
+   * They were `useState`, so walking to Reports and back threw them away and
+   * the page opened on everything again. A filter is a question you are in the
+   * middle of asking; having to ask it again every time you glance away is the
+   * whole complaint. It dies with the tab, deliberately: a narrowing set last
+   * Tuesday should not still be hiding rows this morning.
+   */
+  const [query, setQuery] = useSticky('activity.query', '')
+  /**
+   * null = every category; a set = just those, top-level, subcategories
+   * included; an EMPTY set = none of them, which is a real state you can get
+   * to by unticking "All categories".
+   */
+  const [catFilter, setCatFilter] = useStickyIds('activity.categories')
   /** null = every account in the current book; a set = just those. */
-  const [accountFilter, setAccountFilter] = useState<Set<string> | null>(null)
+  const [accountFilter, setAccountFilter] = useStickyIds('activity.accounts')
   /**
    * One month only, or the whole history. Empty by default — the point of the
    * list is that it runs — and set by a drill-through from Reports, where the
    * question genuinely is "which rows make up that figure".
    */
-  const [monthFilter, setMonthFilter] = useState<string | null>(null)
+  const [monthFilter, setMonthFilter] = useSticky<string | null>('activity.month', null)
   const [limit, setLimit] = useState(PAGE)
   const [editing, setEditing] = useState<Transaction | undefined>()
   const [importOpen, setImportOpen] = useState(false)
@@ -119,8 +133,20 @@ export default function Activity() {
     [allAccounts, inBook, levels],
   )
 
-  // An account filter written under one book means nothing under another.
-  useEffect(() => setAccountFilter(null), [book])
+  /**
+   * An account filter written under one book means nothing under another.
+   *
+   * The previous book is remembered rather than the effect simply depending on
+   * `book`, because a dependency fires on MOUNT too — which, now that the
+   * filter outlives the page, would clear it every single time you opened
+   * Activity. Only an actual change to the lens may reset it.
+   */
+  const lastBook = useRef(book)
+  useEffect(() => {
+    if (lastBook.current === book) return
+    lastBook.current = book
+    setAccountFilter(null)
+  }, [book, setAccountFilter])
 
   const parents = useMemo(() => categories.filter(isTopLevel), [categories])
 
@@ -1055,7 +1081,12 @@ function SearchChip({ value, onChange }: { value: string; onChange: (next: strin
  * always spelled out and everything past that counts.
  */
 function catLabel(value: Set<string> | null, byId: Map<string, Category>, empty = 'every category') {
-  if (value === null || value.size === 0) return empty
+  if (value === null) return empty
+  // Not the same as `null`, and it must not read as it: an empty set is a
+  // deliberate "none of them", reached by unticking "All categories". Labelling
+  // that "All categories" over an empty list is the control disagreeing with
+  // the screen.
+  if (value.size === 0) return 'No categories'
   if (value.size === 1) {
     const only = [...value][0]
     return byId.get(only)?.name ?? 'one category'
@@ -1098,9 +1129,12 @@ function CategoryFilter({
     const next = new Set(value ?? parents.map((c) => c.id))
     if (next.has(id)) next.delete(id)
     else next.add(id)
-    // Back to "all" at both ends: everything ticked means the same thing, and
-    // nothing ticked is a list of no transactions nobody asked for.
-    onChange(next.size === 0 || next.size === parents.length ? null : next)
+    // Everything ticked is `null` rather than a set of every id, so a category
+    // invented next week is included instead of being silently excluded by a
+    // set written before it existed. Nothing ticked is NOT folded back to
+    // "all": it is a state you can mean, and the way to one category is to
+    // clear them and pick it.
+    onChange(next.size === parents.length ? null : next)
   }
 
   return (
@@ -1126,12 +1160,17 @@ function CategoryFilter({
         // shut after the first one would make the second choice cost as much as
         // the first.
         <div className="max-h-72 overflow-y-auto">
+          {/* A select-all that also deselects, which is the only way to reach
+              ONE category without unticking eleven. Ticking a category from a
+              standing start is one press; getting to a standing start used to
+              be as many presses as you have categories. */}
           <button
-            onClick={() => onChange(null)}
+            onClick={() => onChange(value === null ? new Set() : null)}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
           >
             <Check size={15} className={cx('shrink-0', value === null ? 'text-accent' : 'opacity-0')} />
             <span className="font-medium">All categories</span>
+            <span className="ml-auto shrink-0 text-xs text-ink-3">{value === null ? 'Clear' : 'Select all'}</span>
           </button>
           <div className="my-1 border-t border-hairline" />
           {parents.map((c) => {

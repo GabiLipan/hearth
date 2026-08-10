@@ -98,7 +98,8 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
 `categoryTree.ts` (what a drag on the category list means, and what it writes),
 `layout.ts` (which sections a page shows, in what order, how wide, and in which
-shape — home and Reports share it), `sankey.ts` (a period as one balanced flow,
+shape — home and Reports share it), `sticky.ts` (a filter that outlives leaving
+the page and dies with the tab), `sankey.ts` (a period as one balanced flow,
 and where every band goes), `scale.ts` (a value axis with round numbers, shared
 by a scrolling chart and the axis pinned beside it),
 `reimbursements.ts` (what the household owes you), `shade.ts` (telling apart
@@ -506,6 +507,23 @@ the single place a level comes from.
   it in exactly the same way — on a phone it ate a whole bar, which then read as
   a month that had barely started. `MonthScroller` therefore has no edge fade at
   all; the scrollbar and a caption carry the hint instead.
+- **A filter that outlives its page turns every mount-time reset into a bug.**
+  Activity's filters are `useSticky`/`useStickyIds` (session-scoped, per tab —
+  a preference belongs in `settings`, but a filter is a question you are in the
+  middle of asking and one asked last Tuesday must not still be hiding rows).
+  The catch is that `useEffect(…, [book])` fires on MOUNT as well as on change,
+  so "an account filter written under one book means nothing under another" was
+  quietly clearing the filter every time the page opened. It compares against a
+  ref of the previous book instead. Any new reset-on-change effect needs the
+  same treatment.
+- **`null` and an empty set are different filters and must read differently.**
+  `null` is "all of them, including any added later"; an empty set is "none",
+  which is what unticking "All categories" now means — that toggle is the only
+  way to reach ONE category without unticking eleven. So `toggle` no longer
+  folds empty back to `null` (it still folds a full set, so a category invented
+  next week is included), and `catLabel` says "No categories" rather than
+  inheriting the "every category" wording, which would have left the control
+  claiming everything over an empty list.
 - **A tooltip inside a scrolling chart is wrong twice over.** It lives in
   `.recharts-wrapper`, which is inside `overflow-x: auto` — a box that clips on
   BOTH axes, so anything outside the visible window is cut off and reads as the
