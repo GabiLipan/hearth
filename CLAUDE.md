@@ -97,6 +97,10 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
 `categoryTree.ts` (what a drag on the category list means, and what it writes),
+`layout.ts` (which sections a page shows, in what order, how wide, and in which
+shape — home and Reports share it), `sankey.ts` (a period as one balanced flow,
+and where every band goes), `scale.ts` (a value axis with round numbers, shared
+by a scrolling chart and the axis pinned beside it),
 `reimbursements.ts` (what the household owes you), `shade.ts` (telling apart
 two categories the palette gave one colour),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
@@ -496,6 +500,41 @@ the single place a level comes from.
   behaviour you would otherwise have to build. A route never posts anything: a
   bill records money that has not moved, a route only recognises money that
   has, and `nextOn` is a sentence rather than a row.
+- **A faded bar already means something, so nothing else may fade one.** Every
+  chart draws an unfinished month at 45%, and it says so in words. A gradient
+  hinting that a scrolling chart has more to the left washes out the bar under
+  it in exactly the same way — on a phone it ate a whole bar, which then read as
+  a month that had barely started. `MonthScroller` therefore has no edge fade at
+  all; the scrollbar and a caption carry the hint instead.
+- **A scrolling chart's axis is drawn by hand, not by a second chart.** Two
+  Recharts charts agree about where their plot areas are only by accident, and
+  the accident stops holding the first time a margin changes. `ValueAxis` is
+  plain DOM sharing `niceScale` and the plot constants with the chart beside it,
+  whose own `YAxis` is `hide` — present so the grid and the scale still exist,
+  invisible because the axis outside has drawn it. `XAxis` carries an explicit
+  `height` for the same reason: a default that shifted by a pixel would put
+  every figure a pixel off its line, on every chart at once. The scroller also
+  needs `pb-2`, because a scrollbar is painted in the bottom of the PADDING box
+  and without it a thin one strikes through the month labels.
+- **Document order is not reading order once `Columns` is involved.** Masonry
+  distributes cards down columns, so the second card on the page is the top of
+  column two rather than the second `data-section` in the DOM. `Arrange` carries
+  the visible-list index on every measured box rather than implying it from the
+  array, and drops boxes of zero size — a section whose data has nothing to show
+  renders empty and is hidden, and a zero box at the origin would otherwise win
+  "nearest centre" from the far corner of the page.
+- **A wrapper cannot see that its child rendered nothing.** Widgets return null
+  all the time (no accounts, no bills due), and `:empty` on the wrapper never
+  matches because the wrapper always holds the inner box — and, while arranging,
+  the controls. `[&:has(>div:empty)]:hidden` asks about the inner box instead,
+  which is what stops Customise mode drawing a dashed outline around a void.
+- **The Sankey's hub is as tall as the busier side, not as tall as the money.**
+  Every band has a `minBand` floor so a small one stays visible and hoverable,
+  so a side with eleven bands carries slightly more than the money alone. A hub
+  sized to `total * scale` is then met by a stack that overhangs it, which looks
+  like an arithmetic error. Sizing it to the thicker side and centring the
+  thinner one inside keeps every ribbon exactly as thick at the hub as at its own
+  end — which is the only claim the diagram makes.
 - **Transfer pairing is the one matcher with no tolerance.** Every other
   comparison in the app is fuzzy — `payeeSimilar`, the bill amount window, the
   duplicate check. `findTransferCandidates` requires `out === -in` exactly, and

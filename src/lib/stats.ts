@@ -157,3 +157,33 @@ export function typicalSpend(series: number[] | undefined): number | undefined {
 export function monthsEndingAt(month: string, n: number): string[] {
   return Array.from({ length: n }, (_, i) => shiftMonth(month, -(n - 1 - i)))
 }
+
+/**
+ * How many months of history there actually are, ending at `month`.
+ *
+ * What a chart that scrolls needs: the window is what the toggle says, and this
+ * is how far back there is anything to scroll TO. Building the series over a
+ * fixed thirty-six months instead would draw two years of empty bars for a
+ * household that started in March, which reads as two years of spending nothing.
+ *
+ * Capped, because the series is recomputed on every change and nobody scrolls
+ * back five years; and floored at one, because a book with no rows in it still
+ * has to draw an axis.
+ */
+export function monthsOfHistory(
+  txns: { date: string }[],
+  endingAt = thisMonthKey(),
+  cap = 36,
+): number {
+  let earliest: string | undefined
+  for (const t of txns) {
+    const k = monthKey(t.date)
+    if (k > endingAt) continue
+    if (!earliest || k < earliest) earliest = k
+  }
+  if (!earliest) return 1
+  const [ey, em] = earliest.split('-').map(Number)
+  const [ly, lm] = endingAt.split('-').map(Number)
+  const months = (ly - ey) * 12 + (lm - em) + 1
+  return Math.max(1, Math.min(cap, months))
+}

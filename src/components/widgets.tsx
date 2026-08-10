@@ -1,21 +1,26 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeftRight, ArrowRight, ChevronLeft, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
 import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate, todayISO } from '../lib/dates'
-import { monthlySpendByCategory, monthsEndingAt, OTHER_SLICE_ID } from '../lib/stats'
+import { monthlySpendByCategory, monthsEndingAt, monthsOfHistory, OTHER_SLICE_ID } from '../lib/stats'
 import {
   accountsInBook,
   bookSeries,
   bookSlices,
   bookTotals,
+  contributionSplit,
   hasBreakdown,
   BOOK_WORDS,
   type BookId,
   type BookMap,
   type Flow,
 } from '../lib/books'
+import { spendFlow } from '../lib/sankey'
+import { useMemberMap } from '../lib/cache'
+import { nameOf } from './PersonDot'
+import { Sankey } from './Sankey'
 import { settlement } from '../lib/reimbursements'
 import { typicalRange } from '../lib/budgetHistory'
 import { balanceOf, canAddTransactions, canSeeTransactionsAt, levelOn } from '../lib/accounts'
@@ -27,7 +32,7 @@ import { useApp } from '../state/AppContext'
 import { Button, Card, CategoryDot, Field, Progress, Select, Sheet, TextInput, cx } from './ui'
 import { BudgetBullet } from './BudgetBullet'
 import { CategoryIcon } from './CategoryIcon'
-import { CategoryDonut, SpendBars } from './charts'
+import { CategoryBars, CategoryDonut, SpendBars, type TrendShape } from './charts'
 
 export interface HomeData {
   txns: Transaction[]
@@ -66,6 +71,21 @@ export interface HomeData {
   flows: Map<string, Flow>
 }
 
+/**
+ * What every widget on the home page is handed.
+ *
+ * `variant` and `controls` come from the page's stored arrangement — see
+ * `lib/layout.ts`. A widget that offers no choice of shape simply ignores both,
+ * which is most of them. The picker is passed in rather than rendered over the
+ * card because the corner of a card is already spoken for on most of them: a
+ * widget knows where its own heading is, and nothing else does.
+ */
+export interface WidgetProps {
+  data: HomeData
+  variant?: string
+  controls?: ReactNode
+}
+
 const month = () => thisMonthKey()
 
 /* ---------- Month summary hero ---------- */
@@ -88,7 +108,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
   )
 }
 
-export function HeroWidget({ data }: { data: HomeData }) {
+export function HeroWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const words = BOOK_WORDS[data.book]
   const totals = useMemo(
@@ -150,7 +170,7 @@ export function HeroWidget({ data }: { data: HomeData }) {
 }
 
 /* ---------- Budgets at a glance ---------- */
-export function BudgetGlanceWidget({ data }: { data: HomeData }) {
+export function BudgetGlanceWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const now = new Date()
   const paceFrac = now.getDate() / getDaysInMonth(now)
@@ -235,7 +255,7 @@ export function BudgetGlanceWidget({ data }: { data: HomeData }) {
 }
 
 /* ---------- Accounts ---------- */
-export function AccountsWidget({ data }: { data: HomeData }) {
+export function AccountsWidget({ data }: WidgetProps) {
   const { money } = useApp()
   if (data.accounts.length === 0) return null
   const balance = (a: Account) => balanceOf(a, data.txns, data.remoteBalances, levelOn(a.id, data.levels))
@@ -269,7 +289,7 @@ export function AccountsWidget({ data }: { data: HomeData }) {
 }
 
 /* ---------- Where it went ---------- */
-export function DonutWidget({ data }: { data: HomeData }) {
+export function DonutWidget({ data, variant, controls }: WidgetProps) {
   const { money } = useApp()
   /** The category being looked inside, or null for the top level. */
   const [drill, setDrill] = useState<string | null>(null)
@@ -292,22 +312,35 @@ export function DonutWidget({ data }: { data: HomeData }) {
 
   return (
     <Card className="p-4 md:p-3">
-      <h3 className="mb-2 flex items-center gap-1 font-semibold md:mb-1.5 md:text-sm">
-        {drill && (
-          <button
-            onClick={() => setDrill(null)}
-            className="flex items-center gap-0.5 rounded-full px-1 py-0.5 text-ink-3 transition hover:bg-surface-2 hover:text-ink"
-          >
-            <ChevronLeft size={14} /> All
-          </button>
-        )}
-        {drill ? (catMap.get(drill)?.name ?? 'Category') : 'Where it went'}
-      </h3>
-      <CategoryDonut
-        slices={slices}
-        height={180}
-        centerLabel={{ title: drill ? 'in here' : 'spent', value: money(spent, { compact: true }) }}
-      />
+      <div className="mb-2 flex items-center gap-1 md:mb-1.5">
+        <h3 className="flex min-w-0 flex-1 items-center gap-1 font-semibold md:text-sm">
+          {drill && (
+            <button
+              onClick={() => setDrill(null)}
+              className="flex items-center gap-0.5 rounded-full px-1 py-0.5 text-ink-3 transition hover:bg-surface-2 hover:text-ink"
+            >
+              <ChevronLeft size={14} /> All
+            </button>
+          )}
+          <span className="truncate">{drill ? (catMap.get(drill)?.name ?? 'Category') : 'Where it went'}</span>
+        </h3>
+        {controls}
+      </div>
+      {variant === 'bars' ? (
+        <>
+          <p className="mb-2 text-sm text-ink-2">
+            <span className="font-semibold tabular">{money(spent)}</span>{' '}
+            <span className="text-ink-3">{drill ? 'in here' : 'spent'}</span>
+          </p>
+          <CategoryBars slices={slices} />
+        </>
+      ) : (
+        <CategoryDonut
+          slices={slices}
+          height={180}
+          centerLabel={{ title: drill ? 'in here' : 'spent', value: money(spent, { compact: true }) }}
+        />
+      )}
       {/* The donut itself is not clickable, so the way in is a row of buttons
           under it — the same arrangement Reports uses, and the same reasons:
           a keyboard path, and a target big enough for a thumb. */}
@@ -329,21 +362,85 @@ export function DonutWidget({ data }: { data: HomeData }) {
 }
 
 /* ---------- Trend ---------- */
-export function TrendWidget({ data }: { data: HomeData }) {
+
+/** How many months the trend widget shows at once. Everything earlier scrolls. */
+const TREND_WINDOW = 6
+
+export function TrendWidget({ data, variant, controls }: WidgetProps) {
+  // The window is six; the series is everything there is, so the chart has
+  // something to scroll back to. A household three months old gets three bars
+  // rather than three bars and thirty-three empty ones.
+  const months = useMemo(() => monthsOfHistory(data.txns), [data.txns])
   const series = useMemo(
-    () => bookSeries(data.txns, data.flows, data.book, 6, data.books),
-    [data.txns, data.flows, data.book, data.books],
+    () => bookSeries(data.txns, data.flows, data.book, months, data.books),
+    [data.txns, data.flows, data.book, months, data.books],
   )
   return (
     <Card className="p-4 md:p-3">
-      <h3 className="mb-2 font-semibold md:mb-1.5 md:text-sm">Spending, last 6 months</h3>
-      <SpendBars data={series} height={170} />
+      <div className="mb-2 flex items-center gap-1 md:mb-1.5">
+        <h3 className="min-w-0 flex-1 truncate font-semibold md:text-sm">
+          Spending, last {Math.min(TREND_WINDOW, months)} months
+        </h3>
+        {controls}
+      </div>
+      <SpendBars
+        data={series}
+        height={170}
+        visible={TREND_WINDOW}
+        shape={(variant as TrendShape) ?? 'bars'}
+      />
+      {months > TREND_WINDOW && (
+        <p className="mt-1 text-xs text-ink-3">Scroll the chart back for earlier months.</p>
+      )}
+    </Card>
+  )
+}
+
+/* ---------- The month as one path ---------- */
+
+/**
+ * Where the money came from and what it became, in one picture.
+ *
+ * Off by default. It is the widest thing on the page and it says something the
+ * hero and the donut between them already say in figures — so it earns its
+ * place by being asked for, rather than by turning up on everyone's home page
+ * on the strength of being new.
+ */
+export function FlowWidget({ data }: WidgetProps) {
+  const memberMap = useMemberMap()
+  const totals = useMemo(
+    () => bookTotals(data.txns, data.flows, data.book, month(), data.books),
+    [data.txns, data.flows, data.book, data.books],
+  )
+  const slices = useMemo(
+    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, undefined, 8),
+    [data.txns, data.flows, data.categories, data.book, data.books],
+  )
+  const split = useMemo(
+    () => contributionSplit(data.allTxns, data.flows, month(), data.books),
+    [data.allTxns, data.flows, data.books],
+  )
+  const partner = useMemo(() => {
+    const others = [...memberMap.values()].filter((m) => m.userId !== data.userId)
+    return others.length === 1 ? nameOf(others[0]) : undefined
+  }, [memberMap, data.userId])
+
+  const graph = useMemo(
+    () => spendFlow({ book: data.book, totals, slices, split, partner }),
+    [data.book, totals, slices, split, partner],
+  )
+  if (graph.totalMinor === 0) return null
+
+  return (
+    <Card className="p-4 md:p-3">
+      <h3 className="mb-2 font-semibold md:mb-1.5 md:text-sm">{monthLabel(month())} · where it flowed</h3>
+      <Sankey graph={graph} />
     </Card>
   )
 }
 
 /* ---------- Upcoming bills ---------- */
-export function BillsWidget({ data }: { data: HomeData }) {
+export function BillsWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   const upcoming = data.bills
@@ -398,7 +495,7 @@ export function BillsWidget({ data }: { data: HomeData }) {
  * Hidden entirely until the mechanism has been used, so a household that never
  * pays for anything out of its own pockets never sees it.
  */
-export function ReimbursementWidget({ data }: { data: HomeData }) {
+export function ReimbursementWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const [paying, setPaying] = useState(false)
   const s = useMemo(
@@ -614,7 +711,7 @@ function PayBack({
   )
 }
 
-export function RecentWidget({ data }: { data: HomeData }) {
+export function RecentWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   const recent = useMemo(

@@ -33,10 +33,25 @@ import {
   type BookId,
 } from '../lib/books'
 import { useApp } from '../state/AppContext'
-import { Card, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, cx } from '../components/ui'
+import { Card, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, useColumnCount, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
-import { CategoryDonut, SpendBars, IncomeSpendBars, NetLine } from '../components/charts'
+import { Arrange, useLayout } from '../components/Arrange'
+import type { SectionDef } from '../lib/layout'
+import { Sankey } from '../components/Sankey'
+import { spendFlow } from '../lib/sankey'
+import { monthsOfHistory } from '../lib/stats'
+import {
+  CategoryBars,
+  CategoryDonut,
+  SpendBars,
+  IncomeSpendBars,
+  NetLine,
+  NET_SHAPES,
+  SLICE_SHAPES,
+  TREND_SHAPES,
+  type TrendShape,
+} from '../components/charts'
 import {
   CategoryHeatmap,
   FixedVariableBars,
@@ -81,6 +96,34 @@ const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
   { value: 'year', label: 'Year' },
   { value: 'custom', label: 'Range' },
 ]
+
+/**
+ * What this page can show, in the order it shows it by default.
+ *
+ * Every one of these can be moved, resized or put away — a household that only
+ * ever looks at the heatmap should be able to have the heatmap at the top, full
+ * width, and nothing else. Sections that have nothing to say for the book or
+ * period in view render nothing and are hidden; they are still in the list, so
+ * they come back when the data does rather than disappearing from the
+ * arrangement altogether.
+ */
+const SECTIONS: SectionDef[] = [
+  { id: 'categories', label: 'Where it went', defaultSpan: 'full', variants: SLICE_SHAPES },
+  { id: 'spend', label: 'Spending each month', variants: TREND_SHAPES },
+  { id: 'inout', label: 'In vs out' },
+  { id: 'net', label: 'Kept each month', defaultSpan: 'full', variants: NET_SHAPES },
+  { id: 'flow', label: 'The whole flow', defaultSpan: 'full' },
+  { id: 'waterfall', label: 'Step by step', defaultSpan: 'full' },
+  { id: 'salary', label: 'What each salary turned into', defaultSpan: 'full' },
+  { id: 'committed', label: 'Committed vs chosen' },
+  { id: 'kept', label: 'Share kept' },
+  { id: 'payees', label: 'Top payees' },
+  { id: 'heatmap', label: 'Category by month', defaultSpan: 'full' },
+  { id: 'pace', label: 'Pace', defaultSpan: 'full' },
+]
+
+/** Two columns on a laptop, three on a wide monitor. */
+const COLUMN_STEPS: [number, number][] = [[1024, 2], [1900, 3]]
 
 /** A chip that opens a short list and reports which of it is chosen. */
 function ChoiceChip<T extends string>({
@@ -190,9 +233,34 @@ export default function Reports() {
         : bookSlices(txns ?? [], flows, categories, book, inView, books, drill ?? undefined),
     [txns, flows, categories, book, inView, books, drill, period, from, to],
   )
+  /** The same breakdown, never drilled into — what the flow diagram is built from. */
+  const topSlices = useMemo(
+    () =>
+      !drill
+        ? slices
+        : period === 'custom'
+          ? rangeSlices(txns ?? [], flows, categories, book, books, from, to)
+          : bookSlices(txns ?? [], flows, categories, book, inView, books),
+    [drill, slices, txns, flows, categories, book, inView, books, period, from, to],
+  )
   const series = useMemo(
     () => bookSeries(txns ?? [], flows, book, Number(range), books, month),
     [txns, flows, book, range, books, month],
+  )
+  /**
+   * The same series, but as far back as there is anything to show.
+   *
+   * The 6/12 toggle decides how many months are on SCREEN, and the charts that
+   * take this scroll to the rest. Two series rather than one because the toggle
+   * is doing two jobs: it is the window for the monthly charts, and it is the
+   * period for everything derived from `monthKeys` — a heatmap of thirty-six
+   * columns is not a heatmap, and a "share kept" line three years long is not
+   * the question the card is asking.
+   */
+  const history = useMemo(() => monthsOfHistory(txns ?? [], month), [txns, month])
+  const longSeries = useMemo(
+    () => bookSeries(txns ?? [], flows, book, Math.max(history, Number(range)), books, month),
+    [txns, flows, book, history, range, books, month],
   )
   const totals = useMemo(
     () =>
@@ -256,6 +324,31 @@ export default function Reports() {
   const deltas = useMemo(
     () => categoryDeltas(txns ?? [], flows, categories, book, books, monthKeys, month),
     [txns, flows, categories, book, books, monthKeys, month],
+  )
+
+  /**
+   * The period as one path, from where the money came in to what it became.
+   *
+   * Built from the figures already on this page — the same totals as the card
+   * at the top, the same slices as the breakdown — so the diagram cannot
+   * disagree with the numbers beside it. See `lib/sankey.ts` for what it does
+   * with a month that spent more than it took in.
+   */
+  const flowGraph = useMemo(
+    () =>
+      spendFlow({
+        book,
+        totals,
+        // The top level always, even while a category is drilled into. A flow
+        // diagram of one category's children is a picture of a drill-down, not
+        // of a period — and handing it the children would leave the rest of the
+        // spending to arrive on the right as "not categorised", which is a
+        // sentence about the data rather than about the drill.
+        slices: topSlices,
+        split,
+        partner: partner ?? undefined,
+      }),
+    [book, totals, topSlices, split, partner],
   )
 
   /**
@@ -344,6 +437,9 @@ export default function Reports() {
     downloadCSV(`hearth-${book}-${series[0]?.key ?? month}-to-${month}`, toCSV(rows))
   }
 
+  const columnCount = useColumnCount(COLUMN_STEPS)
+  const { layout, setLayout, editing, setEditing } = useLayout('reportsLayout', SECTIONS)
+
   // Changing book or month while inside a category would leave the breadcrumb
   // pointing at a slice that is no longer on screen.
   const changeBook = (next: BookId) => {
@@ -427,6 +523,341 @@ export default function Reports() {
         />
       </div>
     )
+
+  /**
+   * The breakdown, in whichever form the page is in.
+   *
+   * One function rather than two copies, because it appears in both views: as
+   * an arrangeable section under Charts, and pinned above the month table under
+   * Table. The Charts/Table toggle decides whether it draws or tabulates; the
+   * section's own variant decides which drawing.
+   */
+  const categoriesCard = (controls: ReactNode, shape?: string) => (
+    <Card className="p-5 md:p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 md:mb-2">
+        <h3 className="flex items-center gap-1.5 font-semibold md:text-sm">
+          {drill && (
+            <button
+              onClick={() => setDrill(null)}
+              className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-ink-3 transition hover:bg-surface-2 hover:text-ink"
+            >
+              <ChevronLeft size={14} /> All
+            </button>
+          )}
+          {drill ? drillName : `${words.spend}`} · {periodLabel}
+        </h3>
+        <div className="flex items-center gap-2">
+          {!drill && slices.length > 0 && (
+            <span className="hidden text-xs text-ink-3 sm:inline">Tap a category to see what is inside it</span>
+          )}
+          {slices.length > 0 && (
+            <Button size="sm" variant="subtle" onClick={() => seeTransactions(drill ?? undefined)}>
+              <Receipt size={13} /> See transactions
+            </Button>
+          )}
+          {slices.length > 0 && (
+            <Button size="sm" variant="ghost" onClick={exportCategories} title="Download this table as CSV">
+              <Download size={13} /> CSV
+            </Button>
+          )}
+          {controls}
+        </div>
+      </div>
+      {slices.length === 0 ? (
+        <p className="py-8 text-center text-sm text-ink-3">
+          No {book === 'mine' ? 'personal' : 'household'} spending recorded in {periodLabel}.
+        </p>
+      ) : view === 'charts' ? (
+        <>
+          {shape === 'bars' ? (
+            <CategoryBars slices={slices} />
+          ) : (
+            <CategoryDonut
+              slices={slices}
+              centerLabel={{
+                title: drill ? 'in here' : 'spent',
+                value: money(slices.reduce((s, x) => s + x.totalMinor, 0), { compact: true }),
+              }}
+            />
+          )}
+          {/* Neither chart is clickable, so the drill-down lives in a row of
+              buttons under it — which also gives the categories a keyboard
+              path and a hit target big enough for a thumb. */}
+          {!drill && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {slices.filter((s) => canDrill(s.categoryId)).map((s) => (
+                <Button key={s.categoryId} size="sm" variant="subtle" onClick={() => setDrill(s.categoryId)}>
+                  <CategoryIcon icon={s.icon} size={13} /> {s.name}
+                </Button>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <ScrollTable minWidth={460}>
+          <thead>
+            <tr className={table.head}>
+              <th className={cx(table.th, table.pinned)}>Category</th>
+              <th className={cx(table.th, 'text-right')}>Spent</th>
+              <th className={cx(table.th, 'text-right')}>vs typical</th>
+              <th className={cx(table.th, 'text-right')}>Share</th>
+              <th className={cx(table.th, 'w-9')}>
+                <span className="sr-only">Transactions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {slices.map((s) => {
+              const drillable = !drill && canDrill(s.categoryId)
+              return (
+                <tr
+                  key={s.categoryId}
+                  className={cx(table.row, drillable && 'cursor-pointer')}
+                  onClick={drillable ? () => setDrill(s.categoryId) : undefined}
+                >
+                  <td className={cx(table.cell, table.pinned)}>
+                    <span className="inline-flex items-center gap-2">
+                      <span style={{ color: `var(--series-${s.slot})` }}>
+                        <CategoryIcon icon={s.icon} size={15} />
+                      </span>
+                      {s.name}
+                      {drillable && <span className="text-xs text-ink-3">›</span>}
+                    </span>
+                  </td>
+                  <td className={cx(table.cell, 'text-right tabular')}>{money(s.totalMinor)}</td>
+                  {/* Only where there is enough history to mean anything.
+                      Three past months is the floor: "£120 above typical"
+                      on two months' evidence is a confident number about
+                      nothing. Only the parent rows carry it, because that
+                      is the level the median was taken at. */}
+                  <td className={cx(table.cell, 'text-right tabular')}>
+                    {(() => {
+                      const d = drill || period !== 'month' ? undefined : deltas.get(s.categoryId)
+                      if (!d || d.basis < 3) return <span className="text-ink-3">—</span>
+                      // Within a tenth of typical is not news.
+                      if (Math.abs(d.deltaMinor) < Math.max(d.typicalMinor * 0.1, 500)) {
+                        return <span className="text-ink-3">typical</span>
+                      }
+                      return (
+                        <span
+                          className={d.deltaMinor > 0 ? 'text-critical-text' : 'text-good-text'}
+                          title={`Usually about ${money(d.typicalMinor)} over ${d.basis} month${d.basis === 1 ? '' : 's'}`}
+                        >
+                          {money(d.deltaMinor, { sign: true })}
+                        </span>
+                      )
+                    })()}
+                  </td>
+                  <td className={cx(table.cell, 'text-right text-ink-3 tabular')}>{Math.round(s.fraction * 100)}%</td>
+                  {/* Its own control rather than the row's click, because
+                      the row already means "drill into this" wherever there
+                      is anything inside it. `stopPropagation` so the two do
+                      not both fire on the categories that have both. */}
+                  <td className={cx(table.cell, 'pl-2 text-right')}>
+                    <button
+                      aria-label={`See ${s.name} transactions`}
+                      title={`See ${s.name} transactions in ${monthLabel(month)}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        seeTransactions(s.categoryId)
+                      }}
+                      className="grid size-7 place-items-center rounded-lg text-ink-3 transition hover:bg-surface-2 hover:text-ink"
+                    >
+                      <Receipt size={14} />
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </ScrollTable>
+      )}
+    </Card>
+  )
+
+  /** A card's heading, with room for the chart-shape picker on the end of it. */
+  const heading = (title: string, controls: ReactNode, hint?: string) => (
+    <div className="mb-3 md:mb-2">
+      <div className="flex items-start gap-2">
+        <h3 className="min-w-0 flex-1 font-semibold md:text-sm">{title}</h3>
+        {controls}
+      </div>
+      {hint && <p className="mt-1 text-sm text-ink-3 md:text-xs">{hint}</p>}
+    </div>
+  )
+
+  /**
+   * How many months are on screen at once. The toggle picks it; anything
+   * earlier is still there and is reached by scrolling the chart.
+   */
+  const monthsShown = Number(range)
+  const scrollHint =
+    longSeries.length > monthsShown
+      ? `Showing the last ${monthsShown} months — scroll the chart back for earlier ones.`
+      : undefined
+
+  /**
+   * One section of the charts view.
+   *
+   * Returning null is how a section says it has nothing to show — a personal
+   * book has no waterfall, a custom range has no months — and `Arrange` hides
+   * the card rather than leaving an empty one in the arrangement. The section
+   * stays in the layout, so it comes back the moment the data does.
+   */
+  const renderSection = (id: string, variant: string | undefined, controls: ReactNode): ReactNode => {
+    // A range is not made of months, so every monthly series is a question it
+    // cannot answer. The flow diagram and the breakdown are not: both are
+    // totals over whatever period is in view.
+    const monthly = period !== 'custom'
+
+    switch (id) {
+      case 'categories':
+        return categoriesCard(controls, variant)
+
+      case 'flow':
+        return flowGraph.totalMinor === 0 ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              `Where it came from, where it went · ${periodLabel}`,
+              controls,
+              'Every ribbon is as wide as the money it carries, and the two sides balance: what is on the right is what the money on the left turned into.',
+            )}
+            <Sankey graph={flowGraph} />
+          </Card>
+        )
+
+      case 'spend':
+        return !monthly ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(`${words.spend} each month`, controls, scrollHint)}
+            <SpendBars data={longSeries} visible={monthsShown} shape={(variant as TrendShape) ?? 'bars'} />
+          </Card>
+        )
+
+      case 'inout':
+        return !monthly ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              book === 'household' ? 'Paid in vs spent' : book === 'mine' ? 'Earned vs spent' : 'In vs out',
+              controls,
+            )}
+            <IncomeSpendBars data={longSeries} visible={monthsShown} />
+          </Card>
+        )
+
+      case 'net':
+        return !monthly ? null : (
+          <Card className="p-5 md:p-4">
+            {/* Not "what we saved": the series contains months that went the
+                other way, and a title asserting saving over a line that dips
+                below zero is the chart claiming credit for a bad month. */}
+            {heading(
+              book === 'household' ? 'Kept each month' : `${words.net} each month`,
+              controls,
+              words.netHint,
+            )}
+            <NetLine data={longSeries} visible={monthsShown} shape={(variant as TrendShape) ?? 'line'} />
+          </Card>
+        )
+
+      /* The household's month as one path, not three figures to subtract in
+         your head. Household only: the steps ARE the household model, and
+         "moved to savings" means nothing in a book with one account in it. */
+      case 'waterfall':
+        return !monthly || book !== 'household' || !waterfall.some((s) => s.deltaMinor !== 0) ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              `Where it went · ${periodLabel}`,
+              controls,
+              'Paid in, then out again, in the order it happened. The last bar is what is still sitting in the current account.',
+            )}
+            <Waterfall steps={waterfall} />
+          </Card>
+        )
+
+      /* The mirror of it, and the reason the personal book exists: the bar is
+         the salary, and the question is what share of it went where. */
+      case 'salary':
+        return !monthly || book !== 'mine' || !salary.some((b) => b.earnedMinor > 0) ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              'What each salary turned into',
+              controls,
+              "Each bar is one month's earnings, split into what went to the household, what you spent on yourself, and what stayed put.",
+            )}
+            <SalaryStack data={salary} />
+          </Card>
+        )
+
+      case 'committed':
+        return !monthly || !committed.some((m) => m.fixedMinor + m.variableMinor > 0) ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              'Committed vs chosen',
+              controls,
+              'How much of the spending is bills you track. Anything not tracked as a bill counts as chosen, so this is only as good as your bill list.',
+            )}
+            <FixedVariableBars data={committed} />
+          </Card>
+        )
+
+      case 'kept':
+        return !monthly || !kept.some((m) => m.rate !== null) ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              'Share kept',
+              controls,
+              book === 'mine'
+                ? 'What was left with you, as a share of what you earned. Money moved to the household is not spending, but it is not kept either.'
+                : 'What did not go out again, as a share of what came in. Below the line, more went out than in.',
+            )}
+            <SavingsRateLine data={kept} />
+          </Card>
+        )
+
+      case 'payees':
+        return !monthly || payees.length === 0 ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              `Top payees · ${periodLabel}`,
+              controls,
+              'Under the category level. Shops the app treats as the same merchant are one line.',
+            )}
+            <TopPayees rows={payees} />
+          </Card>
+        )
+
+      /* Deliberately the widest thing on the page by default. The point of it
+         is reading ALONG a row for drift, which needs the months to be far
+         enough apart to tell apart. */
+      case 'heatmap':
+        return !monthly || heatmap.rows.length === 0 ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              'Category by month',
+              controls,
+              'Read along a row to see a category creeping up. Shading compares every cell against the biggest one, so the rows are comparable with each other.',
+            )}
+            <CategoryHeatmap grid={heatmap} />
+          </Card>
+        )
+
+      case 'pace':
+        return period !== 'month' || !pacePoints.some((p) => p.thisMonthMinor || p.lastMonthMinor) ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              'Pace',
+              controls,
+              'Spending so far against the same point the month before — the one comparison a part-finished month can honestly make.',
+            )}
+            <PaceLine points={pacePoints} month={month} />
+          </Card>
+        )
+
+      default:
+        return null
+    }
+  }
 
   return (
     <div>
@@ -619,271 +1050,21 @@ export default function Reports() {
         )}
       </Card>
 
-      {/* `[&>*]:min-w-0` is load-bearing, not tidiness. A grid item's default
-          `min-width: auto` is its CONTENT's width, so a card holding a table
-          with `min-width: 460px` — or the heatmap, at 34rem — grows the column
-          to fit it and the `overflow-x-auto` inside never gets the chance to
-          scroll. On a phone that card is then wider than the screen, and
-          because `main` carries `overflow-x: clip` the excess is silently cut
-          off rather than showing a scrollbar. */}
-      <div className="grid gap-3 md:gap-2.5 xl:grid-cols-2 [&>*]:min-w-0">
-        <Card className="p-5 md:p-4 xl:col-span-2">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 md:mb-2">
-            <h3 className="flex items-center gap-1.5 font-semibold md:text-sm">
-              {drill && (
-                <button
-                  onClick={() => setDrill(null)}
-                  className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-ink-3 transition hover:bg-surface-2 hover:text-ink"
-                >
-                  <ChevronLeft size={14} /> All
-                </button>
-              )}
-              {drill ? drillName : `${words.spend}`} · {periodLabel}
-            </h3>
-            <div className="flex items-center gap-2">
-              {!drill && slices.length > 0 && (
-                <span className="hidden text-xs text-ink-3 sm:inline">Tap a category to see what is inside it</span>
-              )}
-              {slices.length > 0 && (
-                <Button size="sm" variant="subtle" onClick={() => seeTransactions(drill ?? undefined)}>
-                  <Receipt size={13} /> See transactions
-                </Button>
-              )}
-              {slices.length > 0 && (
-                <Button size="sm" variant="ghost" onClick={exportCategories} title="Download this table as CSV">
-                  <Download size={13} /> CSV
-                </Button>
-              )}
-            </div>
-          </div>
-          {slices.length === 0 ? (
-            <p className="py-8 text-center text-sm text-ink-3">
-              No {book === 'mine' ? 'personal' : 'household'} spending recorded in {periodLabel}.
-            </p>
-          ) : view === 'charts' ? (
-            <>
-              <CategoryDonut
-                slices={slices}
-                centerLabel={{
-                  title: drill ? 'in here' : 'spent',
-                  value: money(slices.reduce((s, x) => s + x.totalMinor, 0), { compact: true }),
-                }}
-              />
-              {/* The donut is not clickable, so the drill-down lives in a row of
-                  buttons under it — which also gives the categories a keyboard
-                  path and a hit target big enough for a thumb. */}
-              {!drill && (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {slices.filter((s) => canDrill(s.categoryId)).map((s) => (
-                    <Button key={s.categoryId} size="sm" variant="subtle" onClick={() => setDrill(s.categoryId)}>
-                      <CategoryIcon icon={s.icon} size={13} /> {s.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <ScrollTable minWidth={460}>
-              <thead>
-                <tr className={table.head}>
-                  <th className={cx(table.th, table.pinned)}>Category</th>
-                  <th className={cx(table.th, 'text-right')}>Spent</th>
-                  <th className={cx(table.th, 'text-right')}>vs typical</th>
-                  <th className={cx(table.th, 'text-right')}>Share</th>
-                  <th className={cx(table.th, 'w-9')}>
-                    <span className="sr-only">Transactions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {slices.map((s) => {
-                  const drillable = !drill && canDrill(s.categoryId)
-                  return (
-                    <tr
-                      key={s.categoryId}
-                      className={cx(table.row, drillable && 'cursor-pointer')}
-                      onClick={drillable ? () => setDrill(s.categoryId) : undefined}
-                    >
-                      <td className={cx(table.cell, table.pinned)}>
-                        <span className="inline-flex items-center gap-2">
-                          <span style={{ color: `var(--series-${s.slot})` }}>
-                            <CategoryIcon icon={s.icon} size={15} />
-                          </span>
-                          {s.name}
-                          {drillable && <span className="text-xs text-ink-3">›</span>}
-                        </span>
-                      </td>
-                      <td className={cx(table.cell, 'text-right tabular')}>{money(s.totalMinor)}</td>
-                      {/* Only where there is enough history to mean anything.
-                          Three past months is the floor: "£120 above typical"
-                          on two months' evidence is a confident number about
-                          nothing. Only the parent rows carry it, because that
-                          is the level the median was taken at. */}
-                      <td className={cx(table.cell, 'text-right tabular')}>
-                        {(() => {
-                          const d = drill || period !== 'month' ? undefined : deltas.get(s.categoryId)
-                          if (!d || d.basis < 3) return <span className="text-ink-3">—</span>
-                          // Within a tenth of typical is not news.
-                          if (Math.abs(d.deltaMinor) < Math.max(d.typicalMinor * 0.1, 500)) {
-                            return <span className="text-ink-3">typical</span>
-                          }
-                          return (
-                            <span
-                              className={d.deltaMinor > 0 ? 'text-critical-text' : 'text-good-text'}
-                              title={`Usually about ${money(d.typicalMinor)} over ${d.basis} month${d.basis === 1 ? '' : 's'}`}
-                            >
-                              {money(d.deltaMinor, { sign: true })}
-                            </span>
-                          )
-                        })()}
-                      </td>
-                      <td className={cx(table.cell, 'text-right text-ink-3 tabular')}>{Math.round(s.fraction * 100)}%</td>
-                      {/* Its own control rather than the row's click, because
-                          the row already means "drill into this" wherever there
-                          is anything inside it. `stopPropagation` so the two do
-                          not both fire on the categories that have both. */}
-                      <td className={cx(table.cell, 'pl-2 text-right')}>
-                        <button
-                          aria-label={`See ${s.name} transactions`}
-                          title={`See ${s.name} transactions in ${monthLabel(month)}`}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            seeTransactions(s.categoryId)
-                          }}
-                          className="grid size-7 place-items-center rounded-lg text-ink-3 transition hover:bg-surface-2 hover:text-ink"
-                        >
-                          <Receipt size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </ScrollTable>
-          )}
-        </Card>
+      {/* Every chart below is a card somebody can move, resize or put away.
+          `Arrange` does the laying out — masonry for the one-column cards,
+          packed rows for the wider ones — and each section returns null where
+          it has nothing to say, which hides its card rather than leaving an
+          empty one in the arrangement. See `lib/layout.ts`.
 
-        {view === 'charts' && period === 'custom' ? (
-          /* A range has no months in it, so every series below is a question it
-             cannot answer. Said once, here, rather than leaving eight empty
-             cards or — worse — eight cards quietly showing the wrong period. */
-          <Card className="p-5 md:p-4 xl:col-span-2">
-            <p className="text-sm text-ink-3">
-              The monthly charts are hidden for a custom range: a waterfall, a trend and a pace line are all
-              questions about months, and this period is not made of them. Switch to Month or Year for those.
-            </p>
-          </Card>
-        ) : view === 'charts' ? (
-          <>
-            <Card className="p-5 md:p-4">
-              <h3 className="mb-3 font-semibold md:mb-2 md:text-sm">{words.spend} each month</h3>
-              <SpendBars data={series} />
-            </Card>
-            <Card className="p-5 md:p-4">
-              <h3 className="mb-3 font-semibold md:mb-2 md:text-sm">
-                {book === 'household' ? 'Paid in vs spent' : book === 'mine' ? 'Earned vs spent' : 'In vs out'}
-              </h3>
-              <IncomeSpendBars data={series} />
-            </Card>
-            <Card className="p-5 md:p-4 xl:col-span-2">
-              {/* Not "what we saved": the series contains months that went the
-                  other way, and a title asserting saving over a line that dips
-                  below zero is the chart claiming credit for a bad month. */}
-              <h3 className="mb-1 font-semibold md:text-sm">
-                {book === 'household' ? 'Kept each month' : `${words.net} each month`}
-              </h3>
-              <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">{words.netHint}</p>
-              <NetLine data={series} />
-            </Card>
-
-            {/* The household's month as one path, not three figures to subtract
-                in your head. Household only: the steps ARE the household model,
-                and "moved to savings" means nothing in a book with one account
-                in it. */}
-            {book === 'household' && waterfall.some((s) => s.deltaMinor !== 0) && (
-              <Card className="p-5 md:p-4 xl:col-span-2">
-                <h3 className="mb-1 font-semibold md:text-sm">Where it went · {periodLabel}</h3>
-                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
-                  Paid in, then out again, in the order it happened. The last bar is what is still sitting
-                  in the current account.
-                </p>
-                <Waterfall steps={waterfall} />
-              </Card>
-            )}
-
-            {/* The mirror of it, and the reason the personal book exists: the
-                bar is the salary, and the question is what share of it went
-                where. */}
-            {book === 'mine' && salary.some((b) => b.earnedMinor > 0) && (
-              <Card className="p-5 md:p-4 xl:col-span-2">
-                <h3 className="mb-1 font-semibold md:text-sm">What each salary turned into</h3>
-                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
-                  Each bar is one month's earnings, split into what went to the household, what you spent on
-                  yourself, and what stayed put.
-                </p>
-                <SalaryStack data={salary} />
-              </Card>
-            )}
-
-            {committed.some((m) => m.fixedMinor + m.variableMinor > 0) && (
-              <Card className="p-5 md:p-4">
-                <h3 className="mb-1 font-semibold md:text-sm">Committed vs chosen</h3>
-                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
-                  How much of the spending is bills you track. Anything not tracked as a bill counts as
-                  chosen, so this is only as good as your bill list.
-                </p>
-                <FixedVariableBars data={committed} />
-              </Card>
-            )}
-
-            {kept.some((m) => m.rate !== null) && (
-              <Card className="p-5 md:p-4">
-                <h3 className="mb-1 font-semibold md:text-sm">Share kept</h3>
-                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
-                  {book === 'mine'
-                    ? 'What was left with you, as a share of what you earned. Money moved to the household is not spending, but it is not kept either.'
-                    : 'What did not go out again, as a share of what came in. Below the line, more went out than in.'}
-                </p>
-                <SavingsRateLine data={kept} />
-              </Card>
-            )}
-
-            {payees.length > 0 && (
-              <Card className="p-5 md:p-4">
-                <h3 className="mb-1 font-semibold md:text-sm">Top payees · {periodLabel}</h3>
-                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
-                  Under the category level. Shops the app treats as the same merchant are one line.
-                </p>
-                <TopPayees rows={payees} />
-              </Card>
-            )}
-
-            {/* Deliberately the widest thing on the page. The point of it is
-                reading ALONG a row for drift, which needs the months to be far
-                enough apart to tell apart. */}
-            {heatmap.rows.length > 0 && (
-              <Card className="p-5 md:p-4 xl:col-span-2">
-                <h3 className="mb-1 font-semibold md:text-sm">Category by month</h3>
-                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
-                  Read along a row to see a category creeping up. Shading compares every cell against the
-                  biggest one, so the rows are comparable with each other.
-                </p>
-                <CategoryHeatmap grid={heatmap} />
-              </Card>
-            )}
-
-            {period === 'month' && pacePoints.some((p) => p.thisMonthMinor || p.lastMonthMinor) && (
-              <Card className="p-5 md:p-4 xl:col-span-2">
-                <h3 className="mb-1 font-semibold md:text-sm">Pace</h3>
-                <p className="mb-3 text-sm text-ink-3 md:mb-2 md:text-xs">
-                  Spending so far against the same point the month before — the one comparison a
-                  part-finished month can honestly make.
-                </p>
-                <PaceLine points={pacePoints} month={month} />
-              </Card>
-            )}
-          </>
-        ) : (
+          Widths are load-bearing here, not decoration: a card holding a table
+          with `min-width: 460px` — or the heatmap, at 34rem — would grow its
+          column to fit it if anything in the chain forgot `min-w-0`, and the
+          `overflow-x-auto` inside would never get the chance to scroll. On a
+          phone that card is then wider than the screen, and because `main`
+          carries `overflow-x: clip` the excess is silently cut off. */}
+      {view === 'table' ? (
+        <div className="grid gap-3 md:gap-2.5 xl:grid-cols-2 [&>*]:min-w-0">
+          <div className="xl:col-span-2">{categoriesCard(null)}</div>
           <Card className="p-5 md:p-4 xl:col-span-2">
             <div className="mb-3 flex items-center justify-between gap-2 md:mb-2">
               <h3 className="font-semibold md:text-sm">Month by month</h3>
@@ -929,8 +1110,31 @@ export default function Reports() {
               </tbody>
             </ScrollTable>
           </Card>
-        )}
-      </div>
+        </div>
+      ) : (
+        <>
+          {period === 'custom' && (
+            /* A range has no months in it, so every monthly chart is a question
+               it cannot answer. Said once, here, rather than leaving eight empty
+               cards or — worse — eight cards quietly showing the wrong period. */
+            <Card className="mb-3 p-5 md:mb-2.5 md:p-4">
+              <p className="text-sm text-ink-3">
+                The monthly charts are hidden for a custom range: a waterfall, a trend and a pace line are all
+                questions about months, and this period is not made of them. Switch to Month or Year for those.
+              </p>
+            </Card>
+          )}
+          <Arrange
+            catalogue={SECTIONS}
+            layout={layout}
+            onLayout={setLayout}
+            columns={columnCount}
+            editing={editing}
+            onEditing={setEditing}
+            render={({ def, variant, controls }) => renderSection(def.id, variant, controls)}
+          />
+        </>
+      )}
     </div>
   )
 }
