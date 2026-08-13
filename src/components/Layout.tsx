@@ -489,7 +489,9 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
 function UpdateBanner() {
   const { status } = useUpdateState()
   const [taking, setTaking] = useState(false)
-  if (status !== 'ready') return null
+  // `stale` is the same news — a newer version exists — and differs only in
+  // what taking it costs. See `installUpdate`.
+  if (status !== 'ready' && status !== 'stale') return null
   return (
     <div className="flex items-center gap-2 bg-accent/10 px-4 py-2 text-sm text-ink-2 md:px-5">
       <ArrowDownToLine size={15} className="shrink-0 text-accent" />

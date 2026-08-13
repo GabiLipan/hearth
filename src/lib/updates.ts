@@ -39,8 +39,19 @@ export type UpdateStatus =
   | 'checking'
   /** A new version is downloaded and waiting to be let in. */
   | 'ready'
+  /**
+   * The server has a newer build, and this device's service worker has not
+   * picked it up. Real, and the reason this state exists rather than being
+   * folded into `ready`: `sw.js` goes through the same CDN as everything else,
+   * so the worker can go on being told there is nothing new for as long as that
+   * cache holds. Taking the update from here is a heavier operation — see
+   * `installUpdate`.
+   */
+  | 'stale'
   /** Checked, and this is the newest there is. */
   | 'current'
+  /** The check itself failed — offline, or the server did not answer. */
+  | 'offline'
   /** No service worker here — a browser that cannot install, or the dev server. */
   | 'unsupported'
 
@@ -52,6 +63,15 @@ export interface UpdateState {
   builtAt: string
 }
 
+/**
+ * Where the server says which build it is serving.
+ *
+ * Relative to the document, which is what makes it work on a project site
+ * served from a sub-path — the same reason `base` is './'.
+ */
+const STAMP_URL = 'version.json'
+/** How long to give the service worker to notice, once the server is known to be ahead. */
+const CATCH_UP_MS = 8000
 /** How long between automatic checks — a foreground return sooner than this is ignored. */
 const THROTTLE_MS = 60_000
 /** And a slow heartbeat for an app somebody leaves open all day. */
@@ -130,10 +150,6 @@ export function initUpdates() {
  * glanced at.
  */
 export async function checkForUpdate({ manual = false } = {}): Promise<void> {
-  if (!registration) {
-    if (manual) set({ status: 'unsupported' })
-    return
-  }
   // Already downloaded and waiting: there is nothing left to look for, and a
   // check that reported "up to date" over the top of it would be a lie.
   if (state.status === 'ready') return
@@ -141,40 +157,95 @@ export async function checkForUpdate({ manual = false } = {}): Promise<void> {
 
   lastCheckAt = Date.now()
   if (manual) set({ status: 'checking' })
+
+  /**
+   * Ask the SERVER, not the service worker.
+   *
+   * This is the whole fix for "check for updates finds nothing when there is
+   * something". `registration.update()` fetches `sw.js`, which on GitHub Pages
+   * goes through a CDN with its own TTL and, on iOS, a browser cache that is
+   * keener still — so the worker gets handed yesterday's script, concludes
+   * nothing has changed, and the app faithfully reports it. A stamp fetched
+   * with `no-store` AND a cache-busting query cannot be answered from a cache
+   * by anything in that chain.
+   */
+  let serverBuiltAt: string | undefined
+  try {
+    const res = await fetch(`${STAMP_URL}?t=${Date.now()}`, { cache: 'no-store' })
+    if (res.ok) serverBuiltAt = ((await res.json()) as { builtAt?: string }).builtAt
+  } catch {
+    /* handled below, as "could not ask" rather than as "nothing there" */
+  }
+
+  if (!serverBuiltAt) {
+    // A check that FAILED must never look like a check that succeeded. This
+    // used to fall back to the previous status with a fresh timestamp, which
+    // read on screen as "up to date, as of just now" — the app confidently
+    // reporting the outcome of a question it never got an answer to.
+    set({ status: 'offline', checkedAt: Date.now() })
+    return
+  }
+  if (serverBuiltAt === state.builtAt) {
+    set({ status: 'current', checkedAt: Date.now() })
+    return
+  }
+
+  // The server is ahead. Whether this device can take the update the clean way
+  // depends on the worker catching up, so ask it to, and give it a moment.
+  set({ status: 'checking', checkedAt: Date.now() })
+  if (!registration) {
+    set({ status: 'stale', checkedAt: Date.now() })
+    return
+  }
   try {
     await registration.update()
-    const found = registration.installing ?? registration.waiting
-    if (!found) {
-      set({ status: 'current', checkedAt: Date.now() })
-      return
-    }
+  } catch {
+    /* the stamp already told us the truth; the worker is the one struggling */
+  }
+  const until = Date.now() + CATCH_UP_MS
+  while (Date.now() < until) {
     if (registration.waiting) {
       set({ status: 'ready', checkedAt: Date.now() })
       return
     }
-    // Still downloading. `onNeedRefresh` will fire when it is installed, but
-    // only for a worker workbox is watching; this covers the rest and keeps the
-    // manual check from sitting on "checking" for ever.
-    found.addEventListener('statechange', () => {
-      if (found.state === 'installed') set({ status: 'ready', checkedAt: Date.now() })
-      else if (found.state === 'redundant') set({ status: 'current', checkedAt: Date.now() })
-    })
-  } catch {
-    // Offline, or the server is unreachable. Not an error worth a banner: the
-    // app is working from its own cache, which is the point of it.
-    set({ status: state.status === 'checking' ? 'idle' : state.status, checkedAt: Date.now() })
+    if (!registration.installing) {
+      // Nothing downloading and nothing waiting: the worker has been told there
+      // is no new script. It is wrong, and `installUpdate` knows how to get
+      // past that.
+      break
+    }
+    await new Promise((r) => setTimeout(r, 250))
   }
+  set({ status: registration.waiting ? 'ready' : 'stale', checkedAt: Date.now() })
 }
 
 /**
  * Take the new version, now.
  *
- * Reloads the page: the waiting worker is told to activate, and `registerSW`
- * reloads once it has taken control.
+ * The clean path is the first one: a worker is waiting, it is told to activate,
+ * and `registerSW` reloads once it has taken control.
+ *
+ * The second path is for `stale` — the server is provably ahead and the worker
+ * has not seen it. Unregistering removes the only thing that can serve the old
+ * bundle, so the reload that follows goes to the network and comes back with
+ * the new one, which registers a fresh worker on the way in. It costs the
+ * precache, which is rebuilt on that load, and nothing else: every byte of
+ * household data lives in IndexedDB and the outbox, neither of which a service
+ * worker owns.
  */
 export async function installUpdate(): Promise<void> {
-  if (!applyUpdate) return
-  await applyUpdate(true)
+  if (registration?.waiting && applyUpdate) {
+    await applyUpdate(true)
+    return
+  }
+  try {
+    await registration?.unregister()
+  } catch {
+    /* if it will not go, the reload below is still worth trying */
+  }
+  // `reload()` alone can be served from the back/forward cache on iOS; a fresh
+  // navigation to the same URL cannot.
+  window.location.replace(window.location.href)
 }
 
 export function useUpdateState(): UpdateState {

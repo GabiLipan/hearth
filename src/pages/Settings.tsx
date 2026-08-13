@@ -926,18 +926,25 @@ export const SETTINGS_GROUP_TITLES: Record<string, string> = Object.fromEntries(
 function VersionCard() {
   const { status, checkedAt, builtAt } = useUpdateState()
   const [taking, setTaking] = useState(false)
-  const ready = status === 'ready'
+  // Both mean "there is a newer version" — they differ only in how much work
+  // taking it is, which is `installUpdate`'s problem rather than the reader's.
+  const ready = status === 'ready' || status === 'stale'
 
+  const built = `Built ${fmtFullDate(builtAt.slice(0, 10))} at ${fmtTime(Date.parse(builtAt))}`
   const line =
     status === 'checking'
       ? 'Looking for a new version\u2026'
-      : ready
+      : status === 'ready'
         ? 'A new version is ready to install'
-        : status === 'unsupported'
-          ? 'Updates arrive when the app is reopened in this browser'
-          : status === 'current' && checkedAt
-            ? `Up to date, as of ${fmtTime(checkedAt)}`
-            : `This copy was built ${fmtFullDate(builtAt.slice(0, 10))}`
+        : status === 'stale'
+          ? 'A new version is on the server — tap to fetch it'
+          : status === 'unsupported'
+            ? `${built} · updates arrive when the app is reopened in this browser`
+            : status === 'offline'
+              ? 'Could not reach the server — check again when you are online'
+              : status === 'current' && checkedAt
+                ? `${built} · up to date as of ${fmtTime(checkedAt)}`
+                : built
 
   return (
     <Card className="mt-6 p-4">

@@ -2,6 +2,29 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import type { Plugin } from 'vite'
+
+/**
+ * A build stamp the app can ask the SERVER for, bypassing every cache.
+ *
+ * Whether a new version exists is a question about the server, and asking the
+ * service worker was answering it with whatever `sw.js` the CDN felt like
+ * handing over. GitHub Pages caches for ten minutes and iOS caches harder than
+ * that, so a stale `sw.js` makes the browser conclude "no change" — and the app
+ * then truthfully reports a stale answer. One tiny file, fetched with
+ * `cache: 'no-store'` and a cache-busting query, cannot be fooled that way.
+ */
+function versionStamp(builtAt: string): Plugin {
+  return {
+    name: 'hearth-version-stamp',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ builtAt }) })
+    },
+  }
+}
+
+const BUILT_AT = new Date().toISOString()
 
 // base './' + HashRouter keeps the app portable to any static host,
 // including GitHub Pages project sites served from a sub-path.
@@ -16,11 +39,12 @@ export default defineConfig({
      * hand is the one that was deployed. A timestamp answers that, and it is
      * the only thing Settings can honestly show about "which version is this".
      */
-    __BUILT_AT__: JSON.stringify(new Date().toISOString()),
+    __BUILT_AT__: JSON.stringify(BUILT_AT),
   },
   plugins: [
     react(),
     tailwindcss(),
+    versionStamp(BUILT_AT),
     VitePWA({
       /**
        * A new version waits to be asked for, rather than taking over.
@@ -45,7 +69,10 @@ export default defineConfig({
         // receipt scan, not precached, then kept so scanning works offline.
         // ONNX Runtime's WASM is loaded from a CDN at runtime, so keep the copy
         // Vite emits into the bundle out of the precache manifest.
-        globIgnores: ['**/*.wasm'],
+        // The build stamp must never be precached: a cached copy of "which
+        // version is on the server" is the one file whose whole job is to be
+        // fetched fresh.
+        globIgnores: ['**/*.wasm', '**/version.json'],
         // Never let the service worker touch Supabase. A cached PostgREST
         // response replayed to the pull loop would write stale rows into the
         // cache with nothing to reveal they were stale — and the cache would
@@ -55,6 +82,12 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/[a-z0-9-]+\.supabase\.co\//,
+            handler: 'NetworkOnly',
+          },
+          // Same reason as the `globIgnores` above, for the runtime path: the
+          // service worker must not serve this from a cache of its own either.
+          {
+            urlPattern: /version\.json/,
             handler: 'NetworkOnly',
           },
           {
