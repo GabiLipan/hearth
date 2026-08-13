@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Table2, ChartPie, ChevronLeft, Check, Receipt, Download } from 'lucide-react'
 import {
   useAccounts,
@@ -37,7 +37,8 @@ import { Card, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthS
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { Arrange, useLayout } from '../components/Arrange'
-import type { SectionDef } from '../lib/layout'
+import { optionValue, type SectionDef } from '../lib/layout'
+import { drillTo, pathWithState, type Drill } from '../lib/drill'
 import { Sankey } from '../components/Sankey'
 import { spendFlow } from '../lib/sankey'
 import { monthsOfHistory } from '../lib/stats'
@@ -47,9 +48,13 @@ import {
   SpendBars,
   IncomeSpendBars,
   NetLine,
+  IN_OUT_SHAPES,
   NET_SHAPES,
   SLICE_SHAPES,
   TREND_SHAPES,
+  rowCount,
+  sliceCount,
+  type InOutShape,
   type TrendShape,
 } from '../components/charts'
 import {
@@ -108,17 +113,38 @@ const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
  * arrangement altogether.
  */
 const SECTIONS: SectionDef[] = [
-  { id: 'categories', label: 'Where it went', defaultSpan: 'full', variants: SLICE_SHAPES },
+  {
+    id: 'categories',
+    label: 'Where it went',
+    defaultSpan: 'full',
+    variants: SLICE_SHAPES,
+    options: [sliceCount('8')],
+  },
   { id: 'spend', label: 'Spending each month', variants: TREND_SHAPES },
-  { id: 'inout', label: 'In vs out' },
+  { id: 'inout', label: 'In vs out', variants: IN_OUT_SHAPES },
   { id: 'net', label: 'Kept each month', defaultSpan: 'full', variants: NET_SHAPES },
-  { id: 'flow', label: 'The whole flow', defaultSpan: 'full' },
+  { id: 'flow', label: 'The whole flow', defaultSpan: 'full', options: [sliceCount('8')] },
   { id: 'waterfall', label: 'Step by step', defaultSpan: 'full' },
   { id: 'salary', label: 'What each salary turned into', defaultSpan: 'full' },
   { id: 'committed', label: 'Committed vs chosen' },
   { id: 'kept', label: 'Share kept' },
-  { id: 'payees', label: 'Top payees' },
-  { id: 'heatmap', label: 'Category by month', defaultSpan: 'full' },
+  { id: 'payees', label: 'Top payees', options: [rowCount('10')] },
+  {
+    id: 'heatmap',
+    label: 'Category by month',
+    defaultSpan: 'full',
+    options: [
+      rowCount('10', 'Categories shown'),
+      {
+        id: 'figures',
+        label: 'In each cell',
+        choices: [
+          { value: 'amounts', label: 'Amounts' },
+          { value: 'colour', label: 'Colour only' },
+        ],
+      },
+    ],
+  },
   { id: 'pace', label: 'Pace', defaultSpan: 'full' },
 ]
 
@@ -188,6 +214,54 @@ export default function Reports() {
   /** The category being drilled into, or null for the top level. */
   const [drill, setDrill] = useState<string | null>(null)
 
+  /**
+   * The arrangement, read up here rather than beside the grid it draws.
+   *
+   * Most of what a section decides about itself is presentation and can be
+   * answered inside `renderSection` from the `options` it is handed. Three
+   * choices are not: how many categories are worth naming, how many payees and
+   * how many heatmap rows all change what is COMPUTED, and the aggregates are
+   * page-level memos shared with the table view. So the page asks the layout
+   * for those three itself.
+   */
+  const { layout, setLayout, editing, setEditing } = useLayout('reportsLayout', SECTIONS)
+  const sectionOption = (sectionId: string, optionId: string, fallback: string) =>
+    optionValue(
+      SECTIONS.find((s) => s.id === sectionId),
+      layout.find((i) => i.id === sectionId),
+      optionId,
+    ) ?? fallback
+  const sliceLimit = Number(sectionOption('categories', 'count', '8'))
+  const flowLimit = Number(sectionOption('flow', 'count', '8'))
+  const payeeLimit = Number(sectionOption('payees', 'rows', '10'))
+  const heatmapRows = Number(sectionOption('heatmap', 'rows', '10'))
+
+  /**
+   * The state a breadcrumb sent us back with.
+   *
+   * Read once and cleared, exactly as Activity reads a drill: a param nobody
+   * can see must not go on quietly overriding a control somebody then uses.
+   * Anything unrecognised is ignored rather than trusted — this is a URL.
+   */
+  const [params, setParams] = useSearchParams()
+  useEffect(() => {
+    if ([...params.keys()].length === 0) return
+    const asked = {
+      month: params.get('month'),
+      period: params.get('period'),
+      range: params.get('range'),
+      view: params.get('view'),
+      drill: params.get('drill'),
+    }
+    setParams({}, { replace: true })
+    if (asked.month && /^\d{4}-\d{2}$/.test(asked.month)) setMonth(asked.month)
+    if (asked.period === 'month' || asked.period === 'year' || asked.period === 'custom') setPeriod(asked.period)
+    if (asked.range === '6' || asked.range === '12') setRange(asked.range)
+    if (asked.view === 'charts' || asked.view === 'table') setView(asked.view)
+    if (asked.drill) setDrill(asked.drill)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const txns = useAllTransactions()
   const accounts = useAccounts()
   const levels = useMyLevels()
@@ -229,19 +303,22 @@ export default function Reports() {
   const slices = useMemo(
     () =>
       period === 'custom'
-        ? rangeSlices(txns ?? [], flows, categories, book, books, from, to, drill ?? undefined)
-        : bookSlices(txns ?? [], flows, categories, book, inView, books, drill ?? undefined),
-    [txns, flows, categories, book, inView, books, drill, period, from, to],
+        ? rangeSlices(txns ?? [], flows, categories, book, books, from, to, drill ?? undefined, sliceLimit)
+        : bookSlices(txns ?? [], flows, categories, book, inView, books, drill ?? undefined, sliceLimit),
+    [txns, flows, categories, book, inView, books, drill, period, from, to, sliceLimit],
   )
-  /** The same breakdown, never drilled into — what the flow diagram is built from. */
+  /**
+   * The same breakdown, never drilled into — what the flow diagram is built
+   * from. It carries the diagram's own count rather than the breakdown card's:
+   * the two are different pictures with different room in them, and a ribbon
+   * per category is a stricter limit than a row per category.
+   */
   const topSlices = useMemo(
     () =>
-      !drill
-        ? slices
-        : period === 'custom'
-          ? rangeSlices(txns ?? [], flows, categories, book, books, from, to)
-          : bookSlices(txns ?? [], flows, categories, book, inView, books),
-    [drill, slices, txns, flows, categories, book, inView, books, period, from, to],
+      period === 'custom'
+        ? rangeSlices(txns ?? [], flows, categories, book, books, from, to, undefined, flowLimit)
+        : bookSlices(txns ?? [], flows, categories, book, inView, books, undefined, flowLimit),
+    [txns, flows, categories, book, inView, books, period, from, to, flowLimit],
   )
   const series = useMemo(
     () => bookSeries(txns ?? [], flows, book, Number(range), books, month),
@@ -310,12 +387,12 @@ export default function Reports() {
     [txns, flows, book, books, monthKeys],
   )
   const payees = useMemo(
-    () => topPayees(txns ?? [], flows, categories, book, books, month),
-    [txns, flows, categories, book, books, month],
+    () => topPayees(txns ?? [], flows, categories, book, books, month, payeeLimit),
+    [txns, flows, categories, book, books, month, payeeLimit],
   )
   const heatmap = useMemo(
-    () => categoryHeatmap(txns ?? [], flows, categories, book, books, monthKeys),
-    [txns, flows, categories, book, books, monthKeys],
+    () => categoryHeatmap(txns ?? [], flows, categories, book, books, monthKeys, heatmapRows),
+    [txns, flows, categories, book, books, monthKeys, heatmapRows],
   )
   const pacePoints = useMemo(
     () => pace(txns ?? [], flows, book, books, month),
@@ -438,7 +515,6 @@ export default function Reports() {
   }
 
   const columnCount = useColumnCount(COLUMN_STEPS)
-  const { layout, setLayout, editing, setEditing } = useLayout('reportsLayout', SECTIONS)
 
   // Changing book or month while inside a category would leave the breadcrumb
   // pointing at a slice that is no longer on screen.
@@ -458,21 +534,57 @@ export default function Reports() {
   /**
    * Out of a figure and into the rows behind it.
    *
-   * Every slice here is spending in one book, in one month, under one category,
-   * and Activity can now say exactly that — so the answer to "what is that
-   * £412?" is a navigation rather than a reconstruction by hand. "Other" is the
-   * tail of small categories folded together and is not a category at all, so
-   * it goes without one and lands on the whole month.
+   * Every figure on this page is a claim about a set of transactions — spending
+   * in one book, over one period, under one category, to one payee — and
+   * Activity can say exactly that, so the answer to "what is that £412?" is a
+   * navigation rather than a reconstruction by hand. See `lib/drill.ts` for why
+   * it is a page rather than a modal.
+   *
+   * The period travels as whatever it actually is: one month as a month, a year
+   * or a hand-drawn range as its two end dates. A year used to travel as
+   * nothing at all, which landed you in the whole history with a category
+   * filter and a figure that no longer matched anything on screen.
    */
   const navigate = useNavigate()
-  const seeTransactions = (categoryId?: string) => {
-    // Activity filters by a single month, so a year view sends the category and
-    // the book and leaves the list running — which is what you want from a
-    // year's figure anyway.
-    const q = new URLSearchParams(period === 'month' ? { month, book } : { book })
-    if (categoryId && categoryId !== OTHER_SLICE_ID) q.set('category', categoryId)
-    navigate(`/activity?${q}`)
-  }
+  const periodDrill = (): Pick<Drill, 'month' | 'from' | 'to'> =>
+    period === 'month'
+      ? { month }
+      : period === 'year'
+        ? { from: `${year}-01-01`, to: `${year}-12-31` }
+        : { from, to }
+
+  /**
+   * Where "back" goes, with this page's own state in it.
+   *
+   * A bare `/reports` is a different page that happens to share an address: it
+   * opens on this month, as charts, at the top level. The breadcrumb has to
+   * return you to the chart you left — March, as a year, in the table view,
+   * inside Groceries — so the state travels with the link and is read back on
+   * arrival.
+   */
+  const backHere = () =>
+    pathWithState('/reports', { month, period, range, view, drill: drill ?? undefined })
+
+  const seeTransactions = (extra: Partial<Drill> = {}) =>
+    navigate(drillTo({ book, ...periodDrill(), backTo: backHere(), backLabel: 'Reports', ...extra }))
+
+  /** The same, for a figure that names its own month — a heatmap cell, a bar. */
+  const seeMonth = (monthKey: string, extra: Partial<Drill> = {}) =>
+    navigate(
+      drillTo({
+        book,
+        month: monthKey,
+        from: undefined,
+        to: undefined,
+        backTo: backHere(),
+        backLabel: 'Reports',
+        ...extra,
+      }),
+    )
+
+  /** "Other" is the tail of small categories folded together, not a category. */
+  const categoryDrill = (categoryId?: string) =>
+    categoryId && categoryId !== OTHER_SLICE_ID ? { category: categoryId } : {}
 
   if (txns && txns.length === 0) {
     return <Empty icon={ChartPie} title="Nothing to report yet" hint="Add or import some transactions and your charts will appear here." />
@@ -525,6 +637,19 @@ export default function Reports() {
     )
 
   /**
+   * What pressing a category means, in one place.
+   *
+   * The same rule the table's rows have always had: a press goes INTO a
+   * category while there is anything inside it, and shows the transactions when
+   * there is not. So the gesture keeps meaning "more detail" all the way down,
+   * and the bottom of the drill is the list of rows rather than a dead end.
+   */
+  const pickSlice = (slice: { categoryId: string }) => {
+    if (!drill && canDrill(slice.categoryId)) return setDrill(slice.categoryId)
+    seeTransactions(categoryDrill(slice.categoryId))
+  }
+
+  /**
    * The breakdown, in whichever form the page is in.
    *
    * One function rather than two copies, because it appears in both views: as
@@ -551,7 +676,7 @@ export default function Reports() {
             <span className="hidden text-xs text-ink-3 sm:inline">Tap a category to see what is inside it</span>
           )}
           {slices.length > 0 && (
-            <Button size="sm" variant="subtle" onClick={() => seeTransactions(drill ?? undefined)}>
+            <Button size="sm" variant="subtle" onClick={() => seeTransactions(categoryDrill(drill ?? undefined))}>
               <Receipt size={13} /> See transactions
             </Button>
           )}
@@ -570,19 +695,26 @@ export default function Reports() {
       ) : view === 'charts' ? (
         <>
           {shape === 'bars' ? (
-            <CategoryBars slices={slices} />
+            <CategoryBars slices={slices} onPick={pickSlice} />
           ) : (
             <CategoryDonut
               slices={slices}
+              onPick={pickSlice}
+              // What a press does depends on whether THIS category has
+              // anything left inside it, so the label is asked per slice — on a
+              // phone it is the only wording the gesture gets, and a button
+              // saying "Look inside" that opens a list of rows instead is worse
+              // than no label at all.
+              pickLabel={(s) => (!drill && canDrill(s.categoryId) ? 'Look inside' : 'See transactions')}
               centerLabel={{
                 title: drill ? 'in here' : 'spent',
                 value: money(slices.reduce((s, x) => s + x.totalMinor, 0), { compact: true }),
               }}
             />
           )}
-          {/* Neither chart is clickable, so the drill-down lives in a row of
-              buttons under it — which also gives the categories a keyboard
-              path and a hit target big enough for a thumb. */}
+          {/* The buttons stay even though the chart is now clickable: they are
+              the keyboard path, and a hit target big enough for a thumb on the
+              categories too thin to press in the ring. */}
           {!drill && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {slices.filter((s) => canDrill(s.categoryId)).map((s) => (
@@ -659,7 +791,7 @@ export default function Reports() {
                       title={`See ${s.name} transactions in ${monthLabel(month)}`}
                       onClick={(e) => {
                         e.stopPropagation()
-                        seeTransactions(s.categoryId)
+                        seeTransactions(categoryDrill(s.categoryId))
                       }}
                       className="grid size-7 place-items-center rounded-lg text-ink-3 transition hover:bg-surface-2 hover:text-ink"
                     >
@@ -704,7 +836,12 @@ export default function Reports() {
    * the card rather than leaving an empty one in the arrangement. The section
    * stays in the layout, so it comes back the moment the data does.
    */
-  const renderSection = (id: string, variant: string | undefined, controls: ReactNode): ReactNode => {
+  const renderSection = (
+    id: string,
+    variant: string | undefined,
+    options: Record<string, string>,
+    controls: ReactNode,
+  ): ReactNode => {
     // A range is not made of months, so every monthly series is a question it
     // cannot answer. The flow diagram and the breakdown are not: both are
     // totals over whatever period is in view.
@@ -722,7 +859,14 @@ export default function Reports() {
               controls,
               'Every ribbon is as wide as the money it carries, and the two sides balance: what is on the right is what the money on the left turned into.',
             )}
-            <Sankey graph={flowGraph} />
+            {/* Only the category bands lead anywhere: the left-hand side is
+                income and contributions, which are not a category filter, and
+                "Not categorised" is the absence of one. */}
+            <Sankey
+              graph={flowGraph}
+              canPick={(n) => n.id.startsWith('cat:')}
+              onPick={(n) => seeTransactions({ category: n.id.slice(4) })}
+            />
           </Card>
         )
 
@@ -730,7 +874,12 @@ export default function Reports() {
         return !monthly ? null : (
           <Card className="p-5 md:p-4">
             {heading(`${words.spend} each month`, controls, scrollHint)}
-            <SpendBars data={longSeries} visible={monthsShown} shape={(variant as TrendShape) ?? 'bars'} />
+            <SpendBars
+              data={longSeries}
+              visible={monthsShown}
+              shape={(variant as TrendShape) ?? 'bars'}
+              onPickMonth={(m) => seeMonth(m)}
+            />
           </Card>
         )
 
@@ -741,7 +890,12 @@ export default function Reports() {
               book === 'household' ? 'Paid in vs spent' : book === 'mine' ? 'Earned vs spent' : 'In vs out',
               controls,
             )}
-            <IncomeSpendBars data={longSeries} visible={monthsShown} />
+            <IncomeSpendBars
+              data={longSeries}
+              visible={monthsShown}
+              shape={(variant as InOutShape) ?? 'bars'}
+              onPickMonth={(m) => seeMonth(m)}
+            />
           </Card>
         )
 
@@ -756,7 +910,12 @@ export default function Reports() {
               controls,
               words.netHint,
             )}
-            <NetLine data={longSeries} visible={monthsShown} shape={(variant as TrendShape) ?? 'line'} />
+            <NetLine
+              data={longSeries}
+              visible={monthsShown}
+              shape={(variant as TrendShape) ?? 'line'}
+              onPickMonth={(m) => seeMonth(m)}
+            />
           </Card>
         )
 
@@ -823,7 +982,10 @@ export default function Reports() {
               controls,
               'Under the category level. Shops the app treats as the same merchant are one line.',
             )}
-            <TopPayees rows={payees} />
+            {/* The month the list was computed from, not the period label:
+                `topPayees` takes one month, so a drill carrying anything else
+                would open a list that does not add up to the row pressed. */}
+            <TopPayees rows={payees} onPick={(payee) => seeMonth(month, { payee })} />
           </Card>
         )
 
@@ -838,7 +1000,11 @@ export default function Reports() {
               controls,
               'Read along a row to see a category creeping up. Shading compares every cell against the biggest one, so the rows are comparable with each other.',
             )}
-            <CategoryHeatmap grid={heatmap} />
+            <CategoryHeatmap
+              grid={heatmap}
+              figures={options.figures !== 'colour'}
+              onPick={(categoryId, cellMonth) => seeMonth(cellMonth, { category: categoryId })}
+            />
           </Card>
         )
 
@@ -1131,7 +1297,7 @@ export default function Reports() {
             columns={columnCount}
             editing={editing}
             onEditing={setEditing}
-            render={({ def, variant, controls }) => renderSection(def.id, variant, controls)}
+            render={({ def, variant, options, controls }) => renderSection(def.id, variant, options, controls)}
           />
         </>
       )}

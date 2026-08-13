@@ -15,6 +15,9 @@ import {
   moveTo,
   nextSpan,
   normaliseLayout,
+  optionValue,
+  optionsFor,
+  setOption,
   setSpan,
   setVariant,
   toggle,
@@ -151,11 +154,17 @@ export function Arrange({
   editing: boolean
   onEditing: (next: boolean) => void
   /**
-   * One section. `controls` is the chart-shape picker, or null where the
-   * section offers no choice — sections place it in their own heading, because
-   * only they know where their heading is.
+   * One section. `controls` is its picker, or null where the section offers no
+   * choice — sections place it in their own heading, because only they know
+   * where their heading is. `options` is every non-shape choice, resolved.
    */
-  render: (args: { item: LayoutItem; def: SectionDef; variant?: string; controls: ReactNode }) => ReactNode
+  render: (args: {
+    item: LayoutItem
+    def: SectionDef
+    variant?: string
+    options: Record<string, string>
+    controls: ReactNode
+  }) => ReactNode
   gap?: string
 }) {
   const defs = useMemo(() => new Map(catalogue.map((d) => [d.id, d])), [catalogue])
@@ -414,11 +423,13 @@ export function Arrange({
             item,
             def,
             variant: currentVariant(def, item),
-            controls: def.variants?.length ? (
+            options: optionsFor(def, item),
+            controls: def.variants?.length || def.options?.length ? (
               <VariantPicker
                 def={def}
-                value={currentVariant(def, item)}
-                onChange={(v) => onLayout(setVariant(layout, item.id, v))}
+                item={item}
+                onVariant={(v) => onLayout(setVariant(layout, item.id, v))}
+                onOption={(optionId, value) => onLayout(setOption(layout, item.id, optionId, value))}
               />
             ) : null,
           })}
@@ -555,62 +566,91 @@ function WidthGlyph({ filled, of }: { filled: number; of: number }) {
 }
 
 /**
- * Which shape a chart takes.
+ * What this section looks like: its shape, and everything else it lets you
+ * decide.
  *
  * Deliberately NOT inside Customise mode. Rearranging a page is something you
  * do once; asking the same figures a different way — a ring for the shares, bars
- * for the sizes — is something you do while reading, and burying it behind a
- * mode would mean three taps to compare two pictures.
+ * for the sizes, five categories or twenty — is something you do while reading,
+ * and burying it behind a mode would mean three taps to compare two pictures.
  *
  * It is placed by the section rather than floated over the card, because the
  * corner of a card is already spoken for on most of them.
+ *
+ * One control rather than one per choice. A card's heading has room for a word,
+ * not for a row of chips, and the choices are read together anyway — "bars, top
+ * ten" is one sentence about one picture. The trigger says the shape where
+ * there is one and the section's own label where there is not, so a section
+ * whose only choice is "how many" does not grow a control labelled with a
+ * number.
+ *
+ * The lists stay OPEN as they are used: changing how many categories a chart
+ * shows is a thing you do two or three times, watching the picture behind the
+ * panel each time, and closing on every tap would make that three round trips.
+ * Picking a shape closes, because that is a decision rather than an adjustment.
  */
 function VariantPicker({
   def,
-  value,
-  onChange,
+  item,
+  onVariant,
+  onOption,
 }: {
   def: SectionDef
-  value?: string
-  onChange: (next: string) => void
+  item: LayoutItem
+  onVariant: (next: string) => void
+  onOption: (optionId: string, next: string) => void
 }) {
-  const options = def.variants ?? []
-  const current = options.find((o) => o.value === value) ?? options[0]
+  const shapes = def.variants ?? []
+  const shape = shapes.find((o) => o.value === currentVariant(def, item)) ?? shapes[0]
+  const groups = def.options ?? []
+
+  const row = (label: string, chosen: boolean, onClick: () => void) => (
+    <button
+      key={label}
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
+    >
+      <Check size={15} className={cx('shrink-0', chosen ? 'text-accent' : 'opacity-0')} />
+      {label}
+    </button>
+  )
+
   return (
     <Popover
       align="right"
-      width="w-44"
+      width="w-48"
       trigger={({ open, toggle: press }) => (
         <button
           onClick={press}
           data-no-drag
           aria-expanded={open}
-          aria-label={`${def.label} chart shape`}
-          title="Chart shape"
+          aria-label={`How ${def.label} is shown`}
+          title="How this is shown"
           className={cx(
             'inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium transition-colors',
             open ? 'bg-surface-2 text-ink' : 'text-ink-3 hover:bg-surface-2 hover:text-ink-2',
           )}
         >
-          {current?.label}
+          {shape?.label ?? <SlidersHorizontal size={13} />}
         </button>
       )}
     >
-      {(close) =>
-        options.map((o) => (
-          <button
-            key={o.value}
-            onClick={() => {
-              onChange(o.value)
+      {(close) => (
+        <>
+          {shapes.map((o) =>
+            row(o.label, o.value === shape?.value, () => {
+              onVariant(o.value)
               close()
-            }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
-          >
-            <Check size={15} className={cx('shrink-0', o.value === current?.value ? 'text-accent' : 'opacity-0')} />
-            {o.label}
-          </button>
-        ))
-      }
+            }),
+          )}
+          {groups.map((opt) => (
+            <div key={opt.id} className={cx((shapes.length > 0 || groups[0] !== opt) && 'mt-1 border-t border-hairline pt-1')}>
+              <p className="px-2.5 pb-0.5 pt-1 text-xs font-semibold uppercase tracking-wide text-ink-3">{opt.label}</p>
+              {opt.choices.map((c) => row(c.label, c.value === optionValue(def, item, opt.id), () => onOption(opt.id, c.value)))}
+            </div>
+          ))}
+        </>
+      )}
     </Popover>
   )
 }

@@ -34,6 +34,17 @@ type Phase = 'shown' | 'fading' | 'gone'
 
 export interface TouchTooltip {
   /**
+   * Whether the last pointer to arrive was a finger.
+   *
+   * What it decides is where a chart's way THROUGH to the rows behind it
+   * lives. On a mouse a click is free — hover already shows the tooltip — so
+   * clicking the bar opens the transactions. A tap is not free: it is the
+   * gesture that opens the tooltip, and making it also navigate would mean the
+   * panel could never be read. So on touch the way through is a button inside
+   * the panel, which the linger keeps on screen long enough to press.
+   */
+  coarse: boolean
+  /**
    * What a Recharts `<Tooltip active>` should be: `false` once the linger has
    * run out, `undefined` the rest of the time so Recharts goes on deciding for
    * itself. `false` hides the cursor as well as the panel, which is the half a
@@ -44,7 +55,7 @@ export interface TouchTooltip {
   fading: boolean
   /** Bind to the element the pointer lands on. */
   handlers: {
-    onPointerDown: () => void
+    onPointerDown: (e: { pointerType: string }) => void
     onPointerMove: () => void
     onPointerUp: (e: { pointerType: string }) => void
     onPointerCancel: (e: { pointerType: string }) => void
@@ -59,6 +70,7 @@ export interface TouchTooltip {
  */
 export function useTouchTooltip(onGone?: () => void): TouchTooltip {
   const [phase, setPhase] = useState<Phase>('shown')
+  const [coarse, setCoarse] = useState(false)
   /**
    * The phase again, readable synchronously: `keep` runs on every pointer move
    * over the chart, and a `setState` per move would re-run every `useMemo`
@@ -85,6 +97,14 @@ export function useTouchTooltip(onGone?: () => void): TouchTooltip {
     to('shown')
   }, [])
 
+  /** Which kind of pointer we are dealing with, remembered from the last one. */
+  const saw = useCallback((pointerType: string) => {
+    setCoarse((was) => {
+      const next = pointerType !== 'mouse'
+      return was === next ? was : next
+    })
+  }, [])
+
   const release = useCallback((pointerType: string) => {
     // A mouse ends its own tooltip by leaving, and a pen behaves like a finger:
     // it lifts off and there is nothing left hovering.
@@ -104,8 +124,12 @@ export function useTouchTooltip(onGone?: () => void): TouchTooltip {
   return {
     active: phase === 'gone' ? false : undefined,
     fading: phase === 'fading',
+    coarse,
     handlers: {
-      onPointerDown: keep,
+      onPointerDown: (e) => {
+        saw(e.pointerType)
+        keep()
+      },
       onPointerMove: keep,
       onPointerUp: (e) => release(e.pointerType),
       onPointerCancel: (e) => release(e.pointerType),

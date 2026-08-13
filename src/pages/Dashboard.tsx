@@ -20,7 +20,7 @@ import { defaultDemoAccount, seedDemoData } from '../lib/demo'
 import { useSyncState } from '../hooks/useSync'
 import { Arrange, useLayout } from '../components/Arrange'
 import type { SectionDef } from '../lib/layout'
-import { SLICE_SHAPES, TREND_SHAPES } from '../components/charts'
+import { SLICE_SHAPES, TREND_SHAPES, monthWindow, rowCount, sliceCount } from '../components/charts'
 import { Button, Empty, Toolbar, useColumnCount } from '../components/ui'
 import {
   HeroWidget,
@@ -48,15 +48,51 @@ import {
 const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
   { id: 'hero', label: 'Month summary', component: HeroWidget, defaultSpan: 'full' },
   { id: 'budgets', label: 'Budgets at a glance', component: BudgetGlanceWidget, defaultSpan: 'full' },
-  { id: 'bills', label: 'Coming up', component: BillsWidget },
-  { id: 'donut', label: 'Where it went', component: DonutWidget, variants: SLICE_SHAPES },
-  { id: 'trend', label: 'Spending trend', component: TrendWidget, variants: TREND_SHAPES },
+  {
+    id: 'bills',
+    label: 'Coming up',
+    component: BillsWidget,
+    options: [
+      {
+        id: 'ahead',
+        label: 'Looking ahead',
+        defaultValue: '14',
+        choices: [
+          { value: '7', label: 'A week' },
+          { value: '14', label: 'A fortnight' },
+          { value: '30', label: 'A month' },
+          { value: '60', label: 'Two months' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'donut',
+    label: 'Where it went',
+    component: DonutWidget,
+    variants: SLICE_SHAPES,
+    options: [sliceCount('6')],
+  },
+  {
+    id: 'trend',
+    label: 'Spending trend',
+    component: TrendWidget,
+    variants: TREND_SHAPES,
+    options: [monthWindow('6')],
+  },
   { id: 'accounts', label: 'Accounts', component: AccountsWidget },
   { id: 'owed', label: 'Owed to you', component: ReimbursementWidget },
-  { id: 'recent', label: 'Recent activity', component: RecentWidget },
+  { id: 'recent', label: 'Recent activity', component: RecentWidget, options: [rowCount('5', 'Rows')] },
   // Wide and detailed, so it waits to be asked for rather than turning up on
   // everyone's home page on the strength of being new.
-  { id: 'flow', label: 'Where it flowed', component: FlowWidget, defaultSpan: 'full', defaultOn: false },
+  {
+    id: 'flow',
+    label: 'Where it flowed',
+    component: FlowWidget,
+    defaultSpan: 'full',
+    defaultOn: false,
+    options: [sliceCount('8')],
+  },
 ]
 
 /** Two columns on a laptop, three on a wide monitor, four on a very wide one. */
@@ -170,9 +206,9 @@ export default function Dashboard() {
         columns={columnCount}
         editing={editing}
         onEditing={setEditing}
-        render={({ def, variant, controls }) => {
+        render={({ def, variant, options, controls }) => {
           const Widget = (def as (typeof WIDGETS)[number]).component
-          return <Widget data={data} variant={variant} controls={controls} />
+          return <Widget data={data} variant={variant} options={options} controls={controls} />
         }}
       />
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeftRight, ArrowRight, ChevronLeft, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
@@ -18,6 +18,7 @@ import {
   type Flow,
 } from '../lib/books'
 import { spendFlow } from '../lib/sankey'
+import { drillTo, type Drill } from '../lib/drill'
 import { useMemberMap } from '../lib/cache'
 import { nameOf } from './PersonDot'
 import { Sankey } from './Sankey'
@@ -83,10 +84,32 @@ export interface HomeData {
 export interface WidgetProps {
   data: HomeData
   variant?: string
+  /**
+   * Everything the widget lets you decide beyond its shape, resolved from the
+   * stored arrangement — how many categories, how many months, how far ahead.
+   * Values are strings because that is what a stored choice is; a widget that
+   * wants a number says `Number(options.count)` at the point of use rather than
+   * the layout pretending to know what each option means.
+   */
+  options?: Record<string, string>
   controls?: ReactNode
 }
 
 const month = () => thisMonthKey()
+
+/**
+ * Out of a figure on the home page and into the rows behind it.
+ *
+ * The same vocabulary Reports uses — see `lib/drill.ts` — with one difference:
+ * home has no period, no drill and no view to carry, so "back" is just the
+ * page. Everything here is about the current month, so the month travels on
+ * every drill rather than being left to the reader to infer.
+ */
+function useHomeDrill(book: BookId) {
+  const navigate = useNavigate()
+  return (extra: Partial<Drill> = {}) =>
+    navigate(drillTo({ book, month: month(), backTo: '/', backLabel: 'Home', ...extra }))
+}
 
 /* ---------- Month summary hero ---------- */
 
@@ -289,14 +312,15 @@ export function AccountsWidget({ data }: WidgetProps) {
 }
 
 /* ---------- Where it went ---------- */
-export function DonutWidget({ data, variant, controls }: WidgetProps) {
+export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
   const { money } = useApp()
   /** The category being looked inside, or null for the top level. */
   const [drill, setDrill] = useState<string | null>(null)
 
+  const count = Number(options?.count ?? 6)
   const slices = useMemo(
-    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, drill ?? undefined, 6),
-    [data.txns, data.flows, data.categories, data.book, data.books, drill],
+    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, drill ?? undefined, count),
+    [data.txns, data.flows, data.categories, data.book, data.books, drill, count],
   )
   // Changing book empties the breadcrumb: it would otherwise point at a
   // category that is no longer on this screen.
@@ -306,6 +330,17 @@ export function DonutWidget({ data, variant, controls }: WidgetProps) {
   const canDrill = (categoryId: string) =>
     categoryId !== OTHER_SLICE_ID &&
     hasBreakdown(categoryId, data.txns, data.flows, data.categories, data.book, month(), data.books)
+
+  /**
+   * Deeper while there is a deeper, and the transactions when there is not —
+   * the same rule Reports gives the same gesture.
+   */
+  const openRows = useHomeDrill(data.book)
+  const pickSlice = (slice: { categoryId: string }) => {
+    if (!drill && canDrill(slice.categoryId)) return setDrill(slice.categoryId)
+    if (slice.categoryId === OTHER_SLICE_ID) return openRows()
+    openRows({ category: slice.categoryId })
+  }
 
   const spent = slices.reduce((s, x) => s + x.totalMinor, 0)
   if (slices.length === 0 && !drill) return null
@@ -332,12 +367,14 @@ export function DonutWidget({ data, variant, controls }: WidgetProps) {
             <span className="font-semibold tabular">{money(spent)}</span>{' '}
             <span className="text-ink-3">{drill ? 'in here' : 'spent'}</span>
           </p>
-          <CategoryBars slices={slices} />
+          <CategoryBars slices={slices} onPick={pickSlice} />
         </>
       ) : (
         <CategoryDonut
           slices={slices}
           height={180}
+          onPick={pickSlice}
+          pickLabel={(s) => (!drill && canDrill(s.categoryId) ? 'Look inside' : 'See transactions')}
           centerLabel={{ title: drill ? 'in here' : 'spent', value: money(spent, { compact: true }) }}
         />
       )}
@@ -363,13 +400,14 @@ export function DonutWidget({ data, variant, controls }: WidgetProps) {
 
 /* ---------- Trend ---------- */
 
-/** How many months the trend widget shows at once. Everything earlier scrolls. */
-const TREND_WINDOW = 6
-
-export function TrendWidget({ data, variant, controls }: WidgetProps) {
-  // The window is six; the series is everything there is, so the chart has
-  // something to scroll back to. A household three months old gets three bars
-  // rather than three bars and thirty-three empty ones.
+export function TrendWidget({ data, variant, options, controls }: WidgetProps) {
+  // The window is what the card was asked for; the series is everything there
+  // is, so the chart has something to scroll back to. A household three months
+  // old gets three bars rather than three bars and thirty-three empty ones.
+  // Not named `window`: a local of that name shadows the global for the whole
+  // function, which is the same trap `CategoryIcon` aliases `Map` around.
+  const across = Number(options?.months ?? 6)
+  const openRows = useHomeDrill(data.book)
   const months = useMemo(() => monthsOfHistory(data.txns), [data.txns])
   const series = useMemo(
     () => bookSeries(data.txns, data.flows, data.book, months, data.books),
@@ -379,17 +417,18 @@ export function TrendWidget({ data, variant, controls }: WidgetProps) {
     <Card className="p-4 md:p-3">
       <div className="mb-2 flex items-center gap-1 md:mb-1.5">
         <h3 className="min-w-0 flex-1 truncate font-semibold md:text-sm">
-          Spending, last {Math.min(TREND_WINDOW, months)} months
+          Spending, last {Math.min(across, months)} months
         </h3>
         {controls}
       </div>
       <SpendBars
         data={series}
         height={170}
-        visible={TREND_WINDOW}
+        visible={across}
         shape={(variant as TrendShape) ?? 'bars'}
+        onPickMonth={(m) => openRows({ month: m })}
       />
-      {months > TREND_WINDOW && (
+      {months > across && (
         <p className="mt-1 text-xs text-ink-3">Scroll the chart back for earlier months.</p>
       )}
     </Card>
@@ -406,15 +445,16 @@ export function TrendWidget({ data, variant, controls }: WidgetProps) {
  * place by being asked for, rather than by turning up on everyone's home page
  * on the strength of being new.
  */
-export function FlowWidget({ data }: WidgetProps) {
+export function FlowWidget({ data, options, controls }: WidgetProps) {
   const memberMap = useMemberMap()
   const totals = useMemo(
     () => bookTotals(data.txns, data.flows, data.book, month(), data.books),
     [data.txns, data.flows, data.book, data.books],
   )
+  const count = Number(options?.count ?? 8)
   const slices = useMemo(
-    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, undefined, 8),
-    [data.txns, data.flows, data.categories, data.book, data.books],
+    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, undefined, count),
+    [data.txns, data.flows, data.categories, data.book, data.books, count],
   )
   const split = useMemo(
     () => contributionSplit(data.allTxns, data.flows, month(), data.books),
@@ -429,24 +469,37 @@ export function FlowWidget({ data }: WidgetProps) {
     () => spendFlow({ book: data.book, totals, slices, split, partner }),
     [data.book, totals, slices, split, partner],
   )
+  const openRows = useHomeDrill(data.book)
   if (graph.totalMinor === 0) return null
 
   return (
     <Card className="p-4 md:p-3">
-      <h3 className="mb-2 font-semibold md:mb-1.5 md:text-sm">{monthLabel(month())} · where it flowed</h3>
-      <Sankey graph={graph} />
+      <div className="mb-2 flex items-center gap-1 md:mb-1.5">
+        <h3 className="min-w-0 flex-1 truncate font-semibold md:text-sm">{monthLabel(month())} · where it flowed</h3>
+        {controls}
+      </div>
+      {/* Only the category bands lead anywhere — the left-hand side is income
+          and contributions, which are not a category filter. */}
+      <Sankey
+        graph={graph}
+        canPick={(n) => n.id.startsWith('cat:')}
+        onPick={(n) => openRows({ category: n.id.slice(4) })}
+      />
     </Card>
   )
 }
 
 /* ---------- Upcoming bills ---------- */
-export function BillsWidget({ data }: WidgetProps) {
+export function BillsWidget({ data, options }: WidgetProps) {
   const { money } = useApp()
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
+  const ahead = Number(options?.ahead ?? 14)
   const upcoming = data.bills
-    .filter((b) => b.active && daysUntil(b.nextDue) <= 14)
+    .filter((b) => b.active && daysUntil(b.nextDue) <= ahead)
     .sort((a, b) => a.nextDue.localeCompare(b.nextDue))
-    .slice(0, 5)
+    // Still capped: "the next two months" is a horizon, not an instruction to
+    // fill the home page with thirty rows.
+    .slice(0, ahead > 30 ? 10 : 5)
   if (upcoming.length === 0) return null
   return (
     <Card className="p-4 md:p-3">
@@ -711,12 +764,13 @@ function PayBack({
   )
 }
 
-export function RecentWidget({ data }: WidgetProps) {
+export function RecentWidget({ data, options }: WidgetProps) {
   const { money } = useApp()
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
+  const rows = Number(options?.rows ?? 5)
   const recent = useMemo(
-    () => [...data.txns].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).slice(0, 5),
-    [data.txns],
+    () => [...data.txns].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).slice(0, rows),
+    [data.txns, rows],
   )
   if (recent.length === 0) return null
   return (

@@ -16,11 +16,13 @@ import {
   ReferenceLine,
 } from 'recharts'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { Receipt } from 'lucide-react'
 import { useChartColors } from '../hooks/useChartColors'
 import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
 import { useApp } from '../state/AppContext'
 import { distinctShades } from '../lib/shade'
 import { niceScale, type Scale } from '../lib/scale'
+import type { OptionDef } from '../lib/layout'
 import { OTHER_SLICE_ID, type CategorySlice, type MonthPoint } from '../lib/stats'
 import { cx } from './ui'
 
@@ -90,18 +92,30 @@ function ChartTip({
   label,
   rows,
   fading,
+  action,
 }: {
   active?: boolean
   label?: string
   rows: TipRow[]
   /** On its way out after a touch — see `useTouchTooltip`. */
   fading?: boolean
+  /**
+   * The way through to the rows behind this figure, on a device where the tap
+   * that opened this panel could not also be a click. Rendered only when there
+   * is one, and it is the only thing here that takes a pointer at all — the
+   * panel is otherwise inert and must stay that way, or it would eat the moves
+   * that keep it up to date.
+   */
+  action?: { label: string; onPick: () => void }
 }) {
   const { money } = useApp()
   if (!active || rows.length === 0) return null
   return (
     <div
-      className="rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline"
+      className={cx(
+        'rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline',
+        action && 'pointer-events-auto',
+      )}
       style={{ opacity: fading ? 0 : 1, transition: `opacity ${TIP_FADE_MS}ms linear` }}
     >
       {label && <div className="mb-1 font-medium text-ink-2">{label}</div>}
@@ -112,6 +126,14 @@ function ChartTip({
           <span className="ml-auto pl-3 font-semibold text-ink tabular">{money(r.value)}</span>
         </div>
       ))}
+      {action && (
+        <button
+          onClick={action.onPick}
+          className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg bg-surface-2 px-2 py-1.5 text-xs font-medium text-ink-2 transition hover:text-ink"
+        >
+          <Receipt size={12} /> {action.label}
+        </button>
+      )}
     </div>
   )
 }
@@ -235,7 +257,7 @@ export function MonthScroller({
    * finds its own children by type — a wrapper component around `Tooltip`
    * would simply not be seen.
    */
-  children: (portal: HTMLElement | null, active: boolean | undefined) => ReactElement
+  children: (portal: HTMLElement | null, active: boolean | undefined, coarse: boolean) => ReactElement
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -326,7 +348,7 @@ export function MonthScroller({
       >
         <div style={{ width: scrolls ? `${(count / visible) * 100}%` : '100%' }}>
           <ResponsiveContainer width="100%" height={height}>
-            {children(tip, touch.active)}
+            {children(tip, touch.active, touch.coarse)}
           </ResponsiveContainer>
         </div>
       </div>
@@ -361,6 +383,74 @@ const axisProps = (c: ReturnType<typeof useChartColors>, scale: Scale) =>
 
 const CHART_MARGIN = { top: PLOT_TOP, right: 6, left: 6, bottom: 0 }
 
+/**
+ * Out of a month and into the rows behind it.
+ *
+ * A chart is an arithmetic claim about a set of transactions, and the question
+ * it raises is which ones. Where the answer LIVES depends on the pointer, and
+ * that is the whole of the awkwardness here — see `useTouchTooltip.coarse`. On
+ * a mouse, hover already shows the tooltip, so the click is spare and the bar
+ * itself is the target. On a finger the tap is spoken for: it is what opens the
+ * tooltip, and a tap that also navigated would mean the panel could never be
+ * read at all. So on touch the way through is a button inside the panel.
+ *
+ * Both paths end here, so the two cannot come to mean different things.
+ */
+export interface MonthPick {
+  /** The month clicked, as `YYYY-MM`. */
+  onPickMonth?: (month: string) => void
+}
+
+/**
+ * The month a Recharts click landed on, or nothing if it landed on the paper.
+ *
+ * By INDEX, not by payload. Recharts 3 hands a click handler
+ * `MouseHandlerDataParam` — an index, a label and a coordinate — and not the
+ * `activePayload` array version 2 used to pass. Reading the old shape compiles
+ * perfectly well against `unknown` and silently never fires, which is exactly
+ * how this shipped broken the first time. The label is the fallback because it
+ * is what the axis shows, and two months never share one.
+ */
+function monthAt(state: unknown, data: MonthPoint[]): string | undefined {
+  const at = state as { activeIndex?: number | string; activeLabel?: string | number } | undefined
+  const index = Number(at?.activeIndex)
+  if (Number.isInteger(index) && data[index]) return data[index].key
+  return data.find((d) => d.label === String(at?.activeLabel))?.key
+}
+
+/** The month a tooltip is currently describing. */
+function monthOf(payload: readonly { payload?: unknown }[] | undefined): string | undefined {
+  return (payload?.[0]?.payload as { key?: string } | undefined)?.key
+}
+
+/**
+ * What to give a chart so a click on it opens the month it landed on.
+ *
+ * A no-op object when nothing is listening or the pointer is a finger, so the
+ * chart is never left with a cursor promising something it will not do.
+ */
+function pickProps(data: MonthPoint[], onPickMonth: MonthPick['onPickMonth'], coarse: boolean) {
+  if (!onPickMonth || coarse) return {}
+  return {
+    className: 'cursor-pointer',
+    onClick: (state: unknown) => {
+      const month = monthAt(state, data)
+      if (month) onPickMonth(month)
+    },
+  }
+}
+
+/** The tooltip's own way through, on a device where the tap could not be a click. */
+function tipAction(
+  onPickMonth: MonthPick['onPickMonth'],
+  coarse: boolean,
+  payload: readonly { payload?: unknown }[] | undefined,
+) {
+  const month = monthOf(payload)
+  if (!onPickMonth || !coarse || !month) return undefined
+  return { label: 'See transactions', onPick: () => onPickMonth(month) }
+}
+
 /* ---------- Monthly spending: bars, a line, or an area ---------- */
 
 export type TrendShape = 'bars' | 'line' | 'area'
@@ -384,22 +474,93 @@ export const NET_SHAPES: { value: TrendShape; label: string }[] = [
   { value: 'bars', label: 'Bars' },
 ]
 
+/* ---------- What a section lets you decide, beyond its shape ---------- */
+
+/**
+ * How many categories a breakdown names before the rest fold into "Other".
+ *
+ * A function rather than a constant because the right default differs by where
+ * it is: a home widget beside three others has room for six, and a full-width
+ * report has room for more. Everything else about the choice is the same, and
+ * two hand-written copies would drift the moment one gained a step.
+ */
+export const sliceCount = (defaultValue: string): OptionDef => ({
+  id: 'count',
+  label: 'Categories shown',
+  defaultValue,
+  choices: [
+    { value: '5', label: 'Top 5' },
+    { value: '6', label: 'Top 6' },
+    { value: '8', label: 'Top 8' },
+    { value: '12', label: 'Top 12' },
+    { value: '20', label: 'Top 20' },
+  ],
+})
+
+/**
+ * How many months a scrolling chart shows at once.
+ *
+ * This is a WINDOW, not a range: the history is all still there and scrolls in
+ * from the left, so three months is a closer look rather than a shorter memory.
+ */
+export const monthWindow = (defaultValue: string): OptionDef => ({
+  id: 'months',
+  label: 'Months across',
+  defaultValue,
+  choices: [
+    { value: '3', label: '3 months' },
+    { value: '6', label: '6 months' },
+    { value: '12', label: '12 months' },
+  ],
+})
+
+/** How many rows a list shows before it stops. */
+export const rowCount = (defaultValue: string, label = 'How many'): OptionDef => ({
+  id: 'rows',
+  label,
+  defaultValue,
+  choices: [
+    { value: '5', label: '5' },
+    { value: '10', label: '10' },
+    { value: '20', label: '20' },
+  ],
+})
+
+/**
+ * Income and spending as pairs of bars, or as two lines.
+ *
+ * Two different questions, and neither picture answers the other's. Bars
+ * compare one month's two figures — which is taller, and by how much. Lines
+ * compare each figure with ITSELF over time, and put the gap between them on
+ * screen as a band that widens and narrows, which is the only view here where
+ * the two series crossing is something you can see happen.
+ *
+ * Not stacked, in either shape: income and spending are not parts of a whole,
+ * and a stack says they are.
+ */
+export type InOutShape = 'bars' | 'lines'
+export const IN_OUT_SHAPES: { value: InOutShape; label: string }[] = [
+  { value: 'bars', label: 'Bars' },
+  { value: 'lines', label: 'Lines' },
+]
+
 export function SpendBars({
   data,
   height = 220,
   visible = data.length,
   shape = 'bars',
+  onPickMonth,
 }: {
   data: MonthPoint[]
   height?: number
   /** How many months fit across the width. The rest scroll. */
   visible?: number
   shape?: TrendShape
-}) {
+} & MonthPick) {
   const c = useChartColors()
   const scale = useMemo(() => niceScale(0, Math.max(...data.map((d) => d.spend), 0)), [data])
   const a = axisProps(c, scale)
-  const tip = (portal: HTMLElement | null, shown: boolean | undefined) => (
+  const tip = (portal: HTMLElement | null, shown: boolean | undefined, coarse: boolean) => (
     <Tooltip
       portal={portal}
       active={shown}
@@ -409,6 +570,7 @@ export function SpendBars({
           active={active}
           label={String(label ?? '')}
           rows={(payload ?? []).map((p) => ({ name: 'Spent', value: Number(p.value), color: c.series[0] }))}
+          action={tipAction(onPickMonth, coarse, payload)}
         />
       )}
     />
@@ -416,18 +578,18 @@ export function SpendBars({
 
   return (
     <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
-      {(portal, shown) => (shape === 'bars' ? (
-        <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%">
+      {(portal, shown, coarse) => (shape === 'bars' ? (
+        <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%" {...pickProps(data, onPickMonth, coarse)}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip(portal, shown)}
+          {tip(portal, shown, coarse)}
           <Bar dataKey="spend" fill={c.series[0]} radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false}>
             {bars(data, c.series[0], 'spend')}
           </Bar>
         </BarChart>
       ) : shape === 'area' ? (
-        <AreaChart data={data} margin={CHART_MARGIN}>
+        <AreaChart data={data} margin={CHART_MARGIN} {...pickProps(data, onPickMonth, coarse)}>
           <defs>
             <linearGradient id="spend-fill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={c.series[0]} stopOpacity={0.35} />
@@ -437,7 +599,7 @@ export function SpendBars({
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip(portal, shown)}
+          {tip(portal, shown, coarse)}
           <Area
             type="monotone"
             dataKey="spend"
@@ -450,11 +612,11 @@ export function SpendBars({
           />
         </AreaChart>
       ) : (
-        <LineChart data={data} margin={CHART_MARGIN}>
+        <LineChart data={data} margin={CHART_MARGIN} {...pickProps(data, onPickMonth, coarse)}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip(portal, shown)}
+          {tip(portal, shown, coarse)}
           <Line
             type="monotone"
             dataKey="spend"
@@ -475,11 +637,14 @@ export function IncomeSpendBars({
   data,
   height = 240,
   visible = data.length,
+  shape = 'bars',
+  onPickMonth,
 }: {
   data: MonthPoint[]
   height?: number
   visible?: number
-}) {
+  shape?: InOutShape
+} & MonthPick) {
   const c = useChartColors()
   const income = c.series[1] // aqua — income everywhere in the app
   const spend = c.series[0] // blue — spending everywhere in the app
@@ -488,30 +653,34 @@ export function IncomeSpendBars({
     [data],
   )
   const a = axisProps(c, scale)
+  const tip = (portal: HTMLElement | null, shown: boolean | undefined, coarse: boolean) => (
+    <Tooltip
+      portal={portal}
+      active={shown}
+      cursor={shape === 'bars' ? { fill: c.ink3, fillOpacity: 0.08 } : { stroke: c.ink3, strokeOpacity: 0.3 }}
+      content={({ active, payload, label }) => (
+        <ChartTip
+          active={active}
+          label={String(label ?? '')}
+          rows={(payload ?? []).map((p) => ({
+            name: p.dataKey === 'income' ? 'Income' : 'Spending',
+            value: Number(p.value),
+            color: p.dataKey === 'income' ? income : spend,
+          }))}
+          action={tipAction(onPickMonth, coarse, payload)}
+        />
+      )}
+    />
+  )
   return (
     <div>
       <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
-        {(portal, shown) => (
-        <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="30%" barGap={2}>
+        {(portal, shown, coarse) => (shape === 'bars' ? (
+        <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="30%" barGap={2} {...pickProps(data, onPickMonth, coarse)}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          <Tooltip
-            portal={portal}
-            active={shown}
-            cursor={{ fill: c.ink3, fillOpacity: 0.08 }}
-            content={({ active, payload, label }) => (
-              <ChartTip
-                active={active}
-                label={String(label ?? '')}
-                rows={(payload ?? []).map((p) => ({
-                  name: p.dataKey === 'income' ? 'Income' : 'Spending',
-                  value: Number(p.value),
-                  color: p.dataKey === 'income' ? income : spend,
-                }))}
-              />
-            )}
-          />
+          {tip(portal, shown, coarse)}
           <Bar dataKey="income" fill={income} radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false}>
             {bars(data, income, 'income')}
           </Bar>
@@ -519,7 +688,50 @@ export function IncomeSpendBars({
             {bars(data, spend, 'spend')}
           </Bar>
         </BarChart>
-        )}
+        ) : (
+        /* Two lines and the band between them. The fill is not a third series:
+           it is the gap the two lines already draw, given a colour so that a
+           month where spending crossed over income is something you see rather
+           than something you work out. It takes the colour of whichever side is
+           ahead, so the band means the same thing on both sides of a crossing. */
+        <AreaChart data={data} margin={CHART_MARGIN} {...pickProps(data, onPickMonth, coarse)}>
+          <defs>
+            <linearGradient id="inout-band" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={income} stopOpacity={0.18} />
+              <stop offset="100%" stopColor={income} stopOpacity={0.04} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
+          <XAxis {...a.x} />
+          <YAxis {...a.y} />
+          {tip(portal, shown, coarse)}
+          <Area
+            type="monotone"
+            dataKey="income"
+            stroke={income}
+            strokeWidth={2}
+            fill="url(#inout-band)"
+            dot={false}
+            activeDot={{ r: 5, strokeWidth: 2, stroke: c.surface }}
+            isAnimationActive={false}
+          />
+          <Area
+            type="monotone"
+            dataKey="spend"
+            stroke={spend}
+            strokeWidth={2}
+            // The surface, not transparent: the spending area sits ON the
+            // income one, so the band that reads as "kept" is the part of the
+            // income area this does not cover. Transparent would tint the kept
+            // band and the spent one identically and say nothing.
+            fill={c.surface}
+            fillOpacity={0.85}
+            dot={false}
+            activeDot={{ r: 5, strokeWidth: 2, stroke: c.surface }}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+        ))}
       </MonthScroller>
       <div className="mt-1 flex flex-wrap justify-center gap-x-5 gap-y-1 text-sm text-ink-2">
         <span className="flex items-center gap-1.5">
@@ -541,12 +753,13 @@ export function NetLine({
   height = 220,
   visible = data.length,
   shape = 'line',
+  onPickMonth,
 }: {
   data: MonthPoint[]
   height?: number
   visible?: number
   shape?: TrendShape
-}) {
+} & MonthPick) {
   const c = useChartColors()
   const scale = useMemo(
     () =>
@@ -557,7 +770,7 @@ export function NetLine({
     [data],
   )
   const a = axisProps(c, scale)
-  const tip = (portal: HTMLElement | null, shown: boolean | undefined) => (
+  const tip = (portal: HTMLElement | null, shown: boolean | undefined, coarse: boolean) => (
     <Tooltip
       portal={portal}
       active={shown}
@@ -566,6 +779,7 @@ export function NetLine({
         <ChartTip
           active={active}
           label={String(label ?? '')}
+          action={tipAction(onPickMonth, coarse, payload)}
           // A negative month is not a small amount of saving, it is
           // spending more than came in — and calling both of them "net"
           // is how a chart ends up claiming credit for a bad month.
@@ -580,13 +794,13 @@ export function NetLine({
   )
   return (
     <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
-      {(portal, shown) => (shape === 'bars' ? (
-        <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%">
+      {(portal, shown, coarse) => (shape === 'bars' ? (
+        <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%" {...pickProps(data, onPickMonth, coarse)}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           <ReferenceLine y={0} stroke={c.baseline} strokeWidth={1} />
-          {tip(portal, shown)}
+          {tip(portal, shown, coarse)}
           {/* A month that went the other way is not a small good month, so it
               is not the good colour. The bars have to be coloured one at a time
               for that — a single fill cannot say which side of zero it is on. */}
@@ -601,12 +815,12 @@ export function NetLine({
           </Bar>
         </BarChart>
       ) : (
-        <LineChart data={data} margin={CHART_MARGIN}>
+        <LineChart data={data} margin={CHART_MARGIN} {...pickProps(data, onPickMonth, coarse)}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           <ReferenceLine y={0} stroke={c.baseline} strokeWidth={1} />
-          {tip(portal, shown)}
+          {tip(portal, shown, coarse)}
           <Line
             type="monotone"
             dataKey="net"
@@ -669,7 +883,14 @@ function useSliceColours(slices: CategorySlice[]) {
  * answer different questions, and which question you have is not something the
  * app can know.
  */
-export function CategoryBars({ slices }: { slices: CategorySlice[] }) {
+export function CategoryBars({
+  slices,
+  onPick,
+}: {
+  slices: CategorySlice[]
+  /** Where a row goes when pressed. Rows are inert without it. */
+  onPick?: (slice: CategorySlice) => void
+}) {
   const { money } = useApp()
   const colorOf = useSliceColours(slices)
   const biggest = Math.max(...slices.map((s) => s.totalMinor), 1)
@@ -677,7 +898,14 @@ export function CategoryBars({ slices }: { slices: CategorySlice[] }) {
   return (
     <ul className="space-y-2">
       {slices.map((s) => (
-        <li key={s.categoryId}>
+        <li
+          key={s.categoryId}
+          // A row rather than a button around the whole thing: the bar under
+          // the figures is decoration and a button wrapping it would announce
+          // itself to a screen reader as one long unreadable label.
+          className={cx(onPick && 'cursor-pointer rounded-lg transition-colors hover:bg-surface-2')}
+          onClick={onPick ? () => onPick(s) : undefined}
+        >
           <div className="flex items-baseline gap-2 text-sm">
             <span className="min-w-0 flex-1 truncate text-ink-2">{s.name}</span>
             <span className="shrink-0 font-medium tabular">{money(s.totalMinor)}</span>
@@ -705,10 +933,27 @@ export function CategoryDonut({
   slices,
   centerLabel,
   height = 240,
+  onPick,
+  pickLabel = () => 'See transactions',
 }: {
   slices: CategorySlice[]
   centerLabel?: { title: string; value: string }
   height?: number
+  /**
+   * Where a slice goes when pressed — on a mouse by clicking the arc or its
+   * legend row, on a finger through the tooltip, for the reason `MonthPick`
+   * gives at length.
+   */
+  onPick?: (slice: CategorySlice) => void
+  /**
+   * What the tooltip's button says for a given slice.
+   *
+   * Per SLICE, not per chart: pressing a category means "look inside" where
+   * there is an inside and "see transactions" where there is not, and which of
+   * those it is differs from one arc to the next. A single label for the card
+   * promised one and did the other on every category with no children.
+   */
+  pickLabel?: (slice: CategorySlice) => string
 }) {
   const c = useChartColors()
   const { money } = useApp()
@@ -728,6 +973,25 @@ export function CategoryDonut({
   const endAngle = 90 - 360 * sweep
   /** A tapped slice, like a tapped bar, needs an ending given to it. */
   const touch = useTouchTooltip()
+  /**
+   * What a click on an arc does, decided when it happens rather than by the
+   * props it was given.
+   *
+   * The obvious spelling — `onClick={coarse ? undefined : handler}` — swaps the
+   * Pie's props on the first touch, because the first touch is also what sets
+   * `coarse`. Recharts rebuilds the sectors when that happens, and the
+   * synthesised mouse event that would have opened the tooltip lands on a node
+   * that is no longer in the document: the ring became the one chart in the app
+   * a finger could not read. So the props never change, and the handler asks.
+   */
+  const state = useRef({ coarse: touch.coarse, slices, onPick })
+  state.current = { coarse: touch.coarse, slices, onPick }
+  const clickSlice = useCallback((_: unknown, index: number) => {
+    const { coarse, slices: current, onPick: pick } = state.current
+    if (coarse || !pick) return
+    const slice = current[index]
+    if (slice) pick(slice)
+  }, [])
   return (
     /* A CONTAINER query, not `sm:`. This chart is a full-width panel on
        Reports and a widget in a 2-to-4 column grid on the home page, so the
@@ -748,6 +1012,11 @@ export function CategoryDonut({
                 data={slices}
                 dataKey="totalMinor"
                 nameKey="name"
+                // A cursor means nothing on a touch screen, so this one class
+                // can be constant: what must not change mid-gesture is whether
+                // the props are there at all.
+                className={onPick ? 'cursor-pointer' : undefined}
+                onClick={onPick ? clickSlice : undefined}
                 innerRadius="68%"
                 outerRadius="96%"
                 startAngle={startAngle}
@@ -776,6 +1045,7 @@ export function CategoryDonut({
                       active={active}
                       fading={touch.fading}
                       rows={s ? [{ name: s.name, value: s.totalMinor, color: colorOf(s) }] : []}
+                      action={onPick && touch.coarse && s ? { label: pickLabel(s), onPick: () => onPick(s) } : undefined}
                     />
                   )
                 }}
@@ -793,7 +1063,14 @@ export function CategoryDonut({
             each row until the name and its figure sit an inch apart. */}
         <ul className="grid gap-x-6 gap-y-1.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,15rem),1fr))]">
           {slices.map((s) => (
-            <li key={s.categoryId} className="flex min-w-0 items-center gap-2.5 text-sm">
+            <li
+              key={s.categoryId}
+              className={cx(
+                'flex min-w-0 items-center gap-2.5 text-sm',
+                onPick && 'cursor-pointer rounded-lg px-1 -mx-1 transition-colors hover:bg-surface-2',
+              )}
+              onClick={onPick ? () => onPick(s) : undefined}
+            >
               <span className="size-3 shrink-0 rounded-[4px]" style={{ background: colorOf(s) }} />
               {/* `min-w-0` is what makes `truncate` do anything here. A flex
                   item's min-width is auto — its CONTENT's width — so without it

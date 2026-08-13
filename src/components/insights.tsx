@@ -384,7 +384,14 @@ export function SavingsRateLine({ data, height = 220 }: { data: SavingsRatePoint
  * Building Society" or eat a third of the width. This also lets each row carry
  * its category's colour and icon, which is what makes the list scannable.
  */
-export function TopPayees({ rows }: { rows: PayeeTotal[] }) {
+export function TopPayees({
+  rows,
+  onPick,
+}: {
+  rows: PayeeTotal[]
+  /** Where a payee goes when pressed. Rows are inert without it. */
+  onPick?: (payee: string) => void
+}) {
   const { money } = useApp()
   const peak = rows.reduce((m, r) => Math.max(m, r.totalMinor), 0)
   if (rows.length === 0) return null
@@ -392,7 +399,14 @@ export function TopPayees({ rows }: { rows: PayeeTotal[] }) {
   return (
     <ul className="space-y-1.5">
       {rows.map((r) => (
-        <li key={r.payee} className="relative overflow-hidden rounded-lg">
+        <li
+          key={r.payee}
+          className={cx(
+            'relative overflow-hidden rounded-lg',
+            onPick && 'cursor-pointer transition-shadow hover:ring-1 hover:ring-hairline',
+          )}
+          onClick={onPick ? () => onPick(r.payee) : undefined}
+        >
           {/* The bar is behind the text rather than beside it: at ten rows the
               two-column version leaves the names in a narrow gutter. */}
           <span
@@ -430,7 +444,28 @@ export function TopPayees({ rows }: { rows: PayeeTotal[] }) {
  * why not per row — and the figure is written into each cell rather than left
  * to a tooltip, because on a phone there is no hover.
  */
-export function CategoryHeatmap({ grid }: { grid: Heatmap }) {
+export function CategoryHeatmap({
+  grid,
+  figures = true,
+  onPick,
+}: {
+  grid: Heatmap
+  /**
+   * Where a cell goes when pressed: one category, one month — the narrowest
+   * figure anywhere on the page, and so the one where "which transactions?" has
+   * the most exact answer.
+   */
+  onPick?: (categoryId: string, month: string) => void
+  /**
+   * Whether each cell carries its amount.
+   *
+   * On by default, and for a reason worth keeping: on a phone there is no
+   * hover, so a wall of colour with no figures answers nothing. Turning them
+   * off is for the other end — twenty categories across twelve months, where
+   * the numbers are too small to read anyway and the pattern is the point.
+   */
+  figures?: boolean
+}) {
   const { money } = useApp()
   if (grid.rows.length === 0) return null
 
@@ -465,8 +500,15 @@ export function CategoryHeatmap({ grid }: { grid: Heatmap }) {
                 title={`${row.name} · ${monthLabel(grid.months[i])} · ${money(value)}${
                   grid.months[i] === thisMonthKey() ? ' (so far)' : ''
                 }`}
+                // An empty cell has nothing behind it, so it stays inert rather
+                // than opening a list of no transactions.
+                onClick={onPick && value > 0 ? () => onPick(row.categoryId, grid.months[i]) : undefined}
                 className={cx(
-                  'grid place-items-center rounded py-1.5 tabular',
+                  'grid place-items-center rounded tabular',
+                  onPick && value > 0 && 'cursor-pointer hover:ring-1 hover:ring-accent/40',
+                  // The same height with the figures off, so turning them off
+                  // is a change of density rather than of layout.
+                  figures ? 'py-1.5' : 'py-3',
                   value > 0 ? 'text-ink' : 'text-ink-3/40',
                   grid.months[i] === thisMonthKey() && 'opacity-60',
                 )}
@@ -481,7 +523,7 @@ export function CategoryHeatmap({ grid }: { grid: Heatmap }) {
                       : undefined,
                 }}
               >
-                {value > 0 ? money(value, { compact: true, hideDecimals: true }) : '·'}
+                {!figures ? '' : value > 0 ? money(value, { compact: true, hideDecimals: true }) : '·'}
               </span>
             ))}
           </Fragment>

@@ -24,6 +24,36 @@
  */
 export type Span = 1 | 2 | 'full'
 
+/**
+ * A choice a section offers about itself, beyond which shape it takes.
+ *
+ * `variants` answers "what kind of picture is this" and is the primary axis —
+ * a ring or bars, a line or an area. These answer everything else: how many
+ * categories are worth naming, how many months are worth drawing, whether the
+ * figures are written into the heatmap or left to its colour. They are
+ * separate because they compose: every shape of the breakdown can show five
+ * categories or twenty, and folding the two into one list would mean six
+ * entries that have to be read as a grid.
+ *
+ * The first choice is the default, the same rule `variants` follows.
+ */
+export interface OptionDef {
+  id: string
+  /** What the choice is called — a noun, since it heads a list of answers. */
+  label: string
+  choices: { value: string; label: string }[]
+  /**
+   * Which choice is the default, where that is not the first one.
+   *
+   * `variants` can get away with "the first is the default" because a list of
+   * shapes has no natural order to disagree with. A list of numbers does: five,
+   * eight, twelve, twenty reads as a scale, and reordering it to put the
+   * default first makes the control look broken. So the order is the reader's
+   * and the default is stated. Ignored if it names a choice that is not there.
+   */
+  defaultValue?: string
+}
+
 /** One entry in a page's catalogue of what it can show. */
 export interface SectionDef {
   id: string
@@ -38,6 +68,8 @@ export interface SectionDef {
   defaultOn?: boolean
   /** The shapes this section's chart can take. The first is its default. */
   variants?: { value: string; label: string }[]
+  /** Everything else it lets you decide. See `OptionDef`. */
+  options?: OptionDef[]
 }
 
 export interface LayoutItem {
@@ -46,6 +78,11 @@ export interface LayoutItem {
   span: Span
   /** One of the section's `variants`, or undefined for its default. */
   variant?: string
+  /**
+   * The section's other choices, by option id. Absent keys mean the default,
+   * so a section that gains an option does not have to migrate anybody.
+   */
+  opts?: Record<string, string>
 }
 
 const SPANS: Span[] = [1, 2, 'full']
@@ -78,6 +115,7 @@ export function normaliseLayout(stored: unknown, catalogue: SectionDef[]): Layou
       on: item.on !== false,
       span: isSpan(item.span) ? item.span : (def.defaultSpan ?? 1),
       variant: variantOf(def, item.variant),
+      opts: optsOf(def, item.opts),
     })
   }
 
@@ -94,9 +132,56 @@ function variantOf(def: SectionDef, stored: unknown): string | undefined {
   return def.variants?.some((v) => v.value === stored) ? stored : undefined
 }
 
+/**
+ * The stored options, less anything the section has stopped offering.
+ *
+ * Returns undefined rather than `{}` when nothing survives, so a layout
+ * written before options existed stays byte-identical after a round trip and
+ * an unremarkable section does not carry an empty object for ever.
+ */
+function optsOf(def: SectionDef, stored: unknown): Record<string, string> | undefined {
+  if (!def.options?.length || !stored || typeof stored !== 'object') return undefined
+  const out: Record<string, string> = {}
+  for (const opt of def.options) {
+    const value = (stored as Record<string, unknown>)[opt.id]
+    if (typeof value === 'string' && opt.choices.some((c) => c.value === value)) out[opt.id] = value
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 /** The variant in force: what was chosen, or the first one offered. */
 export function currentVariant(def: SectionDef | undefined, item: LayoutItem | undefined): string | undefined {
   return item?.variant ?? def?.variants?.[0]?.value
+}
+
+/** One option's value in force: what was chosen, or the first choice offered. */
+export function optionValue(
+  def: SectionDef | undefined,
+  item: LayoutItem | undefined,
+  optionId: string,
+): string | undefined {
+  const opt = def?.options?.find((o) => o.id === optionId)
+  if (!opt) return undefined
+  const has = (v: string | undefined) => v !== undefined && opt.choices.some((c) => c.value === v)
+  const stored = item?.opts?.[optionId]
+  if (has(stored)) return stored
+  return has(opt.defaultValue) ? opt.defaultValue : opt.choices[0]?.value
+}
+
+/**
+ * Every option a section has, resolved — what a page actually reads.
+ *
+ * A map rather than a call per option, because the caller is a render function
+ * that wants them all and would otherwise repeat the section's own id four
+ * times to ask four questions of it.
+ */
+export function optionsFor(def: SectionDef | undefined, item: LayoutItem | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const opt of def?.options ?? []) {
+    const value = optionValue(def, item, opt.id)
+    if (value !== undefined) out[opt.id] = value
+  }
+  return out
 }
 
 /**
@@ -141,6 +226,10 @@ export function setSpan(items: LayoutItem[], id: string, span: Span): LayoutItem
 
 export function setVariant(items: LayoutItem[], id: string, variant: string): LayoutItem[] {
   return items.map((i) => (i.id === id ? { ...i, variant } : i))
+}
+
+export function setOption(items: LayoutItem[], id: string, optionId: string, value: string): LayoutItem[] {
+  return items.map((i) => (i.id === id ? { ...i, opts: { ...i.opts, [optionId]: value } } : i))
 }
 
 /**

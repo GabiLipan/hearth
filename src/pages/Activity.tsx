@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, HelpCircle, Layers, Shapes, MoreHorizontal } from 'lucide-react'
 import type { Category, Transaction } from '../lib/db'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
@@ -17,10 +17,12 @@ import {
   useDesktop,
   type CellRef,
 } from '../components/InlineCell'
-import { accountsInBook, BOOK_LABEL, type BookId } from '../lib/books'
+import { accountsInBook, BOOK_LABEL } from '../lib/books'
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
 import { useSticky, useStickyIds } from '../lib/sticky'
+import { narrows, readDrill } from '../lib/drill'
+import { payeeSimilar } from '../lib/rules'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, FilterBar, FilterChip, Popover, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
@@ -56,6 +58,7 @@ const SCROLL_OFFSET = 76
 
 export default function Activity() {
   const { money } = useApp()
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   /**
    * Every filter on this page is sticky for the session — see `lib/sticky.ts`.
@@ -81,6 +84,25 @@ export default function Activity() {
    * question genuinely is "which rows make up that figure".
    */
   const [monthFilter, setMonthFilter] = useSticky<string | null>('activity.month', null)
+  /**
+   * A run of days, from a figure that was not a month: a year's category, a
+   * custom range, a bar on a chart of weeks. Held as a pair rather than as two
+   * filters, because half a range is not a narrower question.
+   */
+  const [rangeFilter, setRangeFilter] = useSticky<{ from: string; to: string } | null>('activity.range', null)
+  /**
+   * One merchant, as a report labelled it. Matched with `payeeSimilar` rather
+   * than by equality — see the filter below.
+   */
+  const [payeeFilter, setPayeeFilter] = useSticky<string | null>('activity.payee', null)
+  /**
+   * Where the drill came from, so the page can offer the way back.
+   *
+   * Sticky rather than held in the URL, because the params are cleared the
+   * moment they are read — and the way back has to outlive that, survive a
+   * reload, and still die with the tab like every other filter here.
+   */
+  const [origin, setOrigin] = useSticky<{ label: string; path: string } | null>('activity.origin', null)
   const [limit, setLimit] = useState(PAGE)
   const [editing, setEditing] = useState<Transaction | undefined>()
   const [importOpen, setImportOpen] = useState(false)
@@ -114,13 +136,23 @@ export default function Activity() {
    */
   useEffect(() => {
     if ([...params.keys()].length === 0) return
-    const category = params.get('category')
-    const month = params.get('month')
-    const from = params.get('book')
-    if (category) setCatFilter(new Set([category]))
-    if (month) setMonthFilter(month)
-    if (from === 'household' || from === 'mine' || from === 'all') setBook(from as BookId)
+    const drill = readDrill(params)
     setParams({}, { replace: true })
+
+    // A drill REPLACES the filters rather than narrowing what was already
+    // there: arriving from a figure must show the rows behind that figure, and
+    // a category filter left over from a question asked ten minutes ago would
+    // silently show fewer of them than the chart claimed.
+    if (narrows(drill)) {
+      setCatFilter(drill.category ? new Set([drill.category]) : null)
+      setAccountFilter(drill.account ? new Set([drill.account]) : null)
+      setMonthFilter(drill.month ?? null)
+      setRangeFilter(drill.from && drill.to ? { from: drill.from, to: drill.to } : null)
+      setPayeeFilter(drill.payee ?? null)
+      setQuery('')
+    }
+    if (drill.book) setBook(drill.book)
+    setOrigin(drill.backTo ? { label: drill.backLabel ?? 'where you were', path: drill.backTo } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -157,6 +189,12 @@ export default function Activity() {
       if (!visible.has(t.accountId)) return false
       if (accountFilter && !accountFilter.has(t.accountId)) return false
       if (monthFilter && monthKey(t.date) !== monthFilter) return false
+      if (rangeFilter && (t.date < rangeFilter.from || t.date > rangeFilter.to)) return false
+      // The same comparison the top-payee list groups by, deliberately: that
+      // list clusters "TESCO STORES 3456" and "TESCO EXPRESS" into one row, so
+      // an exact match here would open a list adding up to less than the figure
+      // that was clicked. See `topPayees`.
+      if (payeeFilter && !payeeSimilar(t.payee, payeeFilter)) return false
       if (catFilter !== null) {
         // The list is top-level, so a subcategory counts towards its parent —
         // the same rule budgets use, and the rule the report slices are built on.
@@ -167,7 +205,7 @@ export default function Activity() {
       return true
     })
     return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-  }, [txns, catFilter, catMap, accountFilter, monthFilter, accounts, query])
+  }, [txns, catFilter, catMap, accountFilter, monthFilter, rangeFilter, payeeFilter, accounts, query])
 
   /**
    * The other leg of each transfer, so a row can say where the money went.
@@ -196,6 +234,35 @@ export default function Activity() {
     return out
   }, [txns])
 
+  /**
+   * What a drill narrowed to, said in one line.
+   *
+   * Built from the filters in force rather than from the URL that set them:
+   * the params are cleared on arrival, and a sentence describing a drill that
+   * has since been widened by hand would be a caption disagreeing with the
+   * list under it.
+   */
+  const drillLine = [
+    monthFilter ? monthLabel(monthFilter) : null,
+    rangeFilter ? `${fmtFullDate(rangeFilter.from)} – ${fmtFullDate(rangeFilter.to)}` : null,
+    payeeFilter,
+    catFilter ? catLabel(catFilter, catMap) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  /** A drill is on when something is narrowed, or when there is a way back to offer. */
+  const drilled = Boolean(monthFilter || rangeFilter || payeeFilter || catFilter || origin)
+
+  const clearDrill = () => {
+    setMonthFilter(null)
+    setRangeFilter(null)
+    setPayeeFilter(null)
+    setCatFilter(null)
+    setAccountFilter(null)
+    setQuery('')
+    setOrigin(null)
+  }
+
   /** Where each month starts in `filtered`, and what it came to. */
   const months = useMemo(() => {
     const index = new Map<string, { at: number; count: number; spendMinor: number }>()
@@ -215,6 +282,8 @@ export default function Activity() {
     query,
     catFilter ? [...catFilter].sort().join(',') : 'all',
     monthFilter,
+    rangeFilter ? `${rangeFilter.from}..${rangeFilter.to}` : 'all',
+    payeeFilter ?? 'all',
     book,
     accountFilter ? [...accountFilter].sort().join(',') : 'all',
   ].join('|')
@@ -365,7 +434,7 @@ export default function Activity() {
         <CategoryFilter parents={parents} value={catFilter} onChange={setCatFilter} />
         <AccountFilter accounts={accounts} value={accountFilter} onChange={setAccountFilter} />
         {/* Nowhere to jump to inside a single month. */}
-        {!monthFilter && <MonthJump current={atMonth} months={months} onPick={jumpTo} />}
+        {!monthFilter && !rangeFilter && <MonthJump current={atMonth} months={months} onPick={jumpTo} />}
 
         <Button variant="subtle" onClick={() => setImportOpen(true)}>
           <Upload size={15} /> Import CSV
@@ -383,7 +452,7 @@ export default function Activity() {
         <SearchChip value={query} onChange={setQuery} />
         <CategoryFilter parents={parents} value={catFilter} onChange={setCatFilter} variant="chip" />
         <AccountFilter accounts={accounts} value={accountFilter} onChange={setAccountFilter} variant="chip" />
-        {!monthFilter && <MonthJump current={atMonth} months={months} onPick={jumpTo} variant="chip" />}
+        {!monthFilter && !rangeFilter && <MonthJump current={atMonth} months={months} onPick={jumpTo} variant="chip" />}
         <MoreChip onImport={() => setImportOpen(true)} />
       </FilterBar>
 
@@ -396,25 +465,40 @@ export default function Activity() {
           rows it cannot. */}
       <AskedOfMe txns={txns ?? []} onOpen={setEditing} />
 
-      {/* What a drill-through narrowed the list to, and the way back out of it.
+      {/* What a drill-through narrowed the list to, and both ways out of it.
           A filter this strong has to be visible: without the banner the page
-          simply looks like a history that stops. */}
-      {monthFilter && (
+          simply looks like a history that stops.
+
+          Two exits, because they answer different questions. "Back to Reports"
+          is for when the list has told you what you came for and you want the
+          chart again — it returns to the chart you actually left, month and
+          period and all, because the origin path carries that page's state.
+          "Show everything" is for when the answer is somewhere else in the
+          history, and drops the narrowing without leaving the page. */}
+      {drilled && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-accent/8 px-4 py-2.5 ring-1 ring-accent/20 md:mb-2.5 md:py-2">
-          <p className="min-w-0 flex-1 text-sm">
-            <span className="font-medium">{monthLabel(monthFilter)} only</span>
-            <span className="text-ink-3">
-              {' · '}
-              {catLabel(catFilter, catMap)}
-              {book !== 'all' && ` · ${BOOK_LABEL[book]}`}
-            </span>
+          {/* On a phone the sentence takes the whole first line and the two
+              ways out share the second. Squeezed between them it wrapped into a
+              three-word column with a button either side, which is the shape of
+              a toolbar rather than of a sentence. */}
+          {origin && (
+            <button
+              onClick={() => {
+                clearDrill()
+                navigate(origin.path)
+              }}
+              className="order-2 inline-flex shrink-0 items-center gap-0.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-ink-2 ring-1 ring-hairline transition hover:text-ink md:order-1"
+            >
+              <ChevronLeft size={13} /> {origin.label}
+            </button>
+          )}
+          <p className="order-1 min-w-0 basis-full text-sm md:order-2 md:basis-auto md:flex-1">
+            <span className="font-medium">{drillLine}</span>
+            {book !== 'all' && <span className="text-ink-3">{` · ${BOOK_LABEL[book]}`}</span>}
           </p>
           <button
-            onClick={() => {
-              setMonthFilter(null)
-              setCatFilter(null)
-            }}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-ink-2 ring-1 ring-hairline transition hover:text-ink"
+            onClick={clearDrill}
+            className="order-3 ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-ink-2 ring-1 ring-hairline transition hover:text-ink md:ml-0"
           >
             <X size={12} /> Show everything
           </button>
@@ -431,7 +515,7 @@ export default function Activity() {
           hint={
             searching && book !== 'all'
               ? `This searched ${BOOK_LABEL[book].toLowerCase()} only.`
-              : searching || catFilter || accountFilter || monthFilter
+              : searching || catFilter || accountFilter || monthFilter || rangeFilter || payeeFilter
                 ? 'Try widening the filters above.'
                 : 'Add one with the + button, or import a bank statement CSV.'
           }

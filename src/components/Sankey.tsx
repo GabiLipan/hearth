@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { Receipt } from 'lucide-react'
 import { useChartColors } from '../hooks/useChartColors'
 import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
 import { useApp } from '../state/AppContext'
@@ -57,7 +58,24 @@ function ribbonPath(x0: number, y0: number, x1: number, y1: number, t: number) {
   ].join(' ')
 }
 
-export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string }) {
+export function Sankey({
+  graph,
+  caption,
+  onPick,
+  canPick = (n) => n.side !== 'hub',
+}: {
+  graph: FlowGraph
+  caption?: string
+  /**
+   * Out of a band and into the rows behind it. The node is handed over whole
+   * because only the caller knows what its id means — `cat:…` is a category,
+   * `in:theirs` is somebody's contribution, and the diagram itself has no
+   * opinion about which of those has transactions to show.
+   */
+  onPick?: (node: FlowNode) => void
+  /** Which bands lead anywhere. Everything but the hub, unless told otherwise. */
+  canPick?: (node: FlowNode) => boolean
+}) {
   const c = useChartColors()
   const { money } = useApp()
   const box = useRef<HTMLDivElement>(null)
@@ -114,9 +132,25 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
    * emits no move at all on some browsers — and a tap is the whole gesture on
    * the device where a name is most likely to have been shortened.
    */
+  /** Whether a click on a band goes anywhere — see the note inside. */
+  const byClick = Boolean(onPick) && !touch.coarse
+
   const names = (id: string) => ({
     onPointerDown: (e: ReactPointerEvent) => setHovered({ id, ...at(e) }),
     onPointerMove: (e: ReactPointerEvent) => setHovered({ id, ...at(e) }),
+    // On a mouse the click is spare, so the band itself is the way through. On
+    // a finger it is not: the tap is what opens the panel, so the way through
+    // is the button inside it. Same reasoning as the charts — see `MonthPick`.
+    //
+    // No `className` here: every element this is spread onto already has one,
+    // and a spread AFTER a `className` attribute silently replaces it — which
+    // would take the fade off the ribbons to add a cursor.
+    onClick: byClick
+      ? () => {
+          const node = boxOf.get(id)?.node
+          if (node && canPick(node)) onPick?.(node)
+        }
+      : undefined,
   })
 
   useEffect(() => {
@@ -199,7 +233,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
                   d={ribbonPath(r.x0, r.y0, r.x1, r.y1, r.thickness)}
                   fill={node ? colourOf(node) : c.ink3}
                   fillOpacity={on ? (hovered ? 0.62 : 0.34) : 0.1}
-                  className="transition-[fill-opacity] duration-150"
+                  className={cx('transition-[fill-opacity] duration-150', byClick && 'cursor-pointer')}
                   {...names(r.colourFrom)}
                 />
               )
@@ -215,7 +249,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
                 rx={3}
                 fill={colourOf(b.node)}
                 fillOpacity={lit(b.node.id) ? 1 : 0.25}
-                className="transition-[fill-opacity] duration-150"
+                className={cx('transition-[fill-opacity] duration-150', byClick && 'cursor-pointer')}
                 {...names(b.node.id)}
               />
             ))}
@@ -279,6 +313,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
                   width={LABEL + NODE_W}
                   height={b.height + BAND_GAP}
                   fill="transparent"
+                  className={cx(byClick && 'cursor-pointer')}
                   {...names(b.node.id)}
                 />
               )
@@ -327,6 +362,17 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
             <p className="mt-0.5 text-xs text-ink-3">
               {Math.round((hoveredNode.valueMinor / graph.totalMinor) * 100)}% of everything that moved
             </p>
+          )}
+          {/* The way through on a finger, where the tap that opened this panel
+              could not also have been a click. The panel is otherwise inert, so
+              this button re-enables pointers for itself alone. */}
+          {onPick && touch.coarse && canPick(hoveredNode) && (
+            <button
+              onClick={() => onPick(hoveredNode)}
+              className="pointer-events-auto mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg bg-surface-2 px-2 py-1.5 text-xs font-medium text-ink-2 transition hover:text-ink"
+            >
+              <Receipt size={12} /> See transactions
+            </button>
           )}
         </div>
       )}

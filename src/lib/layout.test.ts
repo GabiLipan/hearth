@@ -5,15 +5,32 @@ import {
   moveTo,
   nextSpan,
   normaliseLayout,
+  optionValue,
+  optionsFor,
+  setOption,
   setSpan,
   toggle,
   type LayoutItem,
   type SectionDef,
 } from './layout'
 
+const COUNTS = {
+  id: 'count',
+  label: 'How many',
+  choices: [
+    { value: '5', label: 'Top 5' },
+    { value: '10', label: 'Top 10' },
+  ],
+}
+
 const CATALOGUE: SectionDef[] = [
   { id: 'hero', label: 'Hero', defaultSpan: 'full' },
-  { id: 'donut', label: 'Donut', variants: [{ value: 'donut', label: 'Ring' }, { value: 'bars', label: 'Bars' }] },
+  {
+    id: 'donut',
+    label: 'Donut',
+    variants: [{ value: 'donut', label: 'Ring' }, { value: 'bars', label: 'Bars' }],
+    options: [COUNTS],
+  },
   { id: 'trend', label: 'Trend' },
   { id: 'flow', label: 'Flow', defaultOn: false, defaultSpan: 'full' },
 ]
@@ -51,6 +68,21 @@ describe('normaliseLayout', () => {
   it('keeps a variant the section still offers', () => {
     const stored = [{ id: 'donut', on: true, span: 1, variant: 'bars' }]
     expect(normaliseLayout(stored, CATALOGUE)[0].variant).toBe('bars')
+  })
+
+  it('keeps an option the section still offers, and drops one it does not', () => {
+    const stored = [{ id: 'donut', on: true, span: 1, opts: { count: '10', gone: '3' } }]
+    expect(normaliseLayout(stored, CATALOGUE)[0].opts).toEqual({ count: '10' })
+  })
+
+  it('refuses a choice that is not on offer, rather than storing it', () => {
+    const stored = [{ id: 'donut', on: true, span: 1, opts: { count: '999' } }]
+    expect(normaliseLayout(stored, CATALOGUE)[0].opts).toBeUndefined()
+  })
+
+  it('leaves a section with no options carrying none', () => {
+    const stored = [{ id: 'trend', on: true, span: 1, opts: { count: '10' } }]
+    expect(normaliseLayout(stored, CATALOGUE)[0].opts).toBeUndefined()
   })
 
   it('survives junk, because the string came off disk', () => {
@@ -157,5 +189,47 @@ describe('setSpan', () => {
     const out = setSpan(items, 'b', 'full')
     expect(out[0]).toBe(items[0])
     expect(out[1].span).toBe('full')
+  })
+})
+
+describe('options', () => {
+  const donut = CATALOGUE[1]
+
+  it('falls back to the first choice, which is the default', () => {
+    expect(optionValue(donut, item('donut'), 'count')).toBe('5')
+  })
+
+  it('honours a stated default over the first choice, and ignores a nonsense one', () => {
+    const stated: SectionDef = { id: 's', label: 'S', options: [{ ...COUNTS, defaultValue: '10' }] }
+    expect(optionValue(stated, item('s'), 'count')).toBe('10')
+    const bogus: SectionDef = { id: 's', label: 'S', options: [{ ...COUNTS, defaultValue: '7' }] }
+    expect(optionValue(bogus, item('s'), 'count')).toBe('5')
+  })
+
+  it('reads a choice that was made', () => {
+    expect(optionValue(donut, item('donut', { opts: { count: '10' } }), 'count')).toBe('10')
+  })
+
+  // The stored value is normalised on load, but a section can lose a choice
+  // inside one session — a catalogue is rebuilt every render — and a chart
+  // handed a number nobody offers is worse than one showing the default.
+  it('falls back when the stored choice is no longer offered', () => {
+    expect(optionValue(donut, item('donut', { opts: { count: '99' } }), 'count')).toBe('5')
+  })
+
+  it('says nothing about an option the section does not have', () => {
+    expect(optionValue(donut, item('donut'), 'nope')).toBeUndefined()
+    expect(optionsFor(CATALOGUE[2], item('trend'))).toEqual({})
+  })
+
+  it('resolves every option at once', () => {
+    expect(optionsFor(donut, item('donut', { opts: { count: '10' } }))).toEqual({ count: '10' })
+  })
+
+  it('setOption touches only the section named, and keeps its other choices', () => {
+    const items = [item('donut', { opts: { count: '5', other: 'x' } }), item('trend')]
+    const out = setOption(items, 'donut', 'count', '10')
+    expect(out[0].opts).toEqual({ count: '10', other: 'x' })
+    expect(out[1]).toBe(items[1])
   })
 })

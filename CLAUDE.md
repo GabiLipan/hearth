@@ -97,9 +97,10 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
 `categoryTree.ts` (what a drag on the category list means, and what it writes),
-`layout.ts` (which sections a page shows, in what order, how wide, and in which
-shape — home and Reports share it), `sticky.ts` (a filter that outlives leaving
-the page and dies with the tab), `sankey.ts` (a period as one balanced flow,
+`layout.ts` (which sections a page shows, in what order, how wide, in which
+shape, and what else each one lets you decide — home and Reports share it),
+`drill.ts` (out of a figure and into the rows behind it, and the way back),
+`sticky.ts` (a filter that outlives leaving the page and dies with the tab), `sankey.ts` (a period as one balanced flow,
 and where every band goes), `scale.ts` (a value axis with round numbers, shared
 by a scrolling chart and the axis pinned beside it),
 `reimbursements.ts` (what the household owes you), `shade.ts` (telling apart
@@ -507,6 +508,47 @@ the single place a level comes from.
   it in exactly the same way — on a phone it ate a whole bar, which then read as
   a month that had barely started. `MonthScroller` therefore has no edge fade at
   all; the scrollbar and a caption carry the hint instead.
+- **A chart's way through to its rows depends on the pointer.** Every figure is
+  a claim about a set of transactions, and the answer to "which ones" is
+  Activity, prefiltered, with a breadcrumb back — not a modal, which would be a
+  second weaker copy of a page that already edits rows, links transfers and
+  knows what you may change. `lib/drill.ts` is the only place that spells one.
+  The awkward half is WHERE the target is. On a mouse the click is spare, since
+  hover already shows the tooltip, so the bar or the arc or the band is the
+  target. On a finger the tap is spoken for — it is what opens the tooltip — so
+  a tap that also navigated would mean the panel could never be read; there the
+  way through is a button inside the panel, which the linger keeps up long
+  enough to press. Hence `useTouchTooltip.coarse`, and hence the button appears
+  only once a finger has actually been used.
+- **Recharts 3 hands a click an INDEX, not a payload.** `onClick` on a chart
+  receives `MouseHandlerDataParam` — `activeIndex`, `activeLabel`, a coordinate
+  — and not version 2's `activePayload` array. Reading the old shape off an
+  `unknown` compiles perfectly and silently never fires, which is how the
+  month-bar drill shipped dead the first time. `monthAt` resolves the index
+  against the data it was given, and falls back to the label.
+- **A prop that appears on the first touch can cost you the tooltip.** The
+  obvious spelling of "click only on a mouse" is `onClick={coarse ? undefined :
+  handler}` — but the first touch is also what SETS `coarse`, so the pie's props
+  changed mid-gesture, Recharts rebuilt its sectors, and the synthesised mouse
+  event that would have opened the panel landed on a node no longer in the
+  document. The ring became the one chart a finger could not read. Keep the
+  props constant and let the handler ask.
+- **The way back has to carry the state of the page it came from.** A bare
+  `/reports` is a different page with the same address: it opens on this month,
+  as charts, at the top level. So a drill's `backTo` is built with
+  `pathWithState`, and Reports reads those params once on arrival and clears
+  them — the same discipline Activity applies to the drill itself, and for the
+  same reason: a param nobody can see must not go on overriding a control
+  somebody then uses.
+- **A section's options are a second axis, not more variants.** `variants` is
+  what KIND of picture (a ring, bars, a line); `options` is everything else
+  (how many categories, how many months, figures or colour alone). They are
+  separate because they compose — folding them into one list would make six
+  entries that have to be read as a grid — and they share one control in the
+  card's heading, because a heading has room for a word rather than a row of
+  chips. Anything that changes what is COMPUTED rather than how it is drawn has
+  to be read at page level (`sectionOption` in Reports) rather than inside the
+  render, because the aggregates are page-level memos the table view shares.
 - **A filter that outlives its page turns every mount-time reset into a bug.**
   Activity's filters are `useSticky`/`useStickyIds` (session-scoped, per tab —
   a preference belongs in `settings`, but a filter is a question you are in the
