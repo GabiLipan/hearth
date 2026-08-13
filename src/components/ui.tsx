@@ -501,9 +501,11 @@ function tapOrigin(): Origin | undefined {
  *
  * `open` going false is the *start* of the close, not the end of it — unmount
  * on the spot and the sheet vanishes mid-gesture. The extra phase must outlast
- * the longest exit animation in `index.css`.
+ * the longest exit animation in `index.css`, which is `origin-out` at 360ms:
+ * the genie takes longer to swallow a sheet than a zoom took to shrink one, and
+ * a number left behind here would cut the last frames off it.
  */
-const EXIT_MS = 260
+const EXIT_MS = 400
 function useSheetPhase(open: boolean) {
   const [phase, setPhase] = useState<'closed' | 'open' | 'closing'>(open ? 'open' : 'closed')
   useEffect(() => {

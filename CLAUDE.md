@@ -371,6 +371,19 @@ the single place a level comes from.
   when a drop is clamped, the line goes where the row will actually land.
   `pointercancel` must NOT commit — it is the system taking the gesture away,
   not a drop.
+- **A genie is a warp, and the web has no warp — so it is timing and 3D.**
+  macOS bends the window's sides into a curve, which no affine transform can
+  do. The two honest options are an animated `clip-path` (a repaint of the whole
+  sheet every frame, on a form full of inputs) or `perspective` + `rotateX`,
+  which tips the edge nearest the button away so THAT edge narrows while the far
+  one stays wide — a trapezoid the eye reads as a funnel, and composited, so it
+  measures at 60fps with nothing over a frame budget. The rest of the effect is
+  timing rather than geometry: the axes are separated IN TIME, so a thin stalk
+  rises out of the button and only then unfurls sideways, and on the way back the
+  sheet necks in horizontally before the column sinks. Opacity holds until the
+  very end — a genie is swallowed, not faded, and dropping it early turns the
+  stalk into a smear. `EXIT_MS` in `ui.tsx` must outlast the exit keyframes: a
+  number left behind there cuts the last frames off it.
 - **Anticipation reads as latency on anything you pressed.** `--ease-settle`
   started life with a negative first control point, so the sheet's resize dipped
   backwards for its first fifth before setting off — which on a bottom-anchored

@@ -221,35 +221,53 @@ body {
   to { opacity: 0; }
 }
 
-/* Grows out of whatever was tapped. The origin point is set inline as
-   `transform-origin`, so the sheet expands from the + button the way an app
-   icon expands into its screen — and collapses back into it on the way out.
+/* Grows out of whatever was tapped, the way the Dock's genie does.
  *
- * The stops sample a damped spring rather than describing a zoom, and the
- * class runs them `linear` so the shape here is the whole of the motion: a
- * single easing between two scales is the "linear zoom" this replaced. X and Y
- * are separated early on so it leaves the button flattened and fills out as it
- * travels, which is what reads as elastic rather than mechanical. The overshoot
- * is kept under 2%: the frame is the whole viewport, so the far corner from the
- * origin moves ~10px on a peak of 1.016, and much more than that would carry
- * the sheet's top edge up under the dynamic island on the way past. */
+ * The origin point is set inline as `transform-origin`, so the sheet leaves
+ * from — and returns into — the + button that opened it. What makes it read as
+ * a genie rather than a zoom is that the two axes are separated IN TIME: a thin
+ * stalk rises out of the button first and only then unfurls sideways, and on
+ * the way back the sheet necks in horizontally before the column sinks. A
+ * single scale on both axes is a box getting smaller; this is something being
+ * drawn through a hole.
+ *
+ * The taper is `perspective` + `rotateX`, not a warp. macOS bends the window's
+ * sides into a curve, which no affine transform can do — the honest options on
+ * the web are an animated `clip-path` (a repaint of the whole sheet every
+ * frame, on a form full of inputs) or 3D. A slight backward tip of the edge
+ * nearest the button narrows THAT edge while the far one stays wide, which is
+ * the trapezoid the eye reads as a funnel, and it stays on the compositor:
+ * transform and opacity only, no layout, no paint.
+ *
+ * The stops sample a damped spring, and the class runs them `linear` so the
+ * shape here is the whole of the motion. The overshoot is kept under 2%: the
+ * frame is the whole viewport, so the far corner from the origin moves ~10px on
+ * a peak of 1.016, and much more would carry the sheet's top edge up under the
+ * dynamic island on the way past. */
 @keyframes origin-in {
-  0% { transform: scale(0.17, 0.09); opacity: 0; }
-  10% { transform: scale(0.47, 0.38); opacity: 1; }
-  20% { transform: scale(0.71, 0.66); }
-  30% { transform: scale(0.88, 0.85); }
-  40% { transform: scale(0.988, 0.975); }
-  50% { transform: scale(1.016, 1.018); }
-  62% { transform: scale(1.010, 1.012); }
-  74% { transform: scale(0.996, 0.995); }
-  86% { transform: scale(1.000, 0.999); }
-  100% { transform: scale(1, 1); opacity: 1; }
+  0% { transform: perspective(1100px) rotateX(-28deg) scale(0.10, 0.05); opacity: 0; }
+  8% { transform: perspective(1100px) rotateX(-25deg) scale(0.14, 0.24); opacity: 1; }
+  18% { transform: perspective(1100px) rotateX(-20deg) scale(0.25, 0.50); }
+  30% { transform: perspective(1100px) rotateX(-14deg) scale(0.45, 0.72); }
+  42% { transform: perspective(1100px) rotateX(-8deg) scale(0.68, 0.87); }
+  54% { transform: perspective(1100px) rotateX(-4deg) scale(0.86, 0.95); }
+  66% { transform: perspective(1100px) rotateX(-1.5deg) scale(0.97, 0.99); }
+  76% { transform: perspective(1100px) rotateX(0deg) scale(1.014, 1.012); }
+  86% { transform: perspective(1100px) rotateX(0deg) scale(1.006, 1.005); }
+  94% { transform: perspective(1100px) rotateX(0deg) scale(0.998, 0.998); }
+  100% { transform: perspective(1100px) rotateX(0deg) scale(1, 1); opacity: 1; }
 }
-/* Leaves the way it came, with a breath of anticipation first. */
+/* Back down the same funnel: a breath of anticipation, the sides draw in, and
+   the column that is left goes last. Opacity holds until the very end — a genie
+   is swallowed, not faded, and dropping it early turns the stalk into a smear. */
 @keyframes origin-out {
-  0% { transform: scale(1, 1); opacity: 1; }
-  14% { transform: scale(1.012, 1.014); opacity: 1; }
-  100% { transform: scale(0.17, 0.1); opacity: 0; }
+  0% { transform: perspective(1100px) rotateX(0deg) scale(1, 1); opacity: 1; }
+  12% { transform: perspective(1100px) rotateX(0deg) scale(1.012, 1.010); opacity: 1; }
+  30% { transform: perspective(1100px) rotateX(-6deg) scale(0.78, 0.93); opacity: 1; }
+  48% { transform: perspective(1100px) rotateX(-13deg) scale(0.50, 0.80); opacity: 1; }
+  66% { transform: perspective(1100px) rotateX(-19deg) scale(0.28, 0.62); opacity: 1; }
+  82% { transform: perspective(1100px) rotateX(-24deg) scale(0.16, 0.38); opacity: 0.92; }
+  100% { transform: perspective(1100px) rotateX(-28deg) scale(0.09, 0.06); opacity: 0; }
 }
 
 /* Page changes. The horizontal pair follow the tab order, so moving right
@@ -287,8 +305,11 @@ body {
 .animate-sheet-out { animation: sheet-down 0.18s var(--ease-in-soft) forwards; }
 .animate-fade { animation: fade-in 0.18s ease-out; }
 .animate-fade-out { animation: fade-out 0.18s ease-in forwards; }
-.animate-origin { animation: origin-in 0.44s linear; }
-.animate-origin-out { animation: origin-out 0.24s var(--ease-in-soft) forwards; }
+.animate-origin { animation: origin-in 0.52s linear; }
+/* Longer than the 0.24s zoom it replaces, and `linear` for the same reason as
+   the entrance: the funnel IS the timing. Still shorter than the way in — a
+   thing you have finished with should not keep you waiting. */
+.animate-origin-out { animation: origin-out 0.36s linear forwards; }
 .animate-page { animation: page-in 0.26s var(--ease-out-soft); }
 .animate-page-forward { animation: page-forward 0.26s var(--ease-out-soft); }
 .animate-page-back { animation: page-back 0.26s var(--ease-out-soft); }
