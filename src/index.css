@@ -224,50 +224,77 @@ body {
 /* Grows out of whatever was tapped, the way the Dock's genie does.
  *
  * The origin point is set inline as `transform-origin`, so the sheet leaves
- * from — and returns into — the + button that opened it. What makes it read as
- * a genie rather than a zoom is that the two axes are separated IN TIME: a thin
- * stalk rises out of the button first and only then unfurls sideways, and on
- * the way back the sheet necks in horizontally before the column sinks. A
- * single scale on both axes is a box getting smaller; this is something being
- * drawn through a hole.
+ * from — and returns into — the + button that opened it.
  *
- * The taper is `perspective` + `rotateX`, not a warp. macOS bends the window's
- * sides into a curve, which no affine transform can do — the honest options on
- * the web are an animated `clip-path` (a repaint of the whole sheet every
- * frame, on a form full of inputs) or 3D. A slight backward tip of the edge
- * nearest the button narrows THAT edge while the far one stays wide, which is
- * the trapezoid the eye reads as a funnel, and it stays on the compositor:
- * transform and opacity only, no layout, no paint.
+ * ## The stops are sampled, not chosen
  *
- * The stops sample a damped spring, and the class runs them `linear` so the
- * shape here is the whole of the motion. The overshoot is kept under 2%: the
- * frame is the whole viewport, so the far corner from the origin moves ~10px on
- * a peak of 1.016, and much more would carry the sheet's top edge up under the
- * dynamic island on the way past. */
+ * Every value below comes from the step response of a damped spring — mass 1,
+ * ω 20 rad/s, ζ 0.82 — read at fifteen points and rounded. That is the whole
+ * reason it moves the way it does: a spring covers most of the distance
+ * immediately and spends the rest of its time settling, so two thirds of the
+ * travel is over in the first quarter of the animation and the last stretch is
+ * a glide. Stops picked by hand look reasonable in a list and animate at a
+ * near-constant speed through the middle, which is the "linear" feel this
+ * replaced. ζ 0.82 puts the overshoot at about 1%: enough to read as alive, and
+ * small enough that the far corner of a full-viewport frame moves ~6px.
+ *
+ * The class runs them `linear` for that reason — the samples ARE the easing, and
+ * an easing function on top would curve an already-curved motion twice.
+ *
+ * ## The funnel, and how much of it is enough
+ *
+ * X trails Y by 22ms and starts a third narrower, so the sheet leaves the button
+ * as a slightly drawn-in shape and fills out — the genie's neck. It is
+ * deliberately slight and brief: the aspect distortion peaks around 1.4:1 and is
+ * gone within 80ms. At 2:1, which is where this started, a phone-sized sheet
+ * spends a fifth of a second as a squeezed column with its content visibly
+ * compressed sideways, and that reads as a rendering fault rather than as
+ * motion.
+ *
+ * The taper is `perspective` + `rotateX`: tipping the edge nearest the button
+ * away narrows THAT edge while the far one stays wide, which is the trapezoid
+ * the eye reads as a funnel. macOS bends the sides into a curve, which no affine
+ * transform can do — the alternative on the web is an animated `clip-path`, a
+ * repaint of the whole sheet every frame on a form full of inputs. This stays on
+ * the compositor: transform and opacity only. */
 @keyframes origin-in {
-  0% { transform: perspective(1100px) rotateX(-28deg) scale(0.10, 0.05); opacity: 0; }
-  8% { transform: perspective(1100px) rotateX(-25deg) scale(0.14, 0.24); opacity: 1; }
-  18% { transform: perspective(1100px) rotateX(-20deg) scale(0.25, 0.50); }
-  30% { transform: perspective(1100px) rotateX(-14deg) scale(0.45, 0.72); }
-  42% { transform: perspective(1100px) rotateX(-8deg) scale(0.68, 0.87); }
-  54% { transform: perspective(1100px) rotateX(-4deg) scale(0.86, 0.95); }
-  66% { transform: perspective(1100px) rotateX(-1.5deg) scale(0.97, 0.99); }
-  76% { transform: perspective(1100px) rotateX(0deg) scale(1.014, 1.012); }
-  86% { transform: perspective(1100px) rotateX(0deg) scale(1.006, 1.005); }
-  94% { transform: perspective(1100px) rotateX(0deg) scale(0.998, 0.998); }
-  100% { transform: perspective(1100px) rotateX(0deg) scale(1, 1); opacity: 1; }
+  0% { transform: perspective(1000px) rotateX(-16deg) scale(0.300, 0.400); opacity: 0; }
+  5% { transform: perspective(1000px) rotateX(-14.8deg) scale(0.300, 0.429); opacity: 0.56; }
+  10% { transform: perspective(1000px) rotateX(-12.3deg) scale(0.318, 0.495); opacity: 1; }
+  15% { transform: perspective(1000px) rotateX(-9.6deg) scale(0.386, 0.578); }
+  20% { transform: perspective(1000px) rotateX(-7.2deg) scale(0.478, 0.662); }
+  26% { transform: perspective(1000px) rotateX(-5deg) scale(0.597, 0.754); }
+  32% { transform: perspective(1000px) rotateX(-3.3deg) scale(0.706, 0.831); }
+  38% { transform: perspective(1000px) rotateX(-2.2deg) scale(0.797, 0.891); }
+  45% { transform: perspective(1000px) rotateX(-1.3deg) scale(0.877, 0.940); }
+  52% { transform: perspective(1000px) rotateX(-0.8deg) scale(0.933, 0.972); }
+  60% { transform: perspective(1000px) rotateX(-0.4deg) scale(0.973, 0.993); }
+  68% { transform: perspective(1000px) rotateX(-0.2deg) scale(0.995, 1.003); }
+  76% { transform: perspective(1000px) rotateX(-0.1deg) scale(1.004, 1.006); }
+  85% { transform: perspective(1000px) rotateX(-0.1deg) scale(1.008, 1.006); }
+  100% { transform: perspective(1000px) rotateX(0deg) scale(1, 1); opacity: 1; }
 }
-/* Back down the same funnel: a breath of anticipation, the sides draw in, and
-   the column that is left goes last. Opacity holds until the very end — a genie
-   is swallowed, not faded, and dropping it early turns the stalk into a smear. */
+
+/* Back down the same funnel, accelerating away: `t^2.1`, with X necking in a
+   little ahead of Y so the sides draw together before the column drops.
+ *
+ * No anticipation — no breath backwards before it goes. A sheet that moves the
+ * wrong way for 40ms after you press Close is indistinguishable from one that
+ * took 40ms to notice, which is the same reason `--ease-settle` keeps all its
+ * character at the END of the curve.
+ *
+ * Opacity holds until three quarters through: a genie is swallowed, not faded,
+ * and dropping it early turns the neck into a smear. */
 @keyframes origin-out {
-  0% { transform: perspective(1100px) rotateX(0deg) scale(1, 1); opacity: 1; }
-  12% { transform: perspective(1100px) rotateX(0deg) scale(1.012, 1.010); opacity: 1; }
-  30% { transform: perspective(1100px) rotateX(-6deg) scale(0.78, 0.93); opacity: 1; }
-  48% { transform: perspective(1100px) rotateX(-13deg) scale(0.50, 0.80); opacity: 1; }
-  66% { transform: perspective(1100px) rotateX(-19deg) scale(0.28, 0.62); opacity: 1; }
-  82% { transform: perspective(1100px) rotateX(-24deg) scale(0.16, 0.38); opacity: 0.92; }
-  100% { transform: perspective(1100px) rotateX(-28deg) scale(0.09, 0.06); opacity: 0; }
+  0% { transform: perspective(1000px) rotateX(0deg) scale(1, 1); opacity: 1; }
+  12% { transform: perspective(1000px) rotateX(-0.2deg) scale(0.988, 0.989); }
+  24% { transform: perspective(1000px) rotateX(-0.9deg) scale(0.950, 0.955); }
+  36% { transform: perspective(1000px) rotateX(-2.1deg) scale(0.883, 0.894); }
+  48% { transform: perspective(1000px) rotateX(-3.9deg) scale(0.786, 0.805); }
+  60% { transform: perspective(1000px) rotateX(-6.2deg) scale(0.657, 0.689); }
+  72% { transform: perspective(1000px) rotateX(-9deg) scale(0.497, 0.544); opacity: 1; }
+  84% { transform: perspective(1000px) rotateX(-12.5deg) scale(0.305, 0.369); opacity: 0.57; }
+  100% { transform: perspective(1000px) rotateX(-18deg) scale(0.180, 0.090); opacity: 0; }
 }
 
 /* Page changes. The horizontal pair follow the tab order, so moving right
@@ -305,11 +332,10 @@ body {
 .animate-sheet-out { animation: sheet-down 0.18s var(--ease-in-soft) forwards; }
 .animate-fade { animation: fade-in 0.18s ease-out; }
 .animate-fade-out { animation: fade-out 0.18s ease-in forwards; }
-.animate-origin { animation: origin-in 0.52s linear; }
-/* Longer than the 0.24s zoom it replaces, and `linear` for the same reason as
-   the entrance: the funnel IS the timing. Still shorter than the way in — a
-   thing you have finished with should not keep you waiting. */
-.animate-origin-out { animation: origin-out 0.36s linear forwards; }
+.animate-origin { animation: origin-in 0.34s linear; }
+/* Shorter than the way in: a thing you have finished with must not keep you
+   waiting, and the exit has no settle to spend time on. */
+.animate-origin-out { animation: origin-out 0.24s linear forwards; }
 .animate-page { animation: page-in 0.26s var(--ease-out-soft); }
 .animate-page-forward { animation: page-forward 0.26s var(--ease-out-soft); }
 .animate-page-back { animation: page-back 0.26s var(--ease-out-soft); }

@@ -377,13 +377,25 @@ the single place a level comes from.
   sheet every frame, on a form full of inputs) or `perspective` + `rotateX`,
   which tips the edge nearest the button away so THAT edge narrows while the far
   one stays wide — a trapezoid the eye reads as a funnel, and composited, so it
-  measures at 60fps with nothing over a frame budget. The rest of the effect is
-  timing rather than geometry: the axes are separated IN TIME, so a thin stalk
-  rises out of the button and only then unfurls sideways, and on the way back the
-  sheet necks in horizontally before the column sinks. Opacity holds until the
-  very end — a genie is swallowed, not faded, and dropping it early turns the
-  stalk into a smear. `EXIT_MS` in `ui.tsx` must outlast the exit keyframes: a
-  number left behind there cuts the last frames off it.
+  measures with nothing over a frame budget. Opacity holds until the very end: a
+  genie is swallowed, not faded, and dropping it early turns the neck into a
+  smear. `EXIT_MS` in `ui.tsx` must outlast the exit keyframes — a number left
+  behind there cuts the last frames off it.
+- **Keyframe stops are SAMPLED from a spring, never chosen by hand.** Hand-picked
+  scales look reasonable in a list and animate at a near-constant speed through
+  the middle, which is exactly what "it feels linear" means. `origin-in` is the
+  step response of mass 1, ω 20, ζ 0.82 read at fifteen points: two thirds of the
+  travel is over in the first quarter and the rest is a settle, which is why the
+  class runs them `linear` — the samples ARE the easing. ζ near 0.82 keeps the
+  overshoot around 1%, which on a full-viewport frame is ~6px at the far corner.
+  The generator lives in the commit that introduced it; re-derive rather than
+  nudge a number.
+- **Anisotropic scaling has a budget, and it is smaller than it looks.** A
+  transform does not re-lay-out the text under it, so scaling Y twice as far as X
+  squeezes every word sideways. At 2:1 held for 200ms a phone-sized sheet reads
+  as a rendering fault rather than as motion — "too stretched" was the report.
+  The funnel wants a peak around 1.4:1, gone inside 100ms; past that it stops
+  looking like a neck and starts looking broken.
 - **Anticipation reads as latency on anything you pressed.** `--ease-settle`
   started life with a negative first control point, so the sheet's resize dipped
   backwards for its first fifth before setting off — which on a bottom-anchored
