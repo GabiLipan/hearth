@@ -1103,6 +1103,7 @@ export function MonthStepper({
   label,
   canGoForward = true,
   step: months = 1,
+  variant = 'toolbar',
 }: {
   month: string
   onChange: (next: string) => void
@@ -1115,24 +1116,51 @@ export function MonthStepper({
    * unchanged and only the label and the stride differ.
    */
   step?: number
+  /**
+   * Which row it is standing in.
+   *
+   * `chip` is the phone's scrolling filter row, where every other control is a
+   * 36px pill — so this one is too. It used to keep its full 44px height and
+   * its rounded rectangle there, on the argument that it is pressed repeatedly
+   * rather than set once, and the result simply read as a control that had been
+   * missed: taller than its neighbours and a different shape, in a row whose
+   * whole job is to look like one row.
+   *
+   * The same reasoning as `FilterChip`'s own note about 36px applies to it now:
+   * under the usual touch minimum, deliberately, and only in this row.
+   */
+  variant?: 'toolbar' | 'chip'
 }) {
+  const chip = variant === 'chip'
   const step = (delta: number) => {
     const [y, m] = month.split('-').map(Number)
     const d = new Date(y, m - 1 + delta * months, 1)
     onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
+  const arrow = (side: 'l' | 'r') =>
+    cx(
+      'grid h-full place-items-center text-ink-2 transition-colors hover:text-ink disabled:opacity-30',
+      chip
+        ? cx('w-8', side === 'l' ? 'rounded-l-full pl-0.5' : 'rounded-r-full pr-0.5')
+        : cx('w-9 desktop:w-7', side === 'l' ? 'rounded-l-xl md:rounded-l-lg' : 'rounded-r-xl md:rounded-r-lg'),
+    )
   return (
-    <div className={cx(CONTROL_H, 'flex items-center rounded-xl bg-surface-2 md:rounded-lg')}>
+    <div
+      className={cx(
+        'flex shrink-0 items-center bg-surface-2',
+        chip ? 'h-9 rounded-full' : cx(CONTROL_H, 'rounded-xl md:rounded-lg'),
+      )}
+    >
       <button
-        className="grid h-full w-9 place-items-center rounded-l-xl text-ink-2 hover:text-ink desktop:w-7 md:rounded-l-lg"
+        className={arrow('l')}
         aria-label={months === 12 ? 'Previous year' : 'Previous month'}
         onClick={() => step(-1)}
       >
         <ChevronLeft size={17} />
       </button>
-      <span className="w-32 text-center text-sm font-semibold md:w-28">{label(month)}</span>
+      <span className={cx('text-center text-sm font-semibold', chip ? 'w-28' : 'w-32 md:w-28')}>{label(month)}</span>
       <button
-        className="grid h-full w-9 place-items-center rounded-r-xl text-ink-2 hover:text-ink disabled:opacity-30 desktop:w-7 md:rounded-r-lg"
+        className={arrow('r')}
         aria-label={months === 12 ? 'Next year' : 'Next month'}
         disabled={!canGoForward}
         onClick={() => step(1)}

@@ -595,10 +595,11 @@ export default function Reports() {
    * January, so everything downstream still receives a month key and nothing
    * else has to know which mode this is.
    *
-   * Built once and rendered into both bars, so the two form factors cannot
-   * disagree about what "Range" means.
+   * Written once and asked for by each bar, so the two form factors cannot
+   * disagree about what "Range" means — but the phone's copy is a pill, because
+   * it stands in a row of pills. Same control, same behaviour, one size.
    */
-  const stepper =
+  const stepper = (variant: 'toolbar' | 'chip') =>
     period === 'custom' ? (
       <div className="flex shrink-0 items-center gap-1.5">
         <TextInput
@@ -621,19 +622,22 @@ export default function Reports() {
         />
       </div>
     ) : period === 'month' ? (
-      <div className="shrink-0">
-        <MonthStepper month={month} onChange={changeMonth} label={monthLabel} canGoForward={month < thisMonthKey()} />
-      </div>
+      <MonthStepper
+        variant={variant}
+        month={month}
+        onChange={changeMonth}
+        label={monthLabel}
+        canGoForward={month < thisMonthKey()}
+      />
     ) : (
-      <div className="shrink-0">
-        <MonthStepper
-          month={month}
-          onChange={changeMonth}
-          label={(k) => k.slice(0, 4)}
-          step={12}
-          canGoForward={year < thisMonthKey().slice(0, 4)}
-        />
-      </div>
+      <MonthStepper
+        variant={variant}
+        month={month}
+        onChange={changeMonth}
+        label={(k) => k.slice(0, 4)}
+        step={12}
+        canGoForward={year < thisMonthKey().slice(0, 4)}
+      />
     )
 
   /**
@@ -1046,14 +1050,12 @@ export default function Reports() {
           className="w-52"
           options={PERIOD_OPTIONS}
         />
-        {stepper}
+        {stepper('toolbar')}
       </Toolbar>
 
       {/* A phone gets the same four decisions in one scrolling row. Three
           segmented controls stacked to about 250px before a single chart, which
-          on this page is most of what there was room for. The stepper stays at
-          full height inside the bar: it is the one control here that is pressed
-          repeatedly rather than set once. */}
+          on this page is most of what there was room for. */}
       <FilterBar>
         {/* Two states, so a toggle rather than a menu — it shows where you are
             and one tap is the whole interaction. */}
@@ -1074,7 +1076,7 @@ export default function Reports() {
           }}
         />
         <ChoiceChip value={range} options={RANGE_OPTIONS} onChange={setRange} />
-        {stepper}
+        {stepper('chip')}
       </FilterBar>
 
       {/* The month in figures, in this book's own words. On the household book
