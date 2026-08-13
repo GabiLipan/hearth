@@ -17,6 +17,7 @@ import {
 } from 'recharts'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useChartColors } from '../hooks/useChartColors'
+import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
 import { useApp } from '../state/AppContext'
 import { distinctShades } from '../lib/shade'
 import { niceScale, type Scale } from '../lib/scale'
@@ -88,15 +89,21 @@ function ChartTip({
   active,
   label,
   rows,
+  fading,
 }: {
   active?: boolean
   label?: string
   rows: TipRow[]
+  /** On its way out after a touch — see `useTouchTooltip`. */
+  fading?: boolean
 }) {
   const { money } = useApp()
   if (!active || rows.length === 0) return null
   return (
-    <div className="rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline">
+    <div
+      className="rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline"
+      style={{ opacity: fading ? 0 : 1, transition: `opacity ${TIP_FADE_MS}ms linear` }}
+    >
       {label && <div className="mb-1 font-medium text-ink-2">{label}</div>}
       {rows.map((r) => (
         <div key={r.name} className="flex items-center gap-2">
@@ -222,17 +229,26 @@ export function MonthScroller({
   height: number
   scale: Scale
   /**
-   * The chart, given the element its `Tooltip` should portal into. A render
-   * prop rather than a plain child because the portal has to reach a `Tooltip`
-   * nested inside a Recharts chart, and Recharts finds its own children by
-   * type — a wrapper component around `Tooltip` would simply not be seen.
+   * The chart, given the element its `Tooltip` should portal into and what its
+   * `active` should be. A render prop rather than a plain child because both
+   * have to reach a `Tooltip` nested inside a Recharts chart, and Recharts
+   * finds its own children by type — a wrapper component around `Tooltip`
+   * would simply not be seen.
    */
-  children: (portal: HTMLElement | null) => ReactElement
+  children: (portal: HTMLElement | null, active: boolean | undefined) => ReactElement
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
   const [tip, setTip] = useState<HTMLDivElement | null>(null)
   const scrolls = count > visible
+  /**
+   * A tapped bar has no "leave", so the panel is given an ending: it stays
+   * while the finger is down and fades a few seconds after it lifts. The fade
+   * goes on the LAYER rather than on the panel inside it — the layer is the
+   * one thing here that is not Recharts', and it holds the panel for every
+   * chart that scrolls, so all four fade the same way.
+   */
+  const touch = useTouchTooltip()
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -301,14 +317,16 @@ export function MonthScroller({
         // straight through the month labels and strikes them out.
         className={cx('min-w-0 flex-1', scrolls && 'overflow-x-auto overscroll-x-contain pb-2')}
         style={{ scrollbarWidth: 'thin' }}
+        {...touch.handlers}
         onPointerMove={(e) => {
           pointer.current = { x: e.clientX, y: e.clientY }
           place()
+          touch.keep()
         }}
       >
         <div style={{ width: scrolls ? `${(count / visible) * 100}%` : '100%' }}>
           <ResponsiveContainer width="100%" height={height}>
-            {children(tip)}
+            {children(tip, touch.active)}
           </ResponsiveContainer>
         </div>
       </div>
@@ -319,6 +337,7 @@ export function MonthScroller({
         ref={setTip}
         aria-hidden
         className="pointer-events-none absolute left-0 top-0 z-30"
+        style={{ opacity: touch.fading ? 0 : 1, transition: `opacity ${TIP_FADE_MS}ms linear` }}
       />
     </div>
   )
@@ -380,9 +399,10 @@ export function SpendBars({
   const c = useChartColors()
   const scale = useMemo(() => niceScale(0, Math.max(...data.map((d) => d.spend), 0)), [data])
   const a = axisProps(c, scale)
-  const tip = (portal: HTMLElement | null) => (
+  const tip = (portal: HTMLElement | null, shown: boolean | undefined) => (
     <Tooltip
       portal={portal}
+      active={shown}
       cursor={shape === 'bars' ? { fill: c.ink3, fillOpacity: 0.08 } : { stroke: c.ink3, strokeOpacity: 0.3 }}
       content={({ active, payload, label }) => (
         <ChartTip
@@ -396,12 +416,12 @@ export function SpendBars({
 
   return (
     <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
-      {(portal) => (shape === 'bars' ? (
+      {(portal, shown) => (shape === 'bars' ? (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%">
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip(portal)}
+          {tip(portal, shown)}
           <Bar dataKey="spend" fill={c.series[0]} radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false}>
             {bars(data, c.series[0], 'spend')}
           </Bar>
@@ -417,7 +437,7 @@ export function SpendBars({
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip(portal)}
+          {tip(portal, shown)}
           <Area
             type="monotone"
             dataKey="spend"
@@ -434,7 +454,7 @@ export function SpendBars({
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
-          {tip(portal)}
+          {tip(portal, shown)}
           <Line
             type="monotone"
             dataKey="spend"
@@ -471,13 +491,14 @@ export function IncomeSpendBars({
   return (
     <div>
       <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
-        {(portal) => (
+        {(portal, shown) => (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="30%" barGap={2}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           <Tooltip
             portal={portal}
+            active={shown}
             cursor={{ fill: c.ink3, fillOpacity: 0.08 }}
             content={({ active, payload, label }) => (
               <ChartTip
@@ -536,9 +557,10 @@ export function NetLine({
     [data],
   )
   const a = axisProps(c, scale)
-  const tip = (portal: HTMLElement | null) => (
+  const tip = (portal: HTMLElement | null, shown: boolean | undefined) => (
     <Tooltip
       portal={portal}
+      active={shown}
       cursor={shape === 'bars' ? { fill: c.ink3, fillOpacity: 0.08 } : { stroke: c.ink3, strokeOpacity: 0.3 }}
       content={({ active, payload, label }) => (
         <ChartTip
@@ -558,13 +580,13 @@ export function NetLine({
   )
   return (
     <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
-      {(portal) => (shape === 'bars' ? (
+      {(portal, shown) => (shape === 'bars' ? (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%">
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           <ReferenceLine y={0} stroke={c.baseline} strokeWidth={1} />
-          {tip(portal)}
+          {tip(portal, shown)}
           {/* A month that went the other way is not a small good month, so it
               is not the good colour. The bars have to be coloured one at a time
               for that — a single fill cannot say which side of zero it is on. */}
@@ -584,7 +606,7 @@ export function NetLine({
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           <ReferenceLine y={0} stroke={c.baseline} strokeWidth={1} />
-          {tip(portal)}
+          {tip(portal, shown)}
           <Line
             type="monotone"
             dataKey="net"
@@ -704,6 +726,8 @@ export function CategoryDonut({
   // than the arcs for the first few frames.
   const startAngle = 90
   const endAngle = 90 - 360 * sweep
+  /** A tapped slice, like a tapped bar, needs an ending given to it. */
+  const touch = useTouchTooltip()
   return (
     /* A CONTAINER query, not `sm:`. This chart is a full-width panel on
        Reports and a widget in a 2-to-4 column grid on the home page, so the
@@ -717,7 +741,7 @@ export function CategoryDonut({
        ever, which looks like a layout choice rather than a broken query. */
     <div className="@container">
       <div className="grid items-center gap-3 @md:grid-cols-[200px_minmax(0,1fr)] [&>*]:min-w-0">
-        <div className="relative mx-auto w-full max-w-[220px]" style={{ height }}>
+        <div className="relative mx-auto w-full max-w-[220px]" style={{ height }} {...touch.handlers}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -743,12 +767,14 @@ export function CategoryDonut({
                 ))}
               </Pie>
               <Tooltip
+                active={touch.active}
                 content={({ active, payload }) => {
                   const p = payload?.[0]
                   const s = p?.payload as CategorySlice | undefined
                   return (
                     <ChartTip
                       active={active}
+                      fading={touch.fading}
                       rows={s ? [{ name: s.name, value: s.totalMinor, color: colorOf(s) }] : []}
                     />
                   )

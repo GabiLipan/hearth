@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { useChartColors } from '../hooks/useChartColors'
+import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
 import { useApp } from '../state/AppContext'
 import { layoutFlow, type FlowGraph, type FlowNode } from '../lib/sankey'
 import { cx } from './ui'
@@ -23,6 +24,15 @@ const LABEL = 116
 /** Below this the bands are too thin to read whatever we do, so it scrolls instead. */
 const MIN_WIDTH = 560
 const NODE_W = 12
+/**
+ * The gap between two bands in a column.
+ *
+ * Passed to the layout rather than left to its default, because the hit areas
+ * below divide it: each band owns the space out to the halfway line between it
+ * and its neighbour, and it can only do that if this file and the arithmetic
+ * agree on how much space there is.
+ */
+const BAND_GAP = 6
 
 /** A name that will not fit is shortened rather than allowed to overlap its neighbour. */
 function short(name: string, max = 18) {
@@ -55,6 +65,26 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
   const frame = useRef<HTMLDivElement>(null)
   const [available, setAvailable] = useState(MIN_WIDTH)
   const [hovered, setHovered] = useState<{ id: string; x: number; y: number } | null>(null)
+  /**
+   * How tall the panel is, which is not knowable until it exists.
+   *
+   * It sits ABOVE the pointer, so its height decides whether it fits — and a
+   * name long enough to wrap onto three lines is exactly the case this panel
+   * was made taller to serve, so the two arrived together: the first long name
+   * pushed the panel off the top of the card. Measured rather than assumed, and
+   * re-measured from a `ResizeObserver` because the panel does not exist on the
+   * pointer move that first opens it, and the pointer may never move again.
+   */
+  const [panel, setPanel] = useState<HTMLDivElement | null>(null)
+  const [size, setSize] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    if (!panel) return
+    const measure = () => setSize({ w: panel.offsetWidth, h: panel.offsetHeight })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(panel)
+    return () => ro.disconnect()
+  }, [panel])
 
   /**
    * Where the pointer is, in the card's coordinates.
@@ -68,6 +98,26 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
     const r = frame.current?.getBoundingClientRect()
     return r ? { x: e.clientX - r.left, y: e.clientY - r.top } : { x: 0, y: 0 }
   }
+
+  /**
+   * A tap has no ending of its own, so one is given to it: the panel stays
+   * while the finger is down and fades a few seconds after it lifts. The same
+   * gesture everywhere else in the app — see `useTouchTooltip`.
+   */
+  const touch = useTouchTooltip(() => setHovered(null))
+
+  /**
+   * What names a band: the band itself, the ribbon leaving it, and the strip
+   * its label sits in.
+   *
+   * `pointerdown` as well as `pointermove`, because a tap that does not travel
+   * emits no move at all on some browsers — and a tap is the whole gesture on
+   * the device where a name is most likely to have been shortened.
+   */
+  const names = (id: string) => ({
+    onPointerDown: (e: ReactPointerEvent) => setHovered({ id, ...at(e) }),
+    onPointerMove: (e: ReactPointerEvent) => setHovered({ id, ...at(e) }),
+  })
 
   useEffect(() => {
     const el = box.current
@@ -92,7 +142,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
   const height = Math.max(280, Math.max(counts.ins, counts.outs) * 42)
 
   const layout = useMemo(
-    () => layoutFlow(graph, { width: width - LABEL * 2, height, nodeWidth: NODE_W }),
+    () => layoutFlow(graph, { width: width - LABEL * 2, height, nodeWidth: NODE_W, padding: BAND_GAP }),
     [graph, width, height],
   )
 
@@ -103,6 +153,19 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
   const hoveredNode = hovered ? boxOf.get(hovered.id)?.node : undefined
   /** Everything dims except the band under the pointer and the ribbon it owns. */
   const lit = (id: string) => !hovered || hovered.id === id
+
+  /** Is there room to hang the panel above the pointer? Below it if not. */
+  const above = !hovered || hovered.y - 10 - size.h >= 0
+  /**
+   * Centred on the pointer, and never over either edge of the card.
+   *
+   * From the panel's own measured width rather than a guess at it: a name long
+   * enough to need this panel is also what makes the panel wide, so a fixed
+   * half-width was wrong in exactly the case it was there for.
+   */
+  const half = size.w / 2
+  const cardW = frame.current?.clientWidth ?? width
+  const left = hovered ? Math.min(Math.max(hovered.x, half), Math.max(half, cardW - half)) : 0
 
   if (layout.boxes.length === 0) {
     return <p className="py-8 text-center text-sm text-ink-3">Nothing moved in this period.</p>
@@ -117,7 +180,14 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
           viewBox={`0 0 ${width} ${height}`}
           role="img"
           aria-label={caption ?? 'Where the money came from and what it became'}
-          onPointerLeave={() => setHovered(null)}
+          {...touch.handlers}
+          // A mouse that leaves takes the panel with it, as it always did. A
+          // finger emits this too, the moment it lifts — and obeying it there
+          // would close the panel at exactly the instant the linger exists to
+          // keep it open.
+          onPointerLeave={(e) => {
+            if (e.pointerType === 'mouse') setHovered(null)
+          }}
         >
           <g transform={`translate(${LABEL},0)`}>
             {layout.ribbons.map((r) => {
@@ -130,7 +200,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
                   fill={node ? colourOf(node) : c.ink3}
                   fillOpacity={on ? (hovered ? 0.62 : 0.34) : 0.1}
                   className="transition-[fill-opacity] duration-150"
-                  onPointerMove={(e) => setHovered({ id: r.colourFrom, ...at(e) })}
+                  {...names(r.colourFrom)}
                 />
               )
             })}
@@ -146,7 +216,7 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
                 fill={colourOf(b.node)}
                 fillOpacity={lit(b.node.id) ? 1 : 0.25}
                 className="transition-[fill-opacity] duration-150"
-                onPointerMove={(e) => setHovered({ id: b.node.id, ...at(e) })}
+                {...names(b.node.id)}
               />
             ))}
 
@@ -181,27 +251,77 @@ export function Sankey({ graph, caption }: { graph: FlowGraph; caption?: string 
                 </text>
               )
             })}
+
+            {/* The name, as something you can point at.
+
+                A label is drawn `pointer-events-none` so it cannot steal the
+                hover from the band it belongs to — which left the one thing on
+                the diagram you would reach for when you cannot read it as the
+                one thing that answered nothing. A shortened name is exactly the
+                case: `short()` cuts at eighteen characters, so "Groceries &
+                household" is a band whose label does not say what it is and
+                whose own 4px of colour is hard to hit with a finger.
+
+                So each band claims its whole row — the label strip and the node
+                — as a transparent target, out to the halfway line between it
+                and its neighbour, which is what makes a 3px band tappable
+                without taking the tap that belonged to the band above. Drawn
+                last so it is over the labels; transparent, so it changes
+                nothing about how the diagram looks. */}
+            {layout.boxes.map((b) => {
+              if (b.node.side === 'hub') return null
+              const left = b.node.side === 'in'
+              return (
+                <rect
+                  key={`h-${b.node.id}`}
+                  x={left ? b.x - LABEL : b.x}
+                  y={b.y - BAND_GAP / 2}
+                  width={LABEL + NODE_W}
+                  height={b.height + BAND_GAP}
+                  fill="transparent"
+                  {...names(b.node.id)}
+                />
+              )
+            })}
           </g>
         </svg>
       </div>
 
       {hovered && hoveredNode && (
         <div
+          ref={setPanel}
           // Follows the pointer, clamped to the card so a band near the right
           // edge does not open a panel off it.
           // Above the diagram and outside the scrolling box, so nothing clips
           // it and nothing is drawn over it. Clamped to the card rather than to
           // the SVG: the SVG is wider than the card whenever this scrolls.
-          className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline"
+          className={cx(
+            // `w-max` with a cap, rather than letting the box shrink to fit:
+            // shrink-to-fit resolves against the widest LINE it can find, so a
+            // long name wrapped itself into a four-word column while most of
+            // the room the panel was allowed sat empty beside it.
+            'pointer-events-none absolute z-30 w-max max-w-[min(20rem,92%)] -translate-x-1/2 rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline',
+            // Above the pointer where there is room for it, and below where
+            // there is not — the top bands of the diagram have nothing above
+            // them, and a panel pinned to the card's top edge instead would
+            // cover the very labels it was opened to explain.
+            above && '-translate-y-full',
+          )}
           style={{
-            left: Math.min(Math.max(90, hovered.x), Math.max(90, (frame.current?.clientWidth ?? width) - 90)),
-            top: Math.max(44, hovered.y - 10),
+            left,
+            top: above ? hovered.y - 10 : hovered.y + 18,
+            opacity: touch.fading ? 0 : 1,
+            transition: `opacity ${TIP_FADE_MS}ms linear`,
           }}
         >
-          <div className="flex items-center gap-2">
-            <span className="size-2.5 rounded-full" style={{ background: colourOf(hoveredNode) }} />
-            <span className="text-ink-3">{hoveredNode.name}</span>
-            <span className="ml-auto pl-3 font-semibold text-ink tabular">{money(hoveredNode.valueMinor)}</span>
+          <div className="flex items-start gap-2">
+            <span className="mt-1.5 size-2.5 shrink-0 rounded-full" style={{ background: colourOf(hoveredNode) }} />
+            {/* The whole name, wrapped rather than shortened — this panel is
+                the only place the diagram admits to what it cut off. */}
+            <span className="min-w-0 break-words text-ink-3">{hoveredNode.name}</span>
+            <span className="ml-auto shrink-0 pl-3 font-semibold text-ink tabular">
+              {money(hoveredNode.valueMinor)}
+            </span>
           </div>
           {graph.totalMinor > 0 && hoveredNode.side !== 'hub' && (
             <p className="mt-0.5 text-xs text-ink-3">

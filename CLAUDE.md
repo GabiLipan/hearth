@@ -538,7 +538,33 @@ the single place a level comes from.
   Placement must also re-run from a `ResizeObserver`: the panel does not exist
   on the pointer move that first activates it, so that placement measures a
   width of zero, cannot tell there is no room to the right, and the pointer may
-  never move again to correct it.
+  never move again to correct it. The same measurement decides which SIDE of the
+  pointer the Sankey's panel goes: a wrapped name makes it tall enough to run
+  off the top of the card, so it flips underneath where there is no room above.
+- **A tapped tooltip has no ending, because nothing ever leaves.** Every chart
+  here was written against hover, and a hover ends by itself; a tap opens a
+  panel that then sits over the chart until something unrelated closes it.
+  `useTouchTooltip` gives the gesture the ending it lacks — the panel stays
+  while the finger is down, and a few seconds after it lifts it fades — and
+  every chart shares it, so the same press means the same thing everywhere.
+  Two halves are easy to get wrong. Hiding it means `<Tooltip active={false}>`
+  rather than a `content` that returns null: the CURSOR (the band highlight
+  under the bar) is drawn by Recharts from the same active state, so a panel
+  hidden by its own content leaves the highlight stranded on the chart. And
+  what makes it gone must be a TIMER, never the fade finishing — a backgrounded
+  tab runs no transitions, so a panel removed by its own `transitionend` comes
+  back half-drawn over the chart. Note also that a finger emits `pointerleave`
+  the moment it lifts, so a `pointerleave` that closes the panel has to check
+  `pointerType`, or the linger is over before it starts.
+- **A label drawn `pointer-events-none` is the thing you would reach for.** The
+  Sankey's names are, so that a label cannot steal the hover from the band it
+  belongs to — which left a name shortened to eighteen characters as the one
+  part of the diagram that answered nothing when pressed. Each band claims its
+  whole row instead, label strip included, as a transparent `rect` drawn last:
+  out to the halfway line between it and its neighbour, which is also what
+  makes a 3px band tappable without swallowing the band above it. That halving
+  is why `padding` is passed to `layoutFlow` explicitly rather than left to its
+  default — the hit areas divide a gap they have to know the size of.
 - **A scrolling chart's axis is drawn by hand, not by a second chart.** Two
   Recharts charts agree about where their plot areas are only by accident, and
   the accident stops holding the first time a margin changes. `ValueAxis` is
