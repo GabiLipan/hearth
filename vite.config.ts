@@ -7,11 +7,38 @@ import { VitePWA } from 'vite-plugin-pwa'
 // including GitHub Pages project sites served from a sub-path.
 export default defineConfig({
   base: './',
+  define: {
+    /**
+     * When this build was made.
+     *
+     * The package version says nothing useful — it has been 1.0.0 all along —
+     * and what somebody actually wants to know is whether the app in their
+     * hand is the one that was deployed. A timestamp answers that, and it is
+     * the only thing Settings can honestly show about "which version is this".
+     */
+    __BUILT_AT__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      /**
+       * A new version waits to be asked for, rather than taking over.
+       *
+       * `autoUpdate` reloads the page the moment a new service worker
+       * activates, which is fine on a desktop tab and wrong in an installed
+       * app: the reload can land in the middle of typing a transaction. It was
+       * also not delivering — an installed PWA on iOS is usually RESTORED
+       * rather than launched, so the page never loads, nothing ever checks, and
+       * the only way to get a new version was to kill the app repeatedly.
+       *
+       * So the app checks on its own terms (see `lib/updates.ts`) and says so.
+       */
+      registerType: 'prompt',
+      // Registered from `lib/updates.ts` instead, which is what lets the app
+      // check on demand and report what it found. Left on 'auto' the plugin
+      // would inject a second registration into index.html.
+      injectRegister: null,
       includeAssets: ['icons/apple-touch-icon.png'],
       workbox: {
         // The OCR models (~12 MB) and ONNX Runtime WASM are fetched on first

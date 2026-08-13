@@ -42,6 +42,17 @@ export function fmtFullDate(dateISO: string) {
   return format(parseISO(dateISO), 'd MMM yyyy')
 }
 
+/**
+ * A clock time, for something that happened just now rather than on a date.
+ *
+ * Takes a millisecond timestamp rather than an ISO date string: the things
+ * measured this precisely — the last update check, the last sync — are events
+ * this session knows the moment of, not dates anybody stored.
+ */
+export function fmtTime(at: number) {
+  return format(new Date(at), 'HH:mm')
+}
+
 export function daysUntil(dateISO: string) {
   return differenceInCalendarDays(parseISO(dateISO), new Date())
 }

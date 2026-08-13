@@ -549,7 +549,20 @@ the single place a level comes from.
   chips. Anything that changes what is COMPUTED rather than how it is drawn has
   to be read at page level (`sectionOption` in Reports) rather than inside the
   render, because the aggregates are page-level memos the table view shares.
-- **A filter that outlives its page turns every mount-time reset into a bug.**
+- **An installed app on iOS is RESTORED, not launched, so it never updates
+  itself.** Reopening it resumes the same page with the same JavaScript and no
+  navigation, so the service worker's update check — which runs at registration,
+  i.e. on page load — never runs again, and the app can sit several deploys
+  behind. Force-quitting it repeatedly is the folk remedy and works only by
+  accident, when one of those launches happens to be a cold start. `lib/updates.ts`
+  checks on `visibilitychange` and `focus` instead (throttled to a minute, with a
+  half-hourly heartbeat), which is the one signal a restore does emit. Verified
+  end to end rather than reasoned about: deploy while the page stays open, fire a
+  background/foreground pair, and a waiting worker appears within half a second.
+  `registerType` is `prompt`, not `autoUpdate`, for a second reason — `autoUpdate`
+  reloads the page the moment the new worker activates, and in an installed app
+  that lands in the middle of typing a transaction. The outbox survives a reload;
+  a half-filled form does not.
   Activity's filters are `useSticky`/`useStickyIds` (session-scoped, per tab —
   a preference belongs in `settings`, but a filter is a question you are in the
   middle of asking and one asked last Tuesday must not still be hiding rows).

@@ -5,9 +5,10 @@ import {
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle,
-  PanelLeftClose, PanelLeftOpen, Target,
+  PanelLeftClose, PanelLeftOpen, Target, ArrowDownToLine,
 } from 'lucide-react'
 import { useSyncState } from '../hooks/useSync'
+import { installUpdate, useUpdateState } from '../lib/updates'
 import { cx, useViewportInset } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
@@ -215,6 +216,7 @@ export function Layout({ children }: { children: ReactNode }) {
       </header>
 
       <SyncBanner />
+      <UpdateBanner />
 
       {/* Content — fills every pixel the sidebar leaves, at any viewport width.
           Pages decide their own column counts from there. */}
@@ -467,6 +469,39 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
  * disappears after three seconds is a message nobody sees. Silence here is what
  * "my change vanished" feels like from the inside.
  */
+/**
+ * A new version is downloaded and waiting.
+ *
+ * Above the page rather than in Settings, because the whole problem was that
+ * nothing ever said so: the app would sit on an old bundle for days with no way
+ * to know. One tap takes it, and the bar is gone for good — it only ever
+ * appears when there is genuinely something newer already on the device.
+ *
+ * It reloads, which is why it asks rather than doing it: queued changes are
+ * safe in IndexedDB, but a half-typed transaction is not.
+ */
+function UpdateBanner() {
+  const { status } = useUpdateState()
+  const [taking, setTaking] = useState(false)
+  if (status !== 'ready') return null
+  return (
+    <div className="flex items-center gap-2 bg-accent/10 px-4 py-2 text-sm text-ink-2 md:px-5">
+      <ArrowDownToLine size={15} className="shrink-0 text-accent" />
+      <span className="min-w-0 flex-1 truncate">A new version of Hearth is ready</span>
+      <button
+        onClick={() => {
+          setTaking(true)
+          void installUpdate()
+        }}
+        disabled={taking}
+        className="shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-ink disabled:opacity-60"
+      >
+        {taking ? 'Updating\u2026' : 'Update now'}
+      </button>
+    </div>
+  )
+}
+
 function SyncBanner() {
   const { online, pending, deadLetters } = useSyncState()
   if (deadLetters === 0 && (online || pending === 0)) return null

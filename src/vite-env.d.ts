@@ -1,4 +1,8 @@
 /// <reference types="vite/client" />
+/// <reference types="vite-plugin-pwa/client" />
+
+/** When this bundle was built — see `define` in vite.config.ts. */
+declare const __BUILT_AT__: string
 
 interface ImportMetaEnv {
   /** Supabase project URL, e.g. https://xxxx.supabase.co */

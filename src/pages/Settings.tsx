@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
-import { Sun, Moon, MonitorSmartphone, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Wand2, ArrowLeftRight, Undo2, Users, Wallet, Shapes, Palette, Database, type LucideIcon } from 'lucide-react'
+import { Sun, Moon, MonitorSmartphone, ArrowDownToLine, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Wand2, ArrowLeftRight, Undo2, Users, Wallet, Shapes, Palette, Database, type LucideIcon } from 'lucide-react'
 import { db, type AccountGrant, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
@@ -35,6 +35,7 @@ import {
   useRules,
 } from '../lib/cache'
 import { styleOf, topLevel } from '../lib/categories'
+import { checkForUpdate, installUpdate, useUpdateState } from '../lib/updates'
 import { discardAllDeadLetters, discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
@@ -51,7 +52,7 @@ import {
 import { FREQ_WORD, type TransferRoute } from '../lib/routes'
 import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
 import { rpc } from '../lib/api'
-import { fmtFullDate } from '../lib/dates'
+import { fmtFullDate, fmtTime } from '../lib/dates'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, useWide, cx } from '../components/ui'
@@ -913,13 +914,74 @@ export const SETTINGS_GROUP_TITLES: Record<string, string> = Object.fromEntries(
   GROUPS.map(({ slug, title }) => [`/settings/${slug}`, title]),
 )
 
+/**
+ * Which version this is, and how to get a newer one.
+ *
+ * An installed app on iOS is restored rather than launched, so it can sit
+ * several deploys behind with nothing on screen admitting it — see
+ * `lib/updates.ts`. The app checks by itself whenever it comes back to the
+ * front; this is for the times you know something has shipped and want to ask
+ * outright rather than force-quitting the app until it notices.
+ */
+function VersionCard() {
+  const { status, checkedAt, builtAt } = useUpdateState()
+  const [taking, setTaking] = useState(false)
+  const ready = status === 'ready'
+
+  const line =
+    status === 'checking'
+      ? 'Looking for a new version\u2026'
+      : ready
+        ? 'A new version is ready to install'
+        : status === 'unsupported'
+          ? 'Updates arrive when the app is reopened in this browser'
+          : status === 'current' && checkedAt
+            ? `Up to date, as of ${fmtTime(checkedAt)}`
+            : `This copy was built ${fmtFullDate(builtAt.slice(0, 10))}`
+
+  return (
+    <Card className="mt-6 p-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">Version</p>
+          <p className="text-xs text-ink-3">{line}</p>
+        </div>
+        {ready ? (
+          <Button
+            size="sm"
+            disabled={taking}
+            onClick={() => {
+              setTaking(true)
+              void installUpdate()
+            }}
+          >
+            <ArrowDownToLine size={14} /> {taking ? 'Updating\u2026' : 'Update now'}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="subtle"
+            disabled={status === 'checking' || status === 'unsupported'}
+            onClick={() => void checkForUpdate({ manual: true })}
+          >
+            <RefreshCw size={14} className={cx(status === 'checking' && 'animate-spin')} /> Check for updates
+          </Button>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 /** The line under the app, on whichever screen is the bottom of Settings. */
 function Colophon() {
   return (
-    <p className="mt-6 px-1 text-xs text-ink-3">
-      Hearth · a private family finance app. Install it from your browser's share / install menu for the full app
-      experience.
-    </p>
+    <>
+      <VersionCard />
+      <p className="mt-3 px-1 text-xs text-ink-3">
+        Hearth · a private family finance app. Install it from your browser's share / install menu for the full app
+        experience.
+      </p>
+    </>
   )
 }
 
