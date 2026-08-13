@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useSyncState } from '../hooks/useSync'
 import { installUpdate, useUpdateState } from '../lib/updates'
+import { DrillSheet } from './DrillSheet'
 import { cx, useViewportInset } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
@@ -217,6 +218,11 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <SyncBanner />
       <UpdateBanner />
+
+      {/* The rows behind whatever figure was last pressed. Mounted here rather
+          than per page: it is a modal over the whole app, and the charts that
+          raise it sit three components deep inside a widget catalogue. */}
+      <DrillSheet />
 
       {/* Content — fills every pixel the sidebar leaves, at any viewport width.
           Pages decide their own column counts from there. */}

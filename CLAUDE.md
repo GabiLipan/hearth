@@ -389,7 +389,12 @@ the single place a level comes from.
   class runs them `linear` — the samples ARE the easing. ζ near 0.82 keeps the
   overshoot around 1%, which on a full-viewport frame is ~6px at the far corner.
   The generator lives in the commit that introduced it; re-derive rather than
-  nudge a number.
+  nudge a number. The same spring, stiffer and flatter (ω 26, ζ 0.86), is what
+  `.morph-height` travels on — as a CSS `linear()` easing rather than keyframes,
+  because a transition between two measured numbers has no keyframes to hang
+  them on. `linear()` needs Safari 17.2, so the cubic-bezier stays above it as
+  the fallback declaration: an unsupported easing drops the whole line, and
+  without one underneath the height would jump.
 - **Anisotropic scaling has a budget, and it is smaller than it looks.** A
   transform does not re-lay-out the text under it, so scaling Y twice as far as X
   squeezes every word sideways. At 2:1 held for 200ms a phone-sized sheet reads
@@ -533,11 +538,22 @@ the single place a level comes from.
   it in exactly the same way — on a phone it ate a whole bar, which then read as
   a month that had barely started. `MonthScroller` therefore has no edge fade at
   all; the scrollbar and a caption carry the hint instead.
+- **A drill is answered twice, and which one depends on what you'll do next.**
+  Reading the rows behind a figure is usually a glance — is that £412 one thing
+  or forty? — so the default is a SHEET over the chart, which leaves the page
+  underneath exactly as it was: same month, same period, same scroll, same
+  drilled-into category, nothing to restore on the way back. The moment the
+  answer becomes "and one of these is filed wrong", the button inside that sheet
+  opens Activity prefiltered, because that is the page that edits rows in place,
+  links transfers and attaches receipts, and a modal rebuilding any of it would
+  be a weaker copy that drifts. So a drill is a description rather than a
+  destination: `matchesDrill` filters rows for the sheet, `drillTo` spells the
+  same thing as a URL, and Activity's own month/range/payee filters go through
+  `matchesDrill` too — otherwise one figure would be explained by two different
+  lists depending on how you asked.
 - **A chart's way through to its rows depends on the pointer.** Every figure is
-  a claim about a set of transactions, and the answer to "which ones" is
-  Activity, prefiltered, with a breadcrumb back — not a modal, which would be a
-  second weaker copy of a page that already edits rows, links transfers and
-  knows what you may change. `lib/drill.ts` is the only place that spells one.
+  a claim about a set of transactions, and the answer to "which ones" lives in
+  `lib/drill.ts`, the only place that spells one.
   The awkward half is WHERE the target is. On a mouse the click is spare, since
   hover already shows the tooltip, so the bar or the arc or the band is the
   target. On a finger the tap is spoken for — it is what opens the tooltip — so

@@ -21,8 +21,7 @@ import { accountsInBook, BOOK_LABEL } from '../lib/books'
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
 import { useSticky, useStickyIds } from '../lib/sticky'
-import { narrows, readDrill } from '../lib/drill'
-import { payeeSimilar } from '../lib/rules'
+import { matchesDrill, narrows, readDrill } from '../lib/drill'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, FilterBar, FilterChip, Popover, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
@@ -182,19 +181,31 @@ export default function Activity() {
 
   const parents = useMemo(() => categories.filter(isTopLevel), [categories])
 
+  /**
+   * The drill-shaped part of this page's filters, in the shape `matchesDrill`
+   * takes — so the list here and the sheet that opens over a chart answer the
+   * same question the same way. The category and account filters stay out of
+   * it: those are sets here (several categories at once) where a drill names
+   * one, and folding a set into that shape would be a different question
+   * wearing its name.
+   */
+  const asDrill = useMemo(
+    () => ({
+      month: monthFilter ?? undefined,
+      from: rangeFilter?.from,
+      to: rangeFilter?.to,
+      payee: payeeFilter ?? undefined,
+    }),
+    [monthFilter, rangeFilter, payeeFilter],
+  )
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     const visible = new Set(accounts.map((a) => a.id))
     const list = (txns ?? []).filter((t) => {
       if (!visible.has(t.accountId)) return false
       if (accountFilter && !accountFilter.has(t.accountId)) return false
-      if (monthFilter && monthKey(t.date) !== monthFilter) return false
-      if (rangeFilter && (t.date < rangeFilter.from || t.date > rangeFilter.to)) return false
-      // The same comparison the top-payee list groups by, deliberately: that
-      // list clusters "TESCO STORES 3456" and "TESCO EXPRESS" into one row, so
-      // an exact match here would open a list adding up to less than the figure
-      // that was clicked. See `topPayees`.
-      if (payeeFilter && !payeeSimilar(t.payee, payeeFilter)) return false
+      if (!matchesDrill(t, asDrill, catMap)) return false
       if (catFilter !== null) {
         // The list is top-level, so a subcategory counts towards its parent —
         // the same rule budgets use, and the rule the report slices are built on.
@@ -205,7 +216,7 @@ export default function Activity() {
       return true
     })
     return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-  }, [txns, catFilter, catMap, accountFilter, monthFilter, rangeFilter, payeeFilter, accounts, query])
+  }, [txns, catFilter, catMap, accountFilter, asDrill, accounts, query])
 
   /**
    * The other leg of each transfer, so a row can say where the money went.

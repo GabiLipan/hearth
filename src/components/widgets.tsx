@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { ArrowLeftRight, ArrowRight, ChevronLeft, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
@@ -18,7 +18,7 @@ import {
   type Flow,
 } from '../lib/books'
 import { spendFlow } from '../lib/sankey'
-import { drillTo, type Drill } from '../lib/drill'
+import { openDrill, type Drill } from '../lib/drill'
 import { useMemberMap } from '../lib/cache'
 import { nameOf } from './PersonDot'
 import { Sankey } from './Sankey'
@@ -106,9 +106,8 @@ const month = () => thisMonthKey()
  * every drill rather than being left to the reader to infer.
  */
 function useHomeDrill(book: BookId) {
-  const navigate = useNavigate()
   return (extra: Partial<Drill> = {}) =>
-    navigate(drillTo({ book, month: month(), backTo: '/', backLabel: 'Home', ...extra }))
+    openDrill({ book, month: month(), backTo: '/', backLabel: 'Home', ...extra })
 }
 
 /* ---------- Month summary hero ---------- */

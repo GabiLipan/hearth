@@ -345,8 +345,24 @@ body {
 /* A panel that changes shape because its contents did — the Expense/Income
    toggle swapping a receipt scanner in and out, a prompt appearing under a
    category. The height comes from a measurement in JS (see `useMorphHeight`),
-   so all that is needed here is the curve to travel it on. */
-.morph-height { transition: height 0.26s var(--ease-settle); }
+   so all that is needed here is the curve to travel it on.
+ *
+ * The curve is the same damped spring the sheet's entrance is sampled from,
+ * expressed as an easing rather than as keyframes because this is a transition
+ * between two measured numbers rather than a fixed animation: mass 1, ω 26,
+ * ζ 0.86, read at 23 points. Stiffer and flatter than the entrance spring —
+ * a panel changing shape under your hand should arrive and stop, where a sheet
+ * arriving from a button can afford to breathe — so the overshoot is 0.3%,
+ * a pixel or two on a tall sheet.
+ *
+ * Two declarations, deliberately. `linear()` is what makes a sampled spring
+ * expressible at all, and a browser without it (Safari before 17.2) drops the
+ * whole declaration as invalid — leaving the cubic-bezier above as the fallback
+ * rather than leaving the height to jump. */
+.morph-height {
+  transition: height 0.22s var(--ease-settle);
+  transition-timing-function: linear(0, 0.0291, 0.1004, 0.1947, 0.2986, 0.4031, 0.5023, 0.5927, 0.6725, 0.7414, 0.7994, 0.8474, 0.8863, 0.9174, 0.9417, 0.9604, 0.9746, 0.985, 0.9924, 0.9976, 1.0011, 1.0032, 1);
+}
 
 /* The sideways travel of a page change is contained by `main`, not by <html>.
    Any overflow on the root element propagates to the viewport, and on iOS that

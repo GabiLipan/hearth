@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { Table2, ChartPie, ChevronLeft, Check, Receipt, Download } from 'lucide-react'
 import {
   useAccounts,
@@ -38,7 +38,7 @@ import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { Arrange, useLayout } from '../components/Arrange'
 import { optionValue, type SectionDef } from '../lib/layout'
-import { drillTo, pathWithState, type Drill } from '../lib/drill'
+import { openDrill, pathWithState, type Drill } from '../lib/drill'
 import { Sankey } from '../components/Sankey'
 import { spendFlow } from '../lib/sankey'
 import { monthsOfHistory } from '../lib/stats'
@@ -545,7 +545,6 @@ export default function Reports() {
    * nothing at all, which landed you in the whole history with a category
    * filter and a figure that no longer matched anything on screen.
    */
-  const navigate = useNavigate()
   const periodDrill = (): Pick<Drill, 'month' | 'from' | 'to'> =>
     period === 'month'
       ? { month }
@@ -566,21 +565,19 @@ export default function Reports() {
     pathWithState('/reports', { month, period, range, view, drill: drill ?? undefined })
 
   const seeTransactions = (extra: Partial<Drill> = {}) =>
-    navigate(drillTo({ book, ...periodDrill(), backTo: backHere(), backLabel: 'Reports', ...extra }))
+    openDrill({ book, ...periodDrill(), backTo: backHere(), backLabel: 'Reports', ...extra })
 
   /** The same, for a figure that names its own month — a heatmap cell, a bar. */
   const seeMonth = (monthKey: string, extra: Partial<Drill> = {}) =>
-    navigate(
-      drillTo({
-        book,
-        month: monthKey,
-        from: undefined,
-        to: undefined,
-        backTo: backHere(),
-        backLabel: 'Reports',
-        ...extra,
-      }),
-    )
+    openDrill({
+      book,
+      month: monthKey,
+      from: undefined,
+      to: undefined,
+      backTo: backHere(),
+      backLabel: 'Reports',
+      ...extra,
+    })
 
   /** "Other" is the tail of small categories folded together, not a category. */
   const categoryDrill = (categoryId?: string) =>
