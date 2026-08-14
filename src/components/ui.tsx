@@ -161,17 +161,66 @@ export function Columns({
 }
 
 /* ---------- Card ---------- */
+/**
+ * The resting shadow is a token, not a literal.
+ *
+ * It used to be `0 1px 2px rgba(0,0,0,0.04)` in both themes, which in the dark
+ * one is a shadow against a #0d0d0d page — invisible, so every card was
+ * separated from the page by its 10%-white hairline and nothing else. See
+ * `--elev-1` / `--elev-2` in index.css.
+ *
+ * A card that does something on being pressed also says so before it is
+ * pressed: it lifts to the raised step under a cursor and settles back on
+ * press. The lift is `translate` and the press is `scale`, which in Tailwind v4
+ * are separate CSS properties rather than two halves of one `transform`, so
+ * they compose instead of overwriting each other. `desktop:` on the hover half,
+ * since a lift is a hover affordance and a finger has no hover to give it.
+ */
 export function Card({ children, className, onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
   return (
     <div
       onClick={onClick}
       className={cx(
-        'rounded-2xl bg-surface ring-1 ring-hairline shadow-[0_1px_2px_rgba(0,0,0,0.04)] md:rounded-xl',
-        onClick && 'cursor-pointer transition-transform active:scale-[0.99]',
+        'rounded-2xl bg-surface ring-1 ring-hairline shadow-card md:rounded-xl',
+        onClick &&
+          cx(
+            'cursor-pointer transition-[box-shadow,translate,scale] duration-200 ease-out motion-reduce:transition-none',
+            'desktop:hover:-translate-y-px desktop:hover:shadow-raised',
+            'active:scale-[0.99] active:shadow-card desktop:active:translate-y-0',
+          ),
         className,
       )}
     >
       {children}
+    </div>
+  )
+}
+
+/**
+ * A card's own heading: a title on the left, and whatever the card wants to say
+ * about itself on the right — a total, a link to the full page.
+ *
+ * This was six hand-rolled copies of the same flex row, with the gap under it
+ * written `mb-1`, `mb-2` and `mb-3` and only one of them carrying a `md:` step.
+ * Stacked in a masonry column, adjacent cards had title-to-content gaps eight
+ * pixels apart — the same argument `CONTROL_H` exists for, one row further up.
+ *
+ * `items-baseline` so a small figure on the right sits on the title's baseline
+ * rather than being centred against its cap height.
+ */
+export function CardHeader({
+  title,
+  action,
+  className,
+}: {
+  title: ReactNode
+  action?: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cx('mb-2 flex items-baseline justify-between gap-2 md:mb-1.5', className)}>
+      <h3 className="min-w-0 truncate font-semibold md:text-sm">{title}</h3>
+      {action}
     </div>
   )
 }
@@ -994,25 +1043,52 @@ export function Sheet({
  * callers can shrink it per breakpoint (e.g. `md:[--dot:26px]`) — desktop rows
  * are denser than the touch-sized ones on a phone. The glyph scales with it.
  */
-export function CategoryDot({ category, size = 36, className }: { category?: Category; size?: number; className?: string }) {
-  const colour = category ? `var(--series-${category.slot})` : 'var(--ink-3)'
+/**
+ * The badge itself: a slot colour, an icon, and a shape saying which axis you
+ * are reading. Everything below is this with its arguments worked out.
+ *
+ * It exists because the recipe — the icon at 52% of the box, on a 16% mix of
+ * the slot colour into `--surface-2` — had been written out three times by
+ * hand, and the third copy (a goal, in `Goals.tsx`) had already drifted to a
+ * different size and a different icon scale.
+ */
+export function Face({
+  slot,
+  icon,
+  shape = 'circle',
+  size = 36,
+  className,
+}: {
+  /** A palette slot, or undefined for the unstyled grey. */
+  slot?: number
+  icon?: string
+  shape?: 'circle' | 'square'
+  size?: number
+  className?: string
+}) {
+  const colour = slot ? slotVar(slot) : 'var(--ink-3)'
   return (
     <span
       className={cx(
-        'grid shrink-0 place-items-center rounded-full',
+        'grid shrink-0 place-items-center',
+        shape === 'circle' ? 'rounded-full' : 'rounded-[calc(var(--dot)*0.3)]',
         'size-[var(--dot)] [&_svg]:size-[calc(var(--dot)*0.52)]',
         className,
       )}
       style={{
         ['--dot' as string]: `${size}px`,
-        background: category ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))` : 'var(--surface-2)',
+        background: slot ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))` : 'var(--surface-2)',
         color: colour,
       }}
       aria-hidden
     >
-      <CategoryIcon icon={category?.icon} size={Math.round(size * 0.52)} />
+      <CategoryIcon icon={icon} size={Math.round(size * 0.52)} />
     </span>
   )
+}
+
+export function CategoryDot({ category, size = 36, className }: { category?: Category; size?: number; className?: string }) {
+  return <Face slot={category?.slot} icon={category?.icon} size={size} className={className} />
 }
 
 /**
@@ -1029,35 +1105,97 @@ export function CategoryDot({ category, size = 36, className }: { category?: Cat
  */
 export function AccountDot({ account, size = 36, className }: { account?: Account; size?: number; className?: string }) {
   const face = account ? accountFace(account) : undefined
-  const colour = face ? slotVar(face.slot) : 'var(--ink-3)'
-  return (
-    <span
-      className={cx(
-        'grid shrink-0 place-items-center rounded-[calc(var(--dot)*0.3)]',
-        'size-[var(--dot)] [&_svg]:size-[calc(var(--dot)*0.52)]',
-        className,
-      )}
-      style={{
-        ['--dot' as string]: `${size}px`,
-        background: face ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))` : 'var(--surface-2)',
-        color: colour,
-      }}
-      aria-hidden
-    >
-      <CategoryIcon icon={face?.icon} size={Math.round(size * 0.52)} />
-    </span>
-  )
+  return <Face slot={face?.slot} icon={face?.icon} shape="square" size={size} className={className} />
 }
 
-/* ---------- Progress bar (budgets) ---------- */
-export function Progress({ fraction, tone, className }: { fraction: number; tone: 'ok' | 'warn' | 'over'; className?: string }) {
+/* ---------- Progress bar (budgets, goals) ---------- */
+/**
+ * How far through something you are.
+ *
+ * ## An overspend has a size
+ *
+ * The bar used to be `min(100, fraction * 100)`, so 105% of a budget and 300%
+ * of it were the same full red track — the two states a budget screen most
+ * needs to tell apart. `BudgetBullet` had already solved this by keeping
+ * headroom past the budget tick, and the Budgets page shows both controls, so
+ * one screen was telling the same fact two ways and the weaker way was the one
+ * on the phone layout.
+ *
+ * So past 100% the track stops meaning "the budget" and starts meaning "what
+ * was spent": the budget's share shrinks to `1 / fraction` of the width and the
+ * excess is painted beyond it. A slight overspend is then a sliver at the right
+ * and a threefold one is two thirds of the bar. Both halves are red — the whole
+ * bar is still an alarm — but the darker half is the part that quantifies it,
+ * so the difference is readable rather than merely present.
+ *
+ * The `min(2%)` floor stays, for the opposite case: a budget with almost
+ * nothing spent against it should still show that it has started.
+ */
+export function Progress({
+  fraction,
+  tone,
+  marker,
+  markerLabel,
+  className,
+}: {
+  fraction: number
+  tone: 'ok' | 'warn' | 'over'
+  /**
+   * A faint tick at 0–1 of the track: where you would be if you were exactly on
+   * schedule. Goals use it for the pace their deadline implies. Omitted where
+   * there is no schedule to be on.
+   */
+  marker?: number
+  /** What the tick means, for the tooltip. Purely advisory; the bar carries a label of its own. */
+  markerLabel?: string
+  className?: string
+}) {
+  /**
+   * `tone`, not `fraction > 1` alone: passing the target is only an overshoot
+   * where the caller says it is one. A goal saved past its target is at 120% and
+   * that is the happy case — gating on the fraction alone painted it in the same
+   * two-tone red as a budget blown by a fifth.
+   */
+  const over = fraction > 1 && tone === 'over'
   const color = tone === 'ok' ? 'var(--accent)' : tone === 'warn' ? 'var(--warning)' : 'var(--critical)'
+  // Past 100% the whole track is the spend, so the budget is a fraction of it.
+  const budgetPct = over ? (1 / fraction) * 100 : Math.min(100, Math.max(2, fraction * 100))
   return (
-    <div className={cx('h-2 w-full overflow-hidden rounded-full bg-surface-2 md:h-1.5', className)}>
+    <div className={cx('relative h-2 w-full overflow-hidden rounded-full bg-surface-2 md:h-1.5', className)}>
       <div
-        className="h-full rounded-full transition-[width] duration-500"
-        style={{ width: `${Math.min(100, Math.max(2, fraction * 100))}%`, background: color }}
+        // Rounded on the left always; on the right only when nothing follows
+        // it, or the cap would butt into the excess block as a notch.
+        className={cx(
+          'absolute inset-y-0 left-0 transition-[width] duration-500',
+          over ? 'rounded-l-full' : 'rounded-full',
+        )}
+        style={{
+          width: `${budgetPct}%`,
+          background: over ? 'color-mix(in oklab, var(--critical) 45%, var(--surface-2))' : color,
+        }}
       />
+      {over && (
+        <div
+          className="absolute inset-y-0 right-0 transition-[width] duration-500"
+          style={{ width: `${100 - budgetPct}%`, background: 'var(--critical)' }}
+        />
+      )}
+      {marker != null && marker > 0 && marker < 1 && (
+        // The tick lands ON the filled bar as often as on the empty track, so
+        // it carries a halo of the surface colour rather than picking one
+        // contrast and losing it half the time — at `bg-ink-3/70` and a single
+        // pixel it disappeared into the accent fill exactly when it mattered,
+        // which is a goal that has passed its pace mark.
+        <div
+          className="absolute inset-y-0 w-[1.5px] -translate-x-1/2 rounded-full bg-ink"
+          style={{
+            left: `${marker * 100}%`,
+            boxShadow: '0 0 0 1px color-mix(in srgb, var(--surface) 75%, transparent)',
+          }}
+          title={markerLabel}
+          aria-hidden
+        />
+      )}
     </div>
   )
 }

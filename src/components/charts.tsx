@@ -452,6 +452,72 @@ function tipAction(
   return { label: 'See transactions', onPick: () => onPickMonth(month) }
 }
 
+/* ---------- Sparkline ---------- */
+/**
+ * A shape for a number that otherwise has none — thirty days of an account's
+ * balance, beside the balance itself.
+ *
+ * Hand-drawn SVG rather than a Recharts `LineChart`, and deliberately so: at
+ * 56×24 there is no axis, no tooltip, no legend and no responsiveness to
+ * arrange, and one of these renders per account in a list. `ResponsiveContainer`
+ * alone would put a ResizeObserver on every row to discover a size the caller
+ * already knows.
+ *
+ * `preserveAspectRatio="none"` lets the caller size it with classes: the path
+ * is drawn in a 0–100 × 0–100 box and stretched, which for a line of constant
+ * stroke width is exactly what is wanted. `vector-effect` keeps the stroke from
+ * being stretched with it.
+ *
+ * A flat series is drawn down the middle rather than at the top or the bottom —
+ * a zero-height range would otherwise divide by zero and put the line on an
+ * edge, which reads as a balance pinned at its lowest ever.
+ */
+export function Sparkline({
+  values,
+  color,
+  className,
+  label,
+}: {
+  values: number[]
+  color: string
+  className?: string
+  label?: string
+}) {
+  const d = useMemo(() => {
+    if (values.length < 2) return ''
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const span = max - min
+    const x = (i: number) => (i / (values.length - 1)) * 100
+    // SVG y grows downwards, so the higher balance is the smaller number. Two
+    // units of padding top and bottom keep the stroke inside the box.
+    const y = (v: number) => (span === 0 ? 50 : 98 - ((v - min) / span) * 96)
+    return values.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(v).toFixed(2)}`).join(' ')
+  }, [values])
+
+  if (!d) return null
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className={className}
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+    >
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  )
+}
+
 /* ---------- Monthly spending: bars, a line, or an area ---------- */
 
 export type TrendShape = 'bars' | 'line' | 'area'

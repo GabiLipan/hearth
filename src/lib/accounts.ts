@@ -1,3 +1,4 @@
+import { format } from 'date-fns'
 import { create, remove, update } from './data'
 import { rpc } from './api'
 import { fullPull } from './pull'
@@ -144,6 +145,49 @@ export function balanceOf(
 ): number {
   if (canSeeTransactionsAt(level)) return computeBalance(account, txns)
   return remoteBalances.get(account.id) ?? account.openingBalanceMinor
+}
+
+/**
+ * The last `days` days of an account's balance, one point per day, ending at
+ * today's figure.
+ *
+ * Worked BACKWARDS from the balance we already have rather than forwards from
+ * the opening balance, for two reasons: `balanceOf` is the number on screen
+ * beside the line, so the line has to end exactly on it or the two disagree by
+ * whatever the cache is missing; and at `balance` level there are no rows to
+ * add up at all — the caller checks `canSeeTransactionsAt` and simply doesn't
+ * ask for a line it cannot draw.
+ *
+ * Returns `days + 1` points, oldest first. A day with no transactions repeats
+ * the previous figure, so the line is flat there rather than absent — a gap in
+ * a sparkline reads as missing data rather than as a quiet week.
+ */
+export function balanceHistory(
+  accountId: string,
+  txns: Transaction[],
+  endBalanceMinor: number,
+  days = 30,
+): number[] {
+  const byDay = new Map<string, number>()
+  for (const t of txns) {
+    if (t.accountId !== accountId) continue
+    byDay.set(t.date, (byDay.get(t.date) ?? 0) + t.amountMinor)
+  }
+  const out: number[] = new Array(days + 1)
+  let running = endBalanceMinor
+  const day = new Date()
+  for (let i = days; i >= 0; i--) {
+    out[i] = running
+    // Step off the day just recorded: the point at i-1 is the balance BEFORE
+    // this day's movements, which is where the previous day ended.
+    //
+    // `format`, not `toISOString().slice(0, 10)` — the latter is UTC, so west
+    // of Greenwich every evening's transactions would be looked up against
+    // tomorrow's key and the line would lag the figure it ends on by a day.
+    running -= byDay.get(format(day, 'yyyy-MM-dd')) ?? 0
+    day.setDate(day.getDate() - 1)
+  }
+  return out
 }
 
 /**

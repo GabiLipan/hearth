@@ -24,16 +24,17 @@ import { nameOf } from './PersonDot'
 import { Sankey } from './Sankey'
 import { settlement } from '../lib/reimbursements'
 import { typicalRange } from '../lib/budgetHistory'
-import { balanceOf, canAddTransactions, canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { accountFace, balanceHistory, balanceOf, canAddTransactions, canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { slotVar } from '../lib/palette'
 import { transfer } from '../lib/goals'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { syncNow } from '../lib/session'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
-import { Button, Card, CategoryDot, Field, Progress, Select, Sheet, TextInput, cx } from './ui'
+import { AccountDot, Button, Card, CardHeader, CategoryDot, Field, Progress, Select, Sheet, TextInput, cx } from './ui'
 import { BudgetBullet } from './BudgetBullet'
 import { CategoryIcon } from './CategoryIcon'
-import { CategoryBars, CategoryDonut, SpendBars, type TrendShape } from './charts'
+import { CategoryBars, CategoryDonut, Sparkline, SpendBars, type TrendShape } from './charts'
 
 export interface HomeData {
   txns: Transaction[]
@@ -112,14 +113,33 @@ function useHomeDrill(book: BookId) {
 
 /* ---------- Month summary hero ---------- */
 
-/** One figure in the desktop stat strip. */
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
+/**
+ * One figure in the desktop stat strip.
+ *
+ * `lead` is the card's focal point, and exactly one figure gets it. The strip
+ * used to be five equal `text-lg` figures divided by hairlines, which made the
+ * most important card on the page the flattest thing on it — while the phone
+ * layout, six lines above, leads with a `text-3xl` headline and subordinates
+ * everything else. Same hierarchy, both widths.
+ */
+function Stat({
+  label,
+  value,
+  tone,
+  lead,
+}: {
+  label: string
+  value: string
+  tone?: 'good' | 'bad'
+  lead?: boolean
+}) {
   return (
     <div className="min-w-0 px-4 first:pl-0 last:pr-0">
       <p className="text-xs text-ink-3">{label}</p>
       <p
         className={cx(
-          'mt-0.5 truncate text-lg font-bold tracking-tight tabular',
+          'mt-0.5 truncate font-bold tracking-tight tabular',
+          lead ? 'text-2xl' : 'text-lg',
           tone === 'good' && 'text-good-text',
           tone === 'bad' && 'text-critical-text',
         )}
@@ -173,7 +193,7 @@ export function HeroWidget({ data }: WidgetProps) {
       <div className="hidden md:block">
         <p className="text-xs text-ink-3">{monthLabel(month())}</p>
         <div className="mt-1 flex flex-nowrap items-start divide-x divide-hairline">
-          <Stat label={words.spend} value={money(totals.spend)} />
+          <Stat label={words.spend} value={money(totals.spend)} lead />
           <Stat label={words.income} value={money(totals.income)} />
           {data.book === 'mine' && totals.contributed > 0 && (
             <Stat label="To household" value={money(totals.contributed)} />
@@ -235,13 +255,15 @@ export function BudgetGlanceWidget({ data }: WidgetProps) {
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0)
   return (
     <Card className="p-4 md:p-3">
-      <div className="mb-3 flex items-baseline justify-between gap-2 md:mb-2">
-        <h3 className="font-semibold md:text-sm">Budgets</h3>
-        <p className="text-sm text-ink-2 tabular">
-          <span className="font-semibold text-ink">{money(totalSpent, { compact: true })}</span> of{' '}
-          {money(totalBudget, { compact: true, hideDecimals: true })}
-        </p>
-      </div>
+      <CardHeader
+        title="Budgets"
+        action={
+          <p className="shrink-0 text-sm text-ink-2 tabular">
+            <span className="font-semibold text-ink">{money(totalSpent, { compact: true })}</span> of{' '}
+            {money(totalBudget, { compact: true, hideDecimals: true })}
+          </p>
+        }
+      />
       {/* This widget spans the full page width, so on a wide screen the rows
           split into columns — a bar 1,000px long is harder to read, not easier. */}
       <ul className="grid gap-2.5 md:gap-x-6 md:gap-y-1.5 lg:grid-cols-2 min-[1800px]:grid-cols-3">
@@ -277,23 +299,33 @@ export function BudgetGlanceWidget({ data }: WidgetProps) {
 }
 
 /* ---------- Accounts ---------- */
+/** How much history the sparkline beside each balance covers. */
+const SPARK_DAYS = 30
+
 export function AccountsWidget({ data }: WidgetProps) {
   const { money } = useApp()
-  if (data.accounts.length === 0) return null
   const balance = (a: Account) => balanceOf(a, data.txns, data.remoteBalances, levelOn(a.id, data.levels))
   const total = data.accounts.reduce((s, a) => s + balance(a), 0)
+  if (data.accounts.length === 0) return null
   return (
     <Card className="p-4 md:p-3">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h3 className="font-semibold md:text-sm">Accounts</h3>
-        <span className="text-sm font-semibold tabular">{money(total)}</span>
-      </div>
+      <CardHeader title="Accounts" action={<span className="text-sm font-semibold tabular">{money(total)}</span>} />
       <ul className="divide-y divide-hairline">
         {data.accounts.map((a) => {
           const level = levelOn(a.id, data.levels)
           const bal = balance(a)
+          const face = accountFace(a)
+          // No line at `balance` level: there are no rows to draw one from, and
+          // a flat line would be a claim about a month nobody here can see.
+          const spark = canSeeTransactionsAt(level)
+            ? balanceHistory(a.id, data.txns, bal, SPARK_DAYS)
+            : undefined
           return (
-            <li key={a.id} className="flex items-center gap-2 py-2 md:py-1">
+            <li key={a.id} className="flex items-center gap-2.5 py-2 md:gap-2 md:py-1.5">
+              {/* The account's own colour and icon — `accountFace`, so an
+                  account nobody has styled still gets the one its kind
+                  implies. A rounded square, where a category is a circle. */}
+              <AccountDot account={a} size={30} className="md:[--dot:26px]" />
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
                 {a.name}
                 {/* The eye means "you can see what is in it, not what it was
@@ -301,6 +333,14 @@ export function AccountsWidget({ data }: WidgetProps) {
                     from the server rather than from rows this device holds. */}
                 {!canSeeTransactionsAt(level) && <Eye size={12} className="ml-1.5 inline text-ink-3" />}
               </span>
+              {spark && (
+                <Sparkline
+                  values={spark}
+                  color={slotVar(face.slot)}
+                  className="h-5 w-12 shrink-0 opacity-70 sm:w-14"
+                  label={`${a.name}: the last ${SPARK_DAYS} days`}
+                />
+              )}
               <span className={cx('text-sm font-semibold tabular', bal < 0 && 'text-critical-text')}>{money(bal)}</span>
             </li>
           )
@@ -504,12 +544,14 @@ export function BillsWidget({ data, options }: WidgetProps) {
   if (upcoming.length === 0) return null
   return (
     <Card className="p-4 md:p-3">
-      <div className="mb-1 flex items-baseline justify-between">
-        <h3 className="font-semibold md:text-sm">Coming up</h3>
-        <Link to="/bills" className="flex items-center gap-1 text-sm font-medium text-accent">
-          All bills <ArrowRight size={13} />
-        </Link>
-      </div>
+      <CardHeader
+        title="Coming up"
+        action={
+          <Link to="/bills" className="flex shrink-0 items-center gap-1 text-sm font-medium text-accent">
+            All bills <ArrowRight size={13} />
+          </Link>
+        }
+      />
       <ul className="divide-y divide-hairline">
         {upcoming.map((b) => {
           const days = daysUntil(b.nextDue)
@@ -563,12 +605,14 @@ export function ReimbursementWidget({ data }: WidgetProps) {
   return (
     <>
       <Card className="p-4 md:p-3">
-        <div className="mb-1 flex items-baseline justify-between gap-2">
-          <h3 className="font-semibold md:text-sm">Owed to you</h3>
-          <Link to="/activity" className="flex items-center gap-1 text-sm font-medium text-accent">
-            Activity <ArrowRight size={13} />
-          </Link>
-        </div>
+        <CardHeader
+          title="Owed to you"
+          action={
+            <Link to="/activity" className="flex shrink-0 items-center gap-1 text-sm font-medium text-accent">
+              Activity <ArrowRight size={13} />
+            </Link>
+          }
+        />
 
         <p className={cx('text-2xl font-bold tracking-tight tabular', owed > 0 && 'text-good-text')}>
           {money(Math.abs(owed))}
@@ -776,12 +820,14 @@ export function RecentWidget({ data, options }: WidgetProps) {
   if (recent.length === 0) return null
   return (
     <Card className="p-4 md:p-3">
-      <div className="mb-1 flex items-baseline justify-between">
-        <h3 className="font-semibold md:text-sm">Recent</h3>
-        <Link to="/activity" className="flex items-center gap-1 text-sm font-medium text-accent">
-          All activity <ArrowRight size={13} />
-        </Link>
-      </div>
+      <CardHeader
+        title="Recent"
+        action={
+          <Link to="/activity" className="flex shrink-0 items-center gap-1 text-sm font-medium text-accent">
+            All activity <ArrowRight size={13} />
+          </Link>
+        }
+      />
       <ul className="divide-y divide-hairline">
         {recent.map((t) => (
           <li key={t.id} className="flex items-center gap-2.5 py-2 md:gap-2 md:py-1">

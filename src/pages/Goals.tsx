@@ -8,11 +8,10 @@ import { useAccounts, useAllTransactions, useBook, useGoals, useMyLevels, useCac
 import { canAddTransactions, levelOn } from '../lib/accounts'
 import { fmtFullDate, todayISO } from '../lib/dates'
 import { parseAmount, currencySymbol } from '../lib/money'
-import { slotVar } from '../lib/palette'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import {
-  Card, Sheet, Button, Field, TextInput, Select, Empty, Progress, Toolbar, cx,
+  Card, Sheet, Button, Face, Field, TextInput, Select, Empty, Progress, Toolbar, cx,
 } from '../components/ui'
 import { confirmAction } from '../components/confirm'
 import { toast } from '../components/toast'
@@ -114,15 +113,10 @@ export default function Goals() {
           {rows.map(({ goal, progress }) => (
             <Card key={goal.id} className="p-4 md:p-3.5">
               <div className="flex items-center gap-2.5">
-                <span
-                  className="grid size-9 shrink-0 place-items-center rounded-full"
-                  style={{
-                    background: `color-mix(in oklab, ${slotVar(goal.slot)} 16%, var(--surface-2))`,
-                    color: slotVar(goal.slot),
-                  }}
-                >
-                  <CategoryIcon icon={goal.icon} size={17} />
-                </span>
+                {/* The same badge a category and an account wear, rather than a
+                    fourth hand-rolled copy of the recipe — this one had already
+                    drifted to its own size and its own icon scale. */}
+                <Face slot={goal.slot} icon={goal.icon} size={36} />
                 <button type="button" onClick={() => openForm(goal)} className="min-w-0 flex-1 text-left">
                   <p className="flex items-center gap-1.5 truncate font-medium">
                     {goal.name}
@@ -139,7 +133,17 @@ export default function Goals() {
               </div>
 
               <div className="mt-3">
-                <Progress fraction={progress.fraction} tone={progress.behind ? 'over' : 'ok'} />
+                {/* The tick is where the bar would be if the money had arrived
+                    evenly between the first contribution and the deadline. Until
+                    now "behind" was a colour and a sentence and nothing on the
+                    bar itself, so a goal that was quietly drifting looked
+                    identical to one comfortably ahead. */}
+                <Progress
+                  fraction={progress.fraction}
+                  tone={progress.behind ? 'over' : 'ok'}
+                  marker={progress.elapsed}
+                  markerLabel="Where an even pace would have you by now"
+                />
               </div>
 
               <div className="mt-2 flex items-center justify-between gap-2">
