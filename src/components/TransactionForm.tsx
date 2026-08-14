@@ -10,7 +10,7 @@ import { clearExplanation, isAsking, looksLikeTransfer, requestExplanation } fro
 import { accountsInBook } from '../lib/books'
 import { syncNow } from '../lib/session'
 import { scanReceipt } from '../lib/receipt'
-import { canAddTransactions, canEditTransaction, levelOn } from '../lib/accounts'
+import { canAddTransactions, canEditTransaction, canManageAccount, levelOn } from '../lib/accounts'
 import { grouped, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -174,11 +174,33 @@ export function TransactionForm({
    */
   const accountGrants = useGrantsFor(accountId)
   const visibleGroups = useMemo(
-    () => grouped(usableOn(categories, accountGrants, userId).filter((c) => c.kind === kind)),
-    [categories, accountGrants, userId, kind],
+    () =>
+      grouped(
+        usableOn(categories, accountGrants, userId)
+          .filter((c) => c.kind === kind)
+          /**
+           * A personal category cannot be offered on a row the household is
+           * about to be able to read.
+           *
+           * `categories_select` keeps a category with an `owner_id` to its
+           * owner, and publishing a transaction does not publish anything it
+           * points at — so the row would arrive on the other device filed under
+           * a category that device cannot resolve, and render as
+           * "Uncategorised". The household's grocery figure would then be short
+           * by exactly the thing this feature exists to add to it, with nothing
+           * on either screen to explain the difference.
+           *
+           * The database will not stop this: `personal_category_guard` asks
+           * whether anybody else is GRANTED on the account, and publishing
+           * grants nobody anything. So it is a rule the form keeps.
+           */
+          .filter((c) => !(forHousehold && c.ownerId)),
+      ),
+    [categories, accountGrants, userId, kind, forHousehold],
   )
 
-  // If the account changes to one where the chosen category is not allowed,
+  // If the account changes to one where the chosen category is not allowed —
+  // or the row becomes the household's, which rules out a private category —
   // clear it rather than letting the save fail.
   useEffect(() => {
     if (!categoryId) return
@@ -187,7 +209,7 @@ export function TransactionForm({
     )
     if (!stillAllowed) setCategoryId(undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId])
+  }, [accountId, forHousehold])
   /**
    * Other transactions from this payee that are filed somewhere else.
    *
@@ -235,6 +257,58 @@ export function TransactionForm({
    */
   const books = useBooks()
   const offerHousehold = kind === 'expense' && !!accountId && !books.household.has(accountId)
+
+  /**
+   * Whether the household can actually SEE what this box promises.
+   *
+   * Ticking it has always made the row household spending in the payer's books
+   * and a contribution out of them. What it could not do until migration 19 is
+   * make that true on the other person's screen: the row lives in an account
+   * they have no grant on, and `transactions_select` authorises by account.
+   *
+   * `publishesHouseholdRows` is the consent that closes it, and it is asked
+   * once per ACCOUNT rather than once per row — "is this an account I am
+   * willing to pay household things from" is a question with a considered
+   * answer, where "may she see this £90" asked every week is a reflex.
+   */
+  const account = useMemo(() => allAccounts.find((a) => a.id === accountId), [allAccounts, accountId])
+  const publishes = !!account?.publishesHouseholdRows
+  /** Consent is a change to the account, so it needs `manage` on it, like a rename. */
+  const mayPublish = canManageAccount(levelOn(accountId ?? '', levels))
+  /** In a household of one there is nobody to publish to, and nothing to ask about. */
+  const someoneToTell = memberMap.size > 1
+
+  /**
+   * Ticking the box, which the first time on an account is also a consent.
+   *
+   * Asked at the tick rather than at save: the dialog is the explanation, and an
+   * explanation that arrives after you have pressed Save is an interruption
+   * rather than a choice. Declining leaves the box unticked, so the cause and
+   * the effect stay next to each other.
+   *
+   * Un-ticking is never a question. It is the account-level switch in Settings
+   * that carries the warning, because that is the one that hides rows somebody
+   * may already be looking at.
+   */
+  async function toggleForHousehold(next: boolean) {
+    if (!next || publishes || !mayPublish || !someoneToTell || !account) {
+      setForHousehold(next)
+      return
+    }
+    const ok = await confirmAction({
+      title: `Let the household see what you pay for from “${account.name}”?`,
+      body: [
+        `Anything on “${account.name}” you mark like this becomes readable by everyone in your household — the payee, the amount, the date, the category and the note.`,
+        'Nothing else on the account is: not its balance, not its name, and not a single row you have not marked.',
+        'You can stop publishing later in Settings, but you cannot un-send a row that has already reached their device.',
+      ],
+      confirmLabel: 'Share these rows',
+      cancelLabel: 'Keep it to myself',
+    })
+    if (!ok) return
+    await update('accounts', account.id, { publishesHouseholdRows: true })
+    setForHousehold(true)
+  }
 
   /**
    * Whether "who paid this in?" is even a question — the mirror image of the
@@ -622,15 +696,42 @@ export function TransactionForm({
             <input
               type="checkbox"
               checked={forHousehold}
-              onChange={(e) => setForHousehold(e.target.checked)}
+              onChange={(e) => void toggleForHousehold(e.target.checked)}
               className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
             />
             <span className="min-w-0 text-sm">
-              <span className="font-medium">I paid for this, but it was the household's</span>
+              <span className="font-medium">I paid for this, but it was the household&rsquo;s</span>
               <span className="mt-0.5 block text-xs text-ink-3">
                 Counted as household spending, and as money you put in — the same as moving it to the joint
                 account and spending it from there.
               </span>
+              {/* What the arithmetic above cannot say by itself: whether the
+                  other person can see any of it. Three states, and they are
+                  genuinely different — this used to be silently the middle one
+                  for everybody, which is the hole migration 19 closes. */}
+              {someoneToTell && (
+                <span className="mt-1.5 block text-xs text-ink-3">
+                  {publishes ? (
+                    <>
+                      Everyone in your household can read the rows you mark here — and nothing else on
+                      &ldquo;{account?.name}&rdquo;.
+                    </>
+                  ) : mayPublish ? (
+                    <>Ticking this asks whether the household may read the rows you mark on this account.</>
+                  ) : (
+                    <>
+                      It counts on your screen only: this account does not publish its household rows, and
+                      only someone who can manage it can change that.
+                    </>
+                  )}
+                </span>
+              )}
+              {forHousehold && (
+                <span className="mt-1.5 block text-xs text-ink-3">
+                  Your own private categories are not offered for a household row — nobody else could read
+                  one, so the spending would arrive on their screen uncategorised.
+                </span>
+              )}
             </span>
           </label>
         )}

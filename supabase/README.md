@@ -8,20 +8,23 @@ the app.
 ## Applying it
 
 In the Supabase SQL editor, run the numbered files in order — `01-schema.sql`
-through to `10-goal-transfers.sql`. There is no migrations table, so if you are
+through to `19-published-household-rows.sql`. There is no migrations table, so if you are
 unsure what a project has already had, run `00-which-migrations-applied.sql`
 first: it is read-only and reports a row per migration.
 
-Every file is re-runnable, with one ordering trap: `10` replaces `09`'s
+Every file is re-runnable, with two ordering traps. `10` replaces `09`'s
 two-argument `link_transfer` with a three-argument one, so re-running `09`
 afterwards puts the old signature back beside the new and PostgREST can no
-longer resolve the call. Re-run `10` to clear it. The detector has a row for
-that too.
+longer resolve the call. Re-run `10` to clear it. And `19` replaces `07`'s
+`transactions_select`, so re-running `07` afterwards puts the narrower policy
+back — nothing fails, published rows simply stop arriving and the household book
+quietly loses whatever was paid from a personal account. Re-run `19`. The
+detector has a row for each.
 
 Then, to prove it works, sign up two accounts and run `99-rls-tests.sql`. It
 runs inside a transaction and rolls back, so it is safe to re-run and leaves
 nothing behind. Every row of the output must read `ok = true`. The other test
-files (`99b` … `99f`) are the same shape.
+files (`99b` … `99l`) are the same shape.
 
 ## Running it locally
 
@@ -37,7 +40,7 @@ the `auth` schema, `auth.uid()`, the `anon`/`authenticated` roles, the
 `local/00-shim.sql` first and `local/98-grants.sql` last:
 
 ```
-local/00-shim.sql → 01 … 10 → local/98-grants.sql → 99*-tests.sql
+local/00-shim.sql → 01 … 19 → local/98-grants.sql → 99*-tests.sql
 ```
 
 `pgcrypto` needs an explicit import:
@@ -63,6 +66,15 @@ wrong balance — the worst possible failure in a finance app. A definer view
 would give the right number but expose a caller-filterable `select *` over the
 whole table. The function returns aggregates only and carries its own
 authorization predicate where a caller cannot widen it.
+
+**Almost every policy authorises a transaction by its ACCOUNT. There is exactly
+one exception, and knowing it is the point.** Migration 19 lets a row marked
+`paid_for_household` out of the account it lives on, to the rest of the
+household, and only where that account's `publishes_household_rows` says so. It
+is the first and only row-level rule here. Anything new that touches
+`transactions` should assume `my_account_ids()` is the whole story for WRITES —
+it still is — and check §5 of `19-published-household-rows.sql` before assuming
+it for reads.
 
 **`visibility_epoch` is how deletions-by-privacy propagate.** A row that becomes
 invisible cannot announce itself: it emits no realtime event and leaves no

@@ -4,7 +4,7 @@ import { Receipt } from 'lucide-react'
 import { closeDrill, drillTo, matchesDrill, useOpenDrill, type Drill } from '../lib/drill'
 import { useAccountMap, useAccounts, useAllTransactions, useBooks, useCategoryMap, useMyLevels } from '../lib/cache'
 import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
-import { accountsInBook, BOOK_LABEL } from '../lib/books'
+import { accountsInBook, isForeignHouseholdRow, BOOK_LABEL } from '../lib/books'
 import { fullName } from '../lib/categories'
 import { fmtDay, fmtFullDate, monthLabel } from '../lib/dates'
 import { useApp } from '../state/AppContext'
@@ -59,12 +59,22 @@ function Rows({ drill }: { drill: Drill }) {
    * figure meant.
    */
   const rows = useMemo(() => {
-    const inBook = accountsInBook(drill.book ?? 'all', books)
+    const book = drill.book ?? 'all'
+    const inBook = accountsInBook(book, books)
     const visible = new Set(
       accounts.filter((a) => inBook.has(a.id) && canSeeTransactionsAt(levelOn(a.id, levels))).map((a) => a.id),
     )
+    // A household expense somebody published from their own card is behind the
+    // figure that raised this drill, and is on no account this device holds —
+    // so the by-account filter would leave the list short of the total printed
+    // over it. See `isForeignHouseholdRow`.
+    const held = new Set(accounts.map((a) => a.id))
     return (txns ?? [])
-      .filter((t) => visible.has(t.accountId) && matchesDrill(t, drill, catMap))
+      .filter(
+        (t) =>
+          (visible.has(t.accountId) || isForeignHouseholdRow(t, book, books, held)) &&
+          matchesDrill(t, drill, catMap),
+      )
       .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
   }, [txns, drill, catMap, accounts, levels, books])
 

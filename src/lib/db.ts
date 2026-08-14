@@ -45,6 +45,11 @@ export interface Transaction {
    * Counted as a contribution out of my book and as household spending in
    * theirs — the same row read two ways, which is the rule that already governs
    * a transfer crossing between books. See `classifyFlows`.
+   *
+   * It is also the one thing in the schema that makes a row readable outside
+   * the account it sits in, and only where the account says so:
+   * `Account.publishesHouseholdRows` is the consent, and a marked row on a
+   * consenting account is readable by the whole household. Migration 19.
    */
   paidForHousehold?: boolean
   /**
@@ -193,6 +198,17 @@ export interface Account {
    * Undefined — the normal case — means derive. See `classifyAccounts`.
    */
   bookOverride?: 'household' | 'mine'
+  /**
+   * "Rows on this account that I marked as the household's may be read by the
+   * rest of the household."
+   *
+   * The consent behind `Transaction.paidForHousehold`. Without it that flag is
+   * right on the payer's screen and invisible on everybody else's, which is the
+   * one documented hole in the household book. It publishes ONLY the marked
+   * rows — not the balance, not the account's name, and nothing else recorded
+   * on it. See `19-published-household-rows.sql`.
+   */
+  publishesHouseholdRows?: boolean
   sortOrder: number
   createdBy?: string
   updatedAt: string

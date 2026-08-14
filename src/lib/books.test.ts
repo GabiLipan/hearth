@@ -10,6 +10,8 @@ import {
   classifyAccounts,
   classifyFlows,
   contributionSplit,
+  isForeignHouseholdRow,
+  isHouseholdPaid,
   type BookMap,
 } from './books'
 
@@ -661,6 +663,100 @@ describe('paying for the household out of my own pocket', () => {
     const t = bookTotalsInRange(rows(), flows(), 'household', books, '2026-03-01', '2026-03-31')
     expect(t.contributions).toBe(9000)
     expect(t.spend).toBe(9000)
+  })
+})
+
+/**
+ * The same feature, read from the OTHER device — which until migration 19 could
+ * not read it at all.
+ *
+ * The row is my partner's weekly shop on her own card. Her account is not in
+ * this device's cache and never will be: there is no grant behind it, and the
+ * row reached us only because her account publishes its household spending. So
+ * every fixture here has a transaction whose `accountId` is in no book, which
+ * is a state nothing else in this file can produce.
+ *
+ * This is the property the household book was chosen for — complete and
+ * identical on both devices — and `paid_for_household` was the one documented
+ * thing that broke it.
+ */
+describe('a household expense published from an account this device is not on', () => {
+  const cats: Category[] = [
+    { id: 'groceries', name: 'Groceries', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+  ]
+  const fixture = [
+    txn({ accountId: 'joint', amountMinor: -4000, date: '2026-03-04', categoryId: 'groceries' }),
+    txn({
+      accountId: 'herPrivate',
+      amountMinor: -9000,
+      date: '2026-03-10',
+      categoryId: 'groceries',
+      paidForHousehold: true,
+    }),
+  ]
+  const flows = () => classifyFlows(fixture, books)
+  const theirs = fixture[1]
+
+  it('is household spending, not an ignored row', () => {
+    // `bookOf` has nothing to say about the account, so before migration 19
+    // this fell straight through to `ignored` — the row arrived and counted for
+    // nothing, which is worse than not replicating it.
+    expect(flows().get(theirs.id)).toBe('paid-for-household')
+  })
+
+  it('gives the household book the same figures as the payer sees', () => {
+    const t = bookTotals(fixture, flows(), 'household', '2026-03', books)
+    expect(t.contributions).toBe(9000)
+    expect(t.spend).toBe(9000 + 4000)
+  })
+
+  it('reaches the household grocery figure', () => {
+    expect(bookSpendByCategory(fixture, flows(), cats, 'household', '2026-03', books)).toEqual([
+      { categoryId: 'groceries', totalMinor: 13000 },
+    ])
+  })
+
+  it('is in neither of my own books', () => {
+    // I did not contribute it, and Everything means the accounts this device
+    // holds — which hers is not.
+    for (const book of ['mine', 'all'] as const) {
+      const t = bookTotals(fixture, flows(), book, '2026-03', books)
+      expect(t.contributed).toBe(0)
+      expect(t.contributions).toBe(0)
+    }
+    expect(bookTotals(fixture, flows(), 'mine', '2026-03', books).spend).toBe(0)
+  })
+
+  it('the categories still add up to the total above them', () => {
+    for (const book of ['household', 'mine', 'all'] as const) {
+      const total = bookTotals(fixture, flows(), book, '2026-03', books).spend
+      const byCat = bookSpendByCategory(fixture, flows(), cats, book, '2026-03', books)
+      expect(byCat.reduce((s, r) => s + r.totalMinor, 0)).toBe(total)
+    }
+  })
+
+  it('is admitted to the household row list and to no other', () => {
+    // The lists are built from "the accounts I may read", which this row is
+    // not on — so without an explicit admission the household list would come
+    // up short of the total printed over it.
+    const held = new Set(accounts.map((a) => a.id))
+    expect(isForeignHouseholdRow(theirs, 'household', books, held)).toBe(true)
+    expect(isForeignHouseholdRow(theirs, 'mine', books, held)).toBe(false)
+    expect(isForeignHouseholdRow(theirs, 'all', books, held)).toBe(false)
+    // A row on an account this device DOES hold is not foreign, whoever paid.
+    const mine = txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true })
+    expect(isForeignHouseholdRow(mine, 'household', books, held)).toBe(false)
+  })
+
+  it('marks the rows the arithmetic counts, and only those', () => {
+    expect(isHouseholdPaid(theirs, books)).toBe(true)
+    // Already the household's money: nothing was moved between books.
+    const joint = txn({ accountId: 'joint', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true })
+    expect(isHouseholdPaid(joint, books)).toBe(false)
+    // A refund is not a contribution to anything.
+    const refund = txn({ accountId: 'herPrivate', amountMinor: 9000, date: '2026-03-12', paidForHousehold: true })
+    expect(isHouseholdPaid(refund, books)).toBe(false)
+    expect(classifyFlows([refund], books).get(refund.id)).toBe('ignored')
   })
 })
 

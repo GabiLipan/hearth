@@ -50,6 +50,11 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   accounts: [
     'id', 'name', 'kind', 'visibility', 'ownerId', 'openingBalanceMinor', 'sortOrder',
     'bookOverride', 'slot', 'icon',
+    // Consent, and an ordinary field on the account: `accounts_update` already
+    // decides who may change one, and it needs `manage`. Writing it bumps the
+    // visibility epoch server-side in BOTH directions — see migration 19 — so
+    // this is the one entry here whose write costs every device a re-pull.
+    'publishesHouseholdRows',
   ],
   // Written by upsert_account_grant, so the whole row is the RPC's argument
   // list — see RPC_TABLES in outbox.ts.

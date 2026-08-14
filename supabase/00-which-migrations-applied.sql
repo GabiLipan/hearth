@@ -173,6 +173,34 @@ select '18-contributions.sql',
        'transactions.contributor_id exists'
 
 union all
+-- Until this reads true, a household expense paid from a personal account is
+-- right on the payer's screen and invisible on everybody else's — which is the
+-- one documented hole in the household book, and the reason the two of you can
+-- read different grocery figures for the same month. The consent switch in the
+-- account form saves nothing until it does.
+select '19-published-household-rows.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'accounts'
+                  and column_name = 'publishes_household_rows')
+   and to_regprocedure('public.account_publishes(uuid)') is not null,
+       'accounts.publishes_household_rows + account_publishes() exist'
+
+union all
+-- Also not a migration, and the one thing that can go wrong here without any
+-- error: 19 REPLACES transactions_select, and re-running 07 afterwards puts
+-- 07's narrower version back. Nothing fails — published rows simply stop
+-- arriving, and the household book quietly loses whatever was paid privately.
+-- Re-run 19 to clear it.
+select 'transactions_select publishes',
+       coalesce(
+         (select pg_get_expr(pol.polqual, pol.polrelid) like '%account_publishes%'
+            from pg_policy pol
+            where pol.polrelid = 'public.transactions'::regclass
+              and pol.polname = 'transactions_select'),
+         false),
+       'transactions_select carries the published-row disjunct — re-run 19 if this is false'
+
+union all
 -- Not a migration: a state you can only reach by re-running 09 AFTER 10, which
 -- re-creates the two-argument link_transfer beside the three-argument one.
 -- PostgREST cannot then resolve the call — supabase-js drops `undefined`

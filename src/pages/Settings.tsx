@@ -31,6 +31,7 @@ import {
   useMemberMap,
   useMembers,
   useMyLevels,
+  useBooks,
   useRemoteBalances,
   useRules,
 } from '../lib/cache'
@@ -1939,15 +1940,41 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
     setIcon(next.icon)
   }, [kind, facePicked])
   const [sharing, setSharing] = useState(false)
+  /**
+   * Whether rows on this account marked as the household's are readable by the
+   * household.
+   *
+   * The consent behind `paidForHousehold`, and the ONLY thing in the app that
+   * lets a transaction out of the account it lives on. It publishes the marked
+   * rows and nothing else — not the balance, not the account's name, not a row
+   * that has not been marked — which is why it is a switch here and not a
+   * `balance` grant in the sharing sheet next to it.
+   */
+  const [publishes, setPublishes] = useState(!!account?.publishesHouseholdRows)
   const [opening, setOpening] = useState(
     account?.openingBalanceMinor ? String(account.openingBalanceMinor / 100) : '',
   )
   const [deleting, setDeleting] = useState(false)
   const levels = useMyLevels()
   const grants = useGrantsFor(account?.id)
+  const members = useMembers()
+  const books = useBooks()
   const myLevel = account ? levelOn(account.id, levels) : 'none'
   const canDelete = canAdministerAccount(myLevel)
   const canSave = name.trim().length > 0
+
+  /**
+   * Whether publishing is even a question here.
+   *
+   * Not on a brand new account (there is nothing on it to publish), not below
+   * `manage` (changing it is an ordinary write to the account row, so
+   * `accounts_update` decides), not in a household of one, and not on an
+   * account already in the household book — money leaving a joint account is
+   * already the household's, so the flag would publish rows both people can
+   * read anyway.
+   */
+  const offerPublishing =
+    !!account && canManageAccount(myLevel) && members.length > 1 && !books.household.has(account.id)
 
   // Everyone with any access, so the row can say "3 people" without opening it.
   //
@@ -1961,6 +1988,28 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
     if (!canSave) return
     const openingMinor = parseAmount(opening) ?? 0
     if (account?.id) {
+      /**
+       * Withdrawing consent is the one change on this form that takes
+       * something away from somebody else, and it is asked about here rather
+       * than at the switch so that changing your mind twice costs nothing.
+       *
+       * Two things it says that are not obvious from the switch: every row
+       * already published goes at once, and none of them can be un-read. The
+       * epoch bump behind the first is why it is instant rather than gradual —
+       * see migration 19.
+       */
+      if (!!account.publishesHouseholdRows && !publishes) {
+        const ok = await confirmAction({
+          title: `Stop publishing household expenses from “${account.name}”?`,
+          body: [
+            'Every row you have marked as the household’s disappears from everybody else’s app, and stops counting towards the household’s spending on their screen.',
+            'It does not un-send anything. Whatever has already reached their device has already been read.',
+          ],
+          confirmLabel: 'Stop publishing',
+          tone: 'danger',
+        })
+        if (!ok) return
+      }
       await update('accounts', account.id, {
         name: name.trim(),
         kind,
@@ -1968,6 +2017,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         bookOverride: book || undefined,
         slot,
         icon,
+        publishesHouseholdRows: publishes,
       })
     } else {
       // Nothing about sharing is decided here. Creating an account makes you
@@ -2096,6 +2146,34 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
               <option value="mine">Mine</option>
             </Select>
           </Field>
+        )}
+        {/* Deliberately next to "Who can see it?" and deliberately not part of
+            it. The sharing sheet hands somebody an ACCOUNT; this hands them a
+            handful of rows and nothing else, and folding the two together would
+            make one look like a quieter version of the other. */}
+        {offerPublishing && (
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-surface-2 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={publishes}
+              onChange={(e) => setPublishes(e.target.checked)}
+              className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+            />
+            <span className="min-w-0 text-sm">
+              <span className="font-medium">Publish household expenses paid from here</span>
+              <span className="mt-0.5 block text-xs text-ink-3">
+                When you mark a payment as the household&rsquo;s, everyone in the household can read that
+                row — payee, amount, category and note. The balance, the name of this account and every
+                row you have not marked stay yours alone.
+              </span>
+              {publishes && (
+                <span className="mt-1.5 block text-xs text-ink-3">
+                  Turning it off hides them again everywhere, but nobody can un-read what they have
+                  already seen.
+                </span>
+              )}
+            </span>
+          </label>
         )}
         {account && (
           <button

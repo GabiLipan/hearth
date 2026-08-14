@@ -225,6 +225,29 @@ body {
   background: color-mix(in srgb, var(--accent) 13%, var(--surface));
 }
 
+/* A household expense paid out of somebody's own account — the one row in the
+ * app that is counted in two books at once, and since migration 19 the one that
+ * can be read outside the account it lives in.
+ *
+ * Built exactly like `.tint-transfer` above, and for the identical reason: the
+ * pinned first column paints an opaque fill, so a translucent Tailwind tint on
+ * the row stops dead at the first cell. Only the hue differs — `--series-7`
+ * rather than `--accent` — because these two tints appear in the same list and
+ * a row that is "one leg of a transfer" and a row that is "spending in two
+ * books" are different claims. Slightly stronger than the transfer tint at
+ * every step, since `--series-7` is the quieter colour of the two and matching
+ * the percentages would have made it read as an accident of rendering. */
+.tint-household {
+  background: color-mix(in srgb, var(--series-7) 7%, var(--surface));
+}
+.tint-household:hover,
+.group:hover > .tint-household {
+  background: color-mix(in srgb, var(--series-7) 12%, var(--surface));
+}
+.tint-household:active {
+  background: color-mix(in srgb, var(--series-7) 17%, var(--surface));
+}
+
 /* ---------- Motion ----------
  * One decelerating curve for everything that arrives, its mirror for everything
  * that leaves, and durations short enough that a tab tapped twice never feels

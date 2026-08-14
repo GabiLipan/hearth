@@ -36,6 +36,13 @@ import { OTHER_SLICE_ID, type CategorySlice } from './stats'
  *   1. The household book is complete and IDENTICAL on both devices, without
  *      either person seeing the other's salary. Every leg it needs is a
  *      transaction in a joint account, which both of them can read.
+ *
+ *      With one exception, which is the reason migration 19 exists: a household
+ *      thing paid out of somebody's own card is household spending that lives
+ *      outside every joint account. That row is published — by consent, per
+ *      account, and alone — so the property above survives it. Anything else
+ *      that ever needs to count a row from an account this device is not on has
+ *      to earn its way out of an account the same way.
  *   2. The household book is right even before anything is linked. An unlinked
  *      £1,800 arriving in the joint account counts as household income either
  *      way; linking only relabels it from "other income" to "her contribution".
@@ -211,6 +218,13 @@ export type Flow =
    * payer's book and household spending in the household's. See
    * `13-paid-for-household.sql` for the reasoning, and `bookTotals` for the one
    * place it has to break the by-account selection rule.
+   *
+   * Since migration 19 it is also the only flow this device can hold a row for
+   * without holding its account: a published row from my partner's card is
+   * household spending here and a contribution in a book I cannot see. On that
+   * side the by-account filter drops it from `mine` and from Everything all by
+   * itself, which is exactly right — I did not contribute it and it is not in
+   * an account I hold.
    */
   | 'paid-for-household'
   /** Both legs in the same book: joint current → joint savings. Not an event. */
@@ -250,6 +264,34 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
   const out = new Map<string, Flow>()
   for (const t of txns) {
     const here = bookOf(t.accountId, books)
+
+    /**
+     * Said outright on the row, and it does not depend on which book the
+     * account is in — including the case where the account is in no book of
+     * mine at all, or is not on this device.
+     *
+     * That last case is the point of migration 19. My partner's household
+     * shopping, paid from her own card, now reaches my device as a single row
+     * whose account I have no grant on and never will. `bookOf` has nothing to
+     * say about it, and before this it fell straight through to `ignored` — so
+     * the row arrived and then counted for nothing, which is a worse failure
+     * than not replicating it at all.
+     *
+     * Hoisted above the `!here` bail rather than added beside it, because the
+     * flag IS the classification here: whoever paid, and out of whatever, this
+     * is the household spending its money.
+     *
+     * Money OUT only, and never on an account already in the household book —
+     * a refund landing back on the card is not a contribution to anything, and
+     * money leaving a joint account is already the household's to spend. The
+     * server's policy publishes exactly the same rows, so the two cannot drift
+     * into a row that replicates and is then ignored.
+     */
+    if (!t.transferId && t.paidForHousehold && t.amountMinor < 0 && here !== 'household') {
+      out.set(t.id, 'paid-for-household')
+      continue
+    }
+
     if (!here) {
       out.set(t.id, 'ignored')
       continue
@@ -298,11 +340,6 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
       // credit the household with money it never had.
       if (t.contributorId && t.amountMinor > 0) out.set(t.id, 'contribution-unpaired')
       else out.set(t.id, t.amountMinor > 0 ? 'external-income' : 'household-spend')
-    } else if (t.paidForHousehold && t.amountMinor < 0) {
-      // Money OUT of a personal account only. A refund arriving back on the
-      // card is not a contribution to anything, and flagging one would credit
-      // the household with money it never had.
-      out.set(t.id, 'paid-for-household')
     } else {
       out.set(t.id, t.amountMinor > 0 ? 'personal-income' : 'personal-spend')
     }
@@ -431,11 +468,14 @@ export function bookTotals(
      * `classifyFlows` can produce and only for a negative row in a personal
      * account.
      *
-     * The honest limit: the household book is normally IDENTICAL on both our
-     * screens, because every row it needs is in a joint account we can both
-     * read. This one is not — a row in a private account is invisible to the
-     * other person, so a household expense paid privately appears in the
-     * household book only for people who can see the account it was paid from.
+     * This used to be the one thing breaking the property the household book
+     * was chosen for — identical on both screens, because every row it needs is
+     * in a joint account we can both read. A row in a private account was not.
+     * Migration 19 closes it: an account whose owner has agreed to it publishes
+     * the rows marked here, and only those, so the row arrives on the other
+     * device and is counted by exactly this branch. On an account that does not
+     * publish, the old asymmetry is still what you get — which is now a state
+     * somebody chose rather than the only one available.
      */
     if (flow === 'paid-for-household') {
       if (effectiveMonth(row, flow) !== month) continue
@@ -673,6 +713,52 @@ export function spendsIn(
     return book === 'household' || (book === 'all' && ids.has(accountId))
   }
   return ids.has(accountId) && isSpend(flow)
+}
+
+/**
+ * `classifyFlows`' `paid-for-household` test, asked about one row.
+ *
+ * Exported so a screen tinting or badging a row asks the same question the
+ * arithmetic did, rather than re-spelling `paidForHousehold && amountMinor < 0`
+ * and drifting from it — the `!books.household.has(...)` conjunct in particular
+ * is easy to forget, and forgetting it marks a joint-account row as though
+ * somebody had paid for the household out of the household's own money.
+ */
+export function isHouseholdPaid(
+  t: Pick<Transaction, 'accountId' | 'amountMinor' | 'paidForHousehold' | 'transferId'>,
+  books: BookMap,
+): boolean {
+  return (
+    !!t.paidForHousehold && !t.transferId && t.amountMinor < 0 && !books.household.has(t.accountId)
+  )
+}
+
+/**
+ * A household expense somebody paid from an account this device is not on.
+ *
+ * The row reached us because its account publishes its household spending
+ * (migration 19) and for no other reason: there is no grant behind it, so every
+ * list built from "the accounts I may read" excludes it, and every one of those
+ * lists sits under a total that has already counted it. That gap is the exact
+ * failure `spendsIn` exists to prevent, one level up — a "£412 spent" heading
+ * over a list of £322 — so the row lists have to admit it explicitly.
+ *
+ * Only under the HOUSEHOLD book. Under `mine` it is not mine, and under
+ * Everything the account is not one this device holds, which is what Everything
+ * means; `bookTotals` leaves it out of both, and a list showing what a total
+ * does not count is the same bug facing the other way.
+ *
+ * `held` is the accounts in this device's cache, not the accounts in the book:
+ * an account I hold at `view` and that is in no book of mine is still an
+ * account whose rows the ordinary filter is deciding about.
+ */
+export function isForeignHouseholdRow(
+  t: Pick<Transaction, 'accountId' | 'amountMinor' | 'paidForHousehold' | 'transferId'>,
+  book: BookId,
+  books: BookMap,
+  held: Set<string>,
+): boolean {
+  return book === 'household' && isHouseholdPaid(t, books) && !held.has(t.accountId)
 }
 
 /**

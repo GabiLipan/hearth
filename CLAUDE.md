@@ -24,7 +24,7 @@ more than the unit tests. This machine has no Postgres and no Docker — use PGl
 npm install @electric-sql/pglite
 ```
 
-Load `local/00-shim.sql`, then `01` … `17`, then `local/98-grants.sql`, then `exec`
+Load `local/00-shim.sql`, then `01` … `19`, then `local/98-grants.sql`, then `exec`
 a test file and read its result set — every row must have `ok = true`.
 `pgcrypto` needs the explicit import: `PGlite.create({ extensions: { pgcrypto } })`
 from `@electric-sql/pglite/contrib/pgcrypto`.
@@ -63,8 +63,14 @@ read-only detector that reports which are present — run it when unsure.
 | `16-explain-requests.sql` | `transactions.explain_requested_*` — ask the one person who can see the other half of a row |
 | `17-account-appearance.sql` | `accounts.slot` + `accounts.icon` — an account gets a colour and an icon, like a category |
 | `18-contributions.sql` | `transactions.contributor_id` — say who paid money in, where the far leg is in an account that will never be in the app |
+| `19-published-household-rows.sql` | `accounts.publishes_household_rows` — a row marked as the household's is readable by the household, wherever it was paid from. The one row-level rule in the schema |
 
-All are re-runnable, with **one ordering trap**: `10` drops the two-argument
+All are re-runnable, with **two ordering traps**. The second: `19` replaces
+`07`'s `transactions_select`, so re-running `07` afterwards silently puts the
+narrower policy back — nothing errors, published rows simply stop arriving, and
+the household book quietly loses everything paid from a personal account. Re-run
+`19`; `00-which-migrations-applied.sql` has a row that detects exactly this. The
+first: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
 re-runnable, so running `09` *after* `10` puts the old signature back beside
 the new. PostgREST then cannot resolve the call — supabase-js drops `undefined`
@@ -162,6 +168,40 @@ policy — a soft delete is an UPDATE and falls out of the same expression.
 Categories, budgets and goals still carry an `owner_id` (`null` = the
 household's, set = that person's alone) and are still household-scoped. Only
 accounts moved.
+
+**One row can leave its account, and exactly one.** Migration 19 is the first
+row-level rule in the schema: a transaction marked `paid_for_household`, on an
+account whose `publishes_household_rows` says so, is readable by everybody in
+the household — and nothing else on that account is. Not the balance, not the
+account's name, not one row that has not been marked. It exists because
+`paid_for_household` counted the household's money correctly on the payer's
+screen and was invisible on the other, which was the one documented thing
+breaking the property the household book was chosen for.
+
+Four things follow, and the first is the one to remember:
+
+- **`my_account_ids()` is still the whole story for WRITES and no longer for
+  reads.** `transactions_update`, `may_edit_transaction()` and every definer
+  function that calls it are untouched: reading a published row gives you no way
+  to change it, un-publish it, delete it, link it into a transfer, or ask about
+  it. §5 of the migration is the audit, function by function, written down.
+- **Consent is per ACCOUNT, asked once, and revocable.** "Is this an account I
+  am willing to pay household things from" has a considered answer; "may she see
+  this £90", asked every week, has a reflex one.
+- **Both directions bump the epoch.** Off, because a row that becomes invisible
+  emits no realtime event and no tombstone. On, because a delta pull is keyed on
+  `updated_at` and the newly readable history has none that is new. Marking or
+  un-marking one ROW bumps only on the way out, and DELETING a published row
+  bumps not at all — the tombstone still satisfies the policy, which is why the
+  policy has no `deleted_at` condition.
+- **Nothing can be un-seen**, and the consent sheet says so in words. So does
+  the note: the whole row travels, because RLS has no column-level half.
+
+The client side is `isHouseholdPaid` / `isForeignHouseholdRow` in `books.ts` —
+a published row is on an account in no book, so `classifyFlows` classifies it
+from the FLAG rather than from `bookOf`, and every list built from "the accounts
+I may read" has to admit it explicitly or come up short of the total printed
+over it.
 
 **A household admin manages people and nothing else.** They can invite, remove
 and promote; they gain no access to any account they were not granted, and
@@ -452,9 +492,11 @@ the single place a level comes from.
   to the household book while living outside it. Anything computing spending
   must use `spendsIn(flow, book, accountId, ids)` rather than
   `ids.has(...) && isSpend(...)`, or the categories stop adding up to the total
-  above them. One honest limit: the household book is normally identical on both
-  screens, and this is the only thing that breaks that — a row in a private
-  account is invisible to the other person.
+  above them. This used to be the one thing breaking "the household book is
+  identical on both screens" — a row in a private account was invisible to the
+  other person. Migration 19 closes it, at the price of a consent per account:
+  on an account that does not publish you still get exactly the old asymmetry,
+  which is now a state somebody chose rather than the only one on offer.
 - **A contribution with one row is not a contribution with two, and `bookTotals`
   can tell.** Under the `all` book contributions are SKIPPED, because there both
   legs are in view and counting either would double-count. That is right only
