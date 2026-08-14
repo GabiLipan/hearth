@@ -693,6 +693,48 @@ the single place a level comes from.
   like an arithmetic error. Sizing it to the thicker side and centring the
   thinner one inside keeps every ribbon exactly as thick at the hub as at its own
   end — which is the only claim the diagram makes.
+- **`[]` from a cache that has not opened is not the same claim as `[]` from
+  one that has.** Every hook in `cache.ts` hands back `[]` while IndexedDB is
+  still opening, which is right for anything counting rows and wrong for
+  anything concluding something from their absence: for the first frames of a
+  cold start, Budgets said "No expense categories yet" and Rules said "Nothing
+  learned yet" to people with a full history. `useAllTransactions` already
+  returned `undefined` for its own table for exactly this reason;
+  `useCacheReady()` is that signal for the rest, so an empty STATE can wait
+  without thirty call sites having to handle `undefined`. It deliberately does
+  not wait for a pull — a device offline since yesterday has a perfectly good
+  cache, and a new household really does have no categories.
+- **A query that only ever looks a few days out must say so to Dexie.** The
+  duplicate check reads ±3 days and transfer pairing ±10, and both used to load
+  every transaction ever recorded and discard almost all of it — on the save
+  path, between the press and the sheet closing. `dateWindow` plus the `date`
+  index makes them range queries; an ISO date sorts lexicographically in date
+  order, which is what makes `between` on a string index mean what it looks
+  like. `DUPLICATE_DAYS`/`PAIR_DAYS` are named next to the queries because a
+  window narrower than the matcher's own rule silently stops finding pairs the
+  rule still accepts, and nothing fails loudly. Narrowing the input does narrow
+  what `findTransferCandidates` can see of the AMBIGUITY around a pair, which is
+  why only the manual picker uses a window: it offers the readings and lets you
+  choose, where auto-linking must weigh them and still works from the full set.
+  The one query that genuinely needs all of history — "and the other eleven from
+  this payee", which is fuzzy and so unindexable — is debounced instead, because
+  keyed on `payee` it re-read the table on every letter of "Sainsbury's".
+- **A segmented control is a radio group, not a tablist.** `Segmented` announced
+  "tab 2 of 3" and then did nothing on an arrow key: there are no tab panels
+  here and never were — every use of it picks a VALUE. It is `radiogroup` /
+  `radio` / `aria-checked` with roving `tabIndex` and arrow keys that move the
+  selection (a radio group's arrow key chooses rather than merely pointing).
+  Note the measuring effect selects on `[role="radio"]`; changing the role again
+  means changing it in two places or the sliding thumb stops finding its target.
+- **A recovery link signs you in, which is why it needs a screen.** Supabase's
+  password reset lands the device in a real session, so without
+  `SyncState.recovering` and the `PASSWORD_RECOVERY` branch in
+  `onAuthStateChange` the flow ends with somebody looking at their own
+  dashboard, still not knowing their password and with nothing offering to set
+  one. `AuthGate` checks it before `ready` and before the household, since every
+  other branch would happily show them the app. The reset form's confirmation is
+  the same whether or not the address is known — anything else turns it into a
+  way of asking which of your friends uses Hearth.
 - **There is exactly one `<form>` per sheet, and every other button says
   `type="button"`.** There was no form anywhere for a long time, so Enter did
   nothing in any sheet — while the desktop table's inline editors, over the same

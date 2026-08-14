@@ -114,10 +114,44 @@ export default defineConfig({
         name: 'Hearth — Family Finance',
         short_name: 'Hearth',
         description: 'Budgeting, bills and spending for the two of us',
-        theme_color: '#1a1a19',
+        /**
+         * Both light, and they have to agree.
+         *
+         * `theme_color` was the DARK surface while `background_color` was the
+         * light page, so the install splash painted a light background under
+         * dark chrome — two halves of two different themes in the one screen
+         * nobody can theme at runtime. The app defaults to light, and
+         * `index.html` overrides the chrome colour before first paint for
+         * anybody whose device says otherwise, so light is the honest value
+         * for the static one.
+         */
+        theme_color: '#f9f9f7',
         background_color: '#f9f9f7',
         display: 'standalone',
         start_url: './',
+        /**
+         * Long-press the icon → straight to the thing this app is for.
+         *
+         * `?add=1` rather than a route of its own: adding a transaction is a
+         * sheet over whatever you were looking at, not a page, and inventing a
+         * URL for it would mean inventing a screen behind it too. `Layout`
+         * reads the parameter once and clears it, the same discipline the drill
+         * params already follow.
+         */
+        shortcuts: [
+          {
+            name: 'Add transaction',
+            short_name: 'Add',
+            url: './#/?add=1',
+            icons: [{ src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+          },
+          {
+            name: 'Activity',
+            short_name: 'Activity',
+            url: './#/activity',
+            icons: [{ src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+          },
+        ],
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },

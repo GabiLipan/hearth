@@ -14,7 +14,7 @@ import { canAddTransactions, canEditTransaction, levelOn } from '../lib/accounts
 import { grouped, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
-import { todayISO } from '../lib/dates'
+import { dateWindow, todayISO } from '../lib/dates'
 import { learnRule, suggestCategory, prettyPayee, similarTo, applyCategory } from '../lib/rules'
 import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
@@ -25,6 +25,28 @@ import { confirmAction } from './confirm'
 import { toast } from './toast'
 import { CategoryPicker } from './CategoryPicker'
 import { nameOf } from './PersonDot'
+
+/**
+ * How far the duplicate check and the transfer matcher ever look from a row.
+ *
+ * Named here because they are now the width of a Dexie query as well as a
+ * filter inside the matcher, and the two must not drift: a window narrower than
+ * the rule would silently stop finding pairs the rule still accepts.
+ * `findLikelyDuplicate` discards gaps over 3 days; `findTransferCandidates` is
+ * being asked for 10 explicitly.
+ */
+const DUPLICATE_DAYS = 3
+const PAIR_DAYS = 10
+
+/** A value that stops changing before anything expensive is done with it. */
+function useDebounced<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms)
+    return () => clearTimeout(timer)
+  }, [value, ms])
+  return settled
+}
 
 export function TransactionForm({
   open,
@@ -171,17 +193,29 @@ export function TransactionForm({
    * added, and a bulk update is the easiest possible way to queue a dozen
    * writes that dead-letter quietly a minute later.
    */
+  /**
+   * The payee, once it has stopped changing.
+   *
+   * This one genuinely has to consider the whole history — "and the other
+   * eleven" is a claim about everything ever recorded, and `payeeSimilar` is
+   * fuzzy, so there is no index that could answer it. What it must not do is
+   * run once per keystroke: keyed on `payee` it re-read every transaction on
+   * every letter of "Sainsbury's". The category suggester above already waits
+   * 250ms for the same reason.
+   */
+  const settledPayee = useDebounced(payee, 250)
+
   const similar =
     useLiveQuery(async () => {
-      if (!open || !categoryId || kind !== 'expense' || payee.trim().length < 3) return []
+      if (!open || !categoryId || kind !== 'expense' || settledPayee.trim().length < 3) return []
       const all = await db.transactions.toArray()
-      return similarTo(payee, categoryId, all, editing?.id).filter((t) =>
+      return similarTo(settledPayee, categoryId, all, editing?.id).filter((t) =>
         canEditTransaction(t, levelOn(t.accountId, levels), userId),
       )
       // `levels` is a fresh Map each render, so it is deliberately not a
       // dependency — the query re-runs on the inputs that change the answer.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, payee, categoryId, kind, editing?.id, userId]) ?? []
+    }, [open, settledPayee, categoryId, kind, editing?.id, userId]) ?? []
 
   /**
    * Whether "I paid for this, but it was the household's" is even a question.
@@ -219,7 +253,14 @@ export function TransactionForm({
     const signed = kind === 'expense' ? -Math.abs(amountMinor!) : Math.abs(amountMinor!)
     if (!editing) {
       // Same amount, similar payee, within a few days — probably the same purchase.
-      const existing = await db.transactions.toArray()
+      //
+      // Asked of the `date` index rather than of every transaction ever
+      // recorded: `findLikelyDuplicate` discards anything more than three days
+      // out, so reading the whole table was fetching years of rows in order to
+      // throw all but a handful away — on the save path, where it is between
+      // the press and the sheet closing.
+      const [from, to] = dateWindow(date, DUPLICATE_DAYS)
+      const existing = await db.transactions.where('date').between(from, to, true, true).toArray()
       const dup = findLikelyDuplicate({ date, payee: payee.trim(), amountMinor: signed }, existing)
       if (
         dup &&
@@ -657,8 +698,16 @@ function Linkage({ txn, onDone }: { txn: Transaction; onDone: () => void }) {
   const partners =
     useLiveQuery(async () => {
       if (!picking) return []
-      const all = await db.transactions.toArray()
-      return findTransferCandidates(all, { maxDaysApart: 10 })
+      /* Only pairs involving THIS row are wanted, and a partner more than
+         `PAIR_DAYS` away is not a candidate at all — so the window is exactly
+         sufficient rather than an approximation. It does narrow what
+         `findTransferCandidates` can see of the ambiguity around a pair, which
+         is safe here and only here: this picker offers the readings and lets
+         you choose, where auto-linking (TransferReview) must weigh them and so
+         still works from the full set. */
+      const [from, to] = dateWindow(txn.date, PAIR_DAYS)
+      const near = await db.transactions.where('date').between(from, to, true, true).toArray()
+      return findTransferCandidates(near, { maxDaysApart: PAIR_DAYS })
         .filter((c) => c.out.id === txn.id || c.in.id === txn.id)
         .filter(
           (c) =>

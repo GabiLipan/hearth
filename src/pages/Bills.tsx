@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Plus, Check, SkipForward, Wand2, CalendarClock, Link2 } from 'lucide-react'
 import type { Bill, BillFreq } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
-import { useAccounts, useAllTransactions, useBills, useBook, useBooks, useCategories, useCategoryMap, useMyLevels } from '../lib/cache'
+import { useAccounts, useAllTransactions, useBills, useBook, useBooks, useCategories, useCategoryMap, useMyLevels, useCacheReady } from '../lib/cache'
 import { canAddTransactions, levelOn } from '../lib/accounts'
 import { accountsInBook, BOOK_LABEL, type BookId, type BookMap } from '../lib/books'
 import { syncNow } from '../lib/session'
@@ -69,6 +69,7 @@ function splitByBook(bills: Bill[], book: BookId, books: BookMap): { key: string
 export default function Bills() {
   const { money } = useApp()
   const bills = useBills()
+  const ready = useCacheReady()
   const catMap = useCategoryMap()
   const books = useBooks()
   const [book, setBook] = useBook()
@@ -275,7 +276,10 @@ export default function Bills() {
         </Card>
       )}
 
+      {/* `[]` from a cache that has not opened yet is not the same claim as
+          `[]` from one that has. See `useCacheReady`. */}
       {active.length === 0 && paused.length === 0 ? (
+        !ready ? null : (
         <Empty
           icon={CalendarClock}
           title={book === 'all' ? 'No recurring bills yet' : `Nothing in ${BOOK_LABEL[book].toLowerCase()} yet`}
@@ -290,6 +294,7 @@ export default function Bills() {
             </Button>
           }
         />
+        )
       ) : (
         <>
           {/* Phone: a stacked, thumb-friendly list, one card per book. */}

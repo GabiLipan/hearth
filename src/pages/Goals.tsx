@@ -4,7 +4,7 @@ import type { Goal } from '../lib/db'
 import { create, update, remove } from '../lib/data'
 import { goalProgress, transfer } from '../lib/goals'
 import { syncNow } from '../lib/session'
-import { useAccounts, useAllTransactions, useBook, useGoals, useMyLevels } from '../lib/cache'
+import { useAccounts, useAllTransactions, useBook, useGoals, useMyLevels, useCacheReady } from '../lib/cache'
 import { canAddTransactions, levelOn } from '../lib/accounts'
 import { fmtFullDate, todayISO } from '../lib/dates'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -31,6 +31,7 @@ export default function Goals() {
   const { money } = useApp()
   const { userId } = useSyncState()
   const goals = useGoals()
+  const ready = useCacheReady()
   const txns = useAllTransactions() ?? []
   const [book, setBook] = useBook()
   const [editing, setEditing] = useState<Goal | 'new' | null>(null)
@@ -87,7 +88,10 @@ export default function Goals() {
         <BookSwitcher book={book} onChange={setBook} className="hidden md:flex md:w-auto" />
       </Toolbar>
 
+      {/* `[]` from a cache that has not opened yet is not the same claim as
+          `[]` from one that has. See `useCacheReady`. */}
       {rows.length === 0 ? (
+        !ready ? null : (
         <Empty
           icon={PiggyBank}
           title={book === 'household' ? 'No shared goals yet' : book === 'mine' ? 'No goals of your own yet' : 'No goals yet'}
@@ -104,6 +108,7 @@ export default function Goals() {
             </Button>
           }
         />
+        )
       ) : (
         <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(min(100%,22rem),1fr))]">
           {rows.map(({ goal, progress }) => (

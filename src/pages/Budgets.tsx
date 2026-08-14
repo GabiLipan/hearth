@@ -4,7 +4,7 @@ import type { Budget, Category } from '../lib/db'
 import { create, update, remove } from '../lib/data'
 import { rpc } from '../lib/api'
 import { syncNow } from '../lib/session'
-import { useAllTransactions, useBook, useBooks, useBudgets, useCategories, useFlows } from '../lib/cache'
+import { useAllTransactions, useBook, useBooks, useBudgets, useCategories, useFlows, useCacheReady } from '../lib/cache'
 import { accountsInBook, isSpend } from '../lib/books'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { budgetCategoryId, styleOf, topLevel } from '../lib/categories'
@@ -57,6 +57,7 @@ export default function Budgets() {
   const [copying, setCopying] = useState(false)
 
   const categories = useCategories()
+  const ready = useCacheReady()
   // Every month, not just this one: the history column judges each month against
   // the budget that was actually in force for it.
   const allBudgets = useBudgets()
@@ -203,8 +204,12 @@ export default function Budgets() {
         </p>
       )}
 
+      {/* `ready` first: `[]` from a cache that has not opened yet is not the
+          same claim as `[]` from one that has. See `useCacheReady`. */}
       {rows.length === 0 ? (
-        <Empty icon={Target} title="No expense categories yet" hint="Add some in Settings and they'll appear here." />
+        ready ? (
+          <Empty icon={Target} title="No expense categories yet" hint="Add some in Settings and they'll appear here." />
+        ) : null
       ) : (
         <>
           <Card className="mb-3 p-4 md:hidden">

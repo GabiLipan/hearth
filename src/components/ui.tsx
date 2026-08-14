@@ -303,14 +303,23 @@ export function Segmented<T extends string>({
   value,
   onChange,
   className,
+  label,
 }: {
   options: { value: T; label: ReactNode }[]
   value: T
   onChange: (v: T) => void
   className?: string
+  /**
+   * What the group as a whole is choosing between.
+   *
+   * A radio group needs a name — the options say "Expense" and "Income", and
+   * nothing said what they were two answers TO. Optional because several of
+   * these sit directly under a heading that already says it.
+   */
+  label?: string
 }) {
   const selected = Math.max(0, options.findIndex((o) => o.value === value))
-  const trackRef = useRef<HTMLDivElement>(null)
+  const track = useRef<HTMLDivElement>(null)
   const [thumb, setThumb] = useState<{ left: number; width: number } | null>(null)
 
   /**
@@ -334,11 +343,11 @@ export function Segmented<T extends string>({
    *     would slide it in from the left edge of a control nobody has touched.
    */
   useLayoutEffect(() => {
-    const track = trackRef.current
-    if (!track) return
+    const bar = track.current
+    if (!bar) return
 
     const measure = () => {
-      const el = track.querySelectorAll<HTMLElement>('[role="tab"]')[selected]
+      const el = bar.querySelectorAll<HTMLElement>('[role="radio"]')[selected]
       if (!el) return
       setThumb({ left: el.offsetLeft, width: el.offsetWidth })
     }
@@ -348,14 +357,14 @@ export function Segmented<T extends string>({
     // buttons resizing covers a web font arriving after first paint, which
     // changes their widths without changing the track's.
     const ro = new ResizeObserver(measure)
-    ro.observe(track)
-    for (const el of track.querySelectorAll('[role="tab"]')) ro.observe(el)
+    ro.observe(bar)
+    for (const el of bar.querySelectorAll('[role="radio"]')) ro.observe(el)
     return () => ro.disconnect()
   }, [selected, options.length])
 
   return (
     <div
-      ref={trackRef}
+      ref={track}
       className={cx(
         // Height from the token, not from the options' padding: this control
         // sits next to a search box in four different toolbars, and deriving
@@ -364,7 +373,24 @@ export function Segmented<T extends string>({
         'relative flex rounded-xl bg-surface-2 p-1 [--seg-pad:0.25rem] md:rounded-lg md:p-0.5 md:[--seg-pad:0.125rem]',
         className,
       )}
-      role="tablist"
+      // A RADIOGROUP, not a tablist. It was announced as "tab 2 of 3" and then
+      // did nothing on an arrow key, because there are no tab panels here and
+      // never were — every use of this control picks a value (Expense/Income,
+      // which book, how many months), which is what a radio group is. The lie
+      // was the accessible name for a segmented control being read as
+      // navigation.
+      role="radiogroup"
+      aria-label={label}
+      onKeyDown={(e) => {
+        const delta = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+        if (!delta) return
+        e.preventDefault()
+        // Wraps, as a radio group does, and moves the selection with the focus
+        // — an arrow key in a radio group CHOOSES rather than merely pointing.
+        const next = (selected + delta + options.length) % options.length
+        onChange(options[next].value)
+        track.current?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus()
+      }}
     >
       <span
         aria-hidden
@@ -392,8 +418,11 @@ export function Segmented<T extends string>({
           // untyped button in a form submits it. Choosing "Income" must not
           // save the transaction.
           type="button"
-          role="tab"
-          aria-selected={value === o.value}
+          role="radio"
+          aria-checked={value === o.value}
+          // One stop for the whole group, which is what makes the arrow keys
+          // above the way through it rather than an extra.
+          tabIndex={value === o.value ? 0 : -1}
           onClick={() => onChange(o.value)}
           className={cx(
             // `min-w-0` + `truncate` rather than letting a long label wrap: the

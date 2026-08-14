@@ -3,6 +3,7 @@ import {
   parseISO,
   startOfMonth,
   endOfMonth,
+  addDays,
   addMonths,
   addWeeks,
   addYears,
@@ -15,6 +16,20 @@ import type { BillFreq } from './db'
 export const todayISO = () => format(new Date(), 'yyyy-MM-dd')
 
 export const monthKey = (dateISO: string) => dateISO.slice(0, 7) // yyyy-MM
+
+/**
+ * The `yyyy-MM-dd` keys `days` either side of one date, as a range.
+ *
+ * For the queries that only ever look a few days from a row — the duplicate
+ * check, transfer pairing — so they can ask Dexie's `date` index for a window
+ * instead of reading every transaction ever recorded and throwing almost all of
+ * them away. An ISO date sorts lexicographically in date order, which is what
+ * makes `between` on a string index mean what it looks like it means.
+ */
+export function dateWindow(dateISO: string, days: number): [string, string] {
+  const d = parseISO(dateISO)
+  return [format(addDays(d, -days), 'yyyy-MM-dd'), format(addDays(d, days), 'yyyy-MM-dd')]
+}
 
 export const thisMonthKey = () => format(new Date(), 'yyyy-MM')
 

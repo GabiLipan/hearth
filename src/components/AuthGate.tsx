@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { useSyncState } from '../hooks/useSync'
 import { isConfigured } from '../lib/supabase'
-import { NotConfigured, Onboarding, Splash } from '../pages/Onboarding'
+import { NewPassword, NotConfigured, Onboarding, Splash } from '../pages/Onboarding'
 
 /**
  * Decides whether to show the app or the sign-in flow.
@@ -16,9 +16,13 @@ import { NotConfigured, Onboarding, Splash } from '../pages/Onboarding'
  * rejects the refresh token.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { ready, knownUser, householdId } = useSyncState()
+  const { ready, knownUser, householdId, recovering } = useSyncState()
 
   if (!isConfigured) return <NotConfigured />
+  // Before `ready`, and before the household check: a recovery link signs the
+  // device in, so every other branch here would happily show the app to
+  // somebody who still does not know their password.
+  if (recovering) return <NewPassword />
   if (!ready) return <Splash />
   if (!knownUser) return <Onboarding stage="auth" />
   if (!householdId) return <Onboarding stage="household" />

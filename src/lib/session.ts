@@ -37,6 +37,15 @@ export interface SyncState {
   pending: number
   /** Writes the server refused; shown in Settings so they are not lost silently. */
   deadLetters: number
+  /**
+   * Arrived through a password-reset link, and has not chosen a new one yet.
+   *
+   * The link signs the device in, so without this the recovery would end with
+   * somebody looking at their dashboard, still not knowing their password and
+   * with no way to set one. The gate shows the "choose a new password" screen
+   * while this is true.
+   */
+  recovering?: boolean
   error?: string
 }
 
@@ -74,6 +83,50 @@ export async function signUp(email: string, password: string) {
 
 export async function signIn(email: string, password: string) {
   const { error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * The way back in.
+ *
+ * There was none: a forgotten password made the app a dead end, with the data
+ * intact on the server and no route to it. The link comes back to wherever this
+ * copy is served — the same reasoning as `signUp`'s `emailRedirectTo`, and the
+ * hash is stripped for the same reason.
+ *
+ * It deliberately does not report whether the address is one we know. Telling a
+ * stranger which emails have accounts is the one thing this endpoint must not
+ * do, so the screen says "if that address has an account" and means it.
+ */
+export async function requestPasswordReset(email: string) {
+  const redirectTo = window.location.href.split('#')[0]
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Finish a recovery: the link has signed this device in, and now the password
+ * behind it changes.
+ *
+ * Clearing `recovering` is what returns the app to its ordinary gate — by this
+ * point there is a real session, so the household loads as usual.
+ */
+export async function setNewPassword(password: string) {
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) throw new Error(error.message)
+  set({ recovering: false })
+}
+
+/**
+ * Send the confirmation email again.
+ *
+ * Offered only when signing in has just failed *because* the address was never
+ * confirmed — the one case where the right next step is an email rather than
+ * another guess at the password.
+ */
+export async function resendConfirmation(email: string) {
+  const emailRedirectTo = window.location.href.split('#')[0]
+  const { error } = await supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo } })
   if (error) throw new Error(error.message)
 }
 
@@ -197,6 +250,9 @@ export async function initSession() {
   supabase.auth.onAuthStateChange((event, session) => {
     void (async () => {
       try {
+        // Arriving on a recovery link. Raised before anything else, because
+        // the same tick also carries a perfectly ordinary SIGNED_IN.
+        if (event === 'PASSWORD_RECOVERY') set({ recovering: true })
         if (session?.user) {
           set({ email: session.user.email ?? undefined, userId: session.user.id })
           await setSetting('knownUser', session.user.id)

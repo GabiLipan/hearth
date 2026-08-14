@@ -126,6 +126,32 @@ body {
   overscroll-behavior-y: none;
 }
 
+/**
+ * Where the keyboard is.
+ *
+ * `focus-visible` styling existed in exactly two files, so tabbing through the
+ * app was very nearly invisible: the tab bar, the filter chips, the category
+ * tiles, the sheet's close button and every link in Settings took focus and
+ * showed nothing at all. One rule rather than a class on ninety controls,
+ * because the ones most likely to be missed are the ones nobody remembered to
+ * add it to.
+ *
+ * `:focus-visible` and not `:focus`, so a mouse press never draws a ring.
+ *
+ * Inputs and selects are excluded because they already grow their own
+ * `focus:ring-2` — two indicators on one control reads as a rendering fault
+ * rather than as emphasis.
+ *
+ * `:where()` keeps this at zero specificity, so anything with a considered
+ * focus style of its own still wins without having to fight a global rule.
+ */
+:where(a, button, summary, [role='button'], [role='radio'], [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  /* Follows the shape it is drawn around: a pill gets a pill. */
+  border-radius: inherit;
+}
+
 /* Currency figures that must align vertically */
 .tabular {
   font-variant-numeric: tabular-nums;

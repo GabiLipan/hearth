@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { ChevronLeft, Plus, Search, Trash2, Wand2, Check } from 'lucide-react'
 import type { Rule, Transaction } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
-import { useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules } from '../lib/cache'
+import { useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules, useCacheReady } from '../lib/cache'
 import { canEditTransaction, levelOn } from '../lib/accounts'
 import { fullName } from '../lib/categories'
 import { applyCategory, coverageOf, normalizePayee } from '../lib/rules'
@@ -46,6 +46,7 @@ export default function RulesPage() {
   const catMap = useCategoryMap()
   const txns = useAllTransactions()
   const levels = useMyLevels()
+  const ready = useCacheReady()
 
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
@@ -178,16 +179,20 @@ export default function RulesPage() {
       )}
 
       {rules.length === 0 ? (
-        <Empty
-          icon={Wand2}
-          title="Nothing learned yet"
-          hint="Categorise a transaction and Hearth will remember the payee. You can also write a rule yourself."
-          action={
-            <Button onClick={() => setAdding(true)}>
-              <Plus size={16} /> Write a rule
-            </Button>
-          }
-        />
+        // `[]` from a cache that has not opened yet is not the same claim as
+        // `[]` from one that has. See `useCacheReady`.
+        !ready ? null : (
+          <Empty
+            icon={Wand2}
+            title="Nothing learned yet"
+            hint="Categorise a transaction and Hearth will remember the payee. You can also write a rule yourself."
+            action={
+              <Button onClick={() => setAdding(true)}>
+                <Plus size={16} /> Write a rule
+              </Button>
+            }
+          />
+        )
       ) : (
         <>
           {/* Phone: a stacked list. The coverage line is the point, so it gets

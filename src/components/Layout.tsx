@@ -2,7 +2,7 @@ import {
   useEffect, useLayoutEffect, useRef, useState,
   type CSSProperties, type ReactNode,
 } from 'react'
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle,
   PanelLeftClose, PanelLeftOpen, Target, ArrowDownToLine,
@@ -71,8 +71,37 @@ const tabIndex = (path: string) => {
 export function Layout({ children }: { children: ReactNode }) {
   const [addOpen, setAddOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
+  const navigate = useNavigate()
   const title = TITLES[pathname] ?? 'Hearth'
+
+  /**
+   * The window's title, which never changed.
+   *
+   * Every history entry, every tab and every bookmark read "Hearth — Family
+   * Finance", so a browser with three of them open offered three identical
+   * things to choose between. Home stays the bare name: "Home · Hearth" is a
+   * tautology, and the front page of an app is the one place its own name is
+   * the whole answer.
+   */
+  useEffect(() => {
+    document.title = pathname === '/' ? 'Hearth' : `${title} · Hearth`
+  }, [pathname, title])
+
+  /**
+   * `?add=1` — the app icon's "Add transaction" shortcut.
+   *
+   * Read once and cleared, so it cannot re-open the sheet every time this
+   * component happens to re-render, and so that closing the sheet and pressing
+   * Back does not open it again. The same discipline `drill.ts` params follow,
+   * and for the same reason: a parameter nobody can see must not go on
+   * overriding something somebody then does.
+   */
+  useEffect(() => {
+    if (!new URLSearchParams(search).has('add')) return
+    setAddOpen(true)
+    navigate(pathname, { replace: true })
+  }, [search, pathname, navigate])
   /**
    * The mobile top bar's height, published as `--header-h`.
    *

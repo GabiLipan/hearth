@@ -16,6 +16,15 @@
           var pref = localStorage.getItem('hearth-theme') || 'system';
           var dark = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
           document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+          // And the browser chrome with it. `AppContext` keeps this in step
+          // from here on; the point of doing it HERE is that it otherwise
+          // arrives only once React has mounted, so a cold start — and the
+          // whole of the install splash — showed the wrong colour above the
+          // page and then corrected itself.
+          var meta = document.createElement('meta');
+          meta.name = 'theme-color';
+          meta.content = dark ? '#0d0d0d' : '#f9f9f7';
+          document.head.appendChild(meta);
         } catch (e) { /* default light */ }
       })();
     </script>

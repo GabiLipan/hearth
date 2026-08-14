@@ -36,6 +36,39 @@ import { useSyncState } from '../hooks/useSync'
  * repeated at thirty call sites.
  */
 
+/**
+ * Whether the cache has actually been read yet.
+ *
+ * Every hook below hands back `[]` while IndexedDB is still opening, which is
+ * the right default for anything that COUNTS rows and the wrong one for
+ * anything that draws a conclusion from their absence: for the first frames of
+ * a cold start, Budgets said "No expense categories yet", Goals said "No goals
+ * yet" and Rules said "Nothing learned yet" — to people with a full history.
+ * The screens then flicked to the real content, which reads as a glitch at
+ * best and, on Budgets, as data loss.
+ *
+ * `useAllTransactions` already had the answer for its own table — it returns
+ * `undefined` until Dexie replies, and Activity and Reports both gate on it
+ * with a comment saying why. This is that convention made available to the
+ * other tables without changing thirty call sites to handle `undefined`: an
+ * empty state asks this first, and everything that merely counts or lists
+ * carries on treating "nothing yet" as nothing.
+ *
+ * One probe is enough. What is being waited for is the database opening, not
+ * any particular table, and when it opens every query resolves together.
+ *
+ * Deliberately NOT "the first pull has landed". A device that has been offline
+ * since yesterday has a perfectly good cache and must not be made to wait for
+ * a sync that may never come; and a genuinely new household really does have
+ * no categories, so its empty state is true as soon as it can be drawn.
+ */
+export function useCacheReady(): boolean {
+  return useLiveQuery(async () => {
+    await db.categories.limit(1).toArray()
+    return true
+  }, []) ?? false
+}
+
 export function useCategories(): Category[] {
   return useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), [], []) ?? []
 }
