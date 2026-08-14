@@ -293,6 +293,7 @@ export function CategoryTree({
                   }
                 >
                   <button
+                    type="button"
                     onClick={() => onOpen(category)}
                     className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2.5 text-left desktop:py-1.5"
                   >
@@ -316,6 +317,7 @@ export function CategoryTree({
                       badges out of the column they share with every other list
                       in the app. */}
                   <button
+                    type="button"
                     aria-label={`Move ${category.name}`}
                     // `touch-action: none` only here: the browser must not treat
                     // a drag off the handle as a scroll, but the rest of the

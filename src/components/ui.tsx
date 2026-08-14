@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Ref,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type SelectHTMLAttributes,
@@ -212,11 +213,27 @@ export const CONTROL_H = 'h-11 desktop:h-9'
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'ghost' | 'danger' | 'subtle'
   size?: 'sm' | 'md' | 'lg'
+  /**
+   * React 19 passes `ref` as an ordinary prop, so it rides along in `rest` and
+   * needs no `forwardRef` — it just has to be declared, because
+   * `ButtonHTMLAttributes` does not carry it.
+   */
+  ref?: Ref<HTMLButtonElement>
 }
 
-export function Button({ variant = 'primary', size = 'md', className, ...rest }: BtnProps) {
+/**
+ * `type` defaults to `button`, not to the platform's `submit`.
+ *
+ * A sheet that takes an `onSubmit` wraps its body and footer in a real `<form>`,
+ * and inside a form every button with no type is a submit button — so the Delete
+ * button beside "Save changes" would save the row it was about to remove. The
+ * one button that submits says so; everything else is inert by default, which is
+ * the safer way round for a component used in ninety places.
+ */
+export function Button({ variant = 'primary', size = 'md', type = 'button', className, ...rest }: BtnProps) {
   return (
     <button
+      type={type}
       className={cx(
         'inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition-colors md:rounded-lg',
         'disabled:opacity-40 disabled:pointer-events-none',
@@ -370,6 +387,11 @@ export function Segmented<T extends string>({
       {options.map((o) => (
         <button
           key={o.value}
+          // Every raw button in a shared control carries an explicit type: any
+          // of these can end up inside a sheet that takes an `onSubmit`, and an
+          // untyped button in a form submits it. Choosing "Income" must not
+          // save the transaction.
+          type="button"
           role="tab"
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
@@ -496,6 +518,77 @@ function tapOrigin(): Origin | undefined {
   return { x: lastTap.x, y: lastTap.y }
 }
 
+/* ---------- Modal layers ---------- */
+
+/**
+ * Every sheet on screen, oldest first.
+ *
+ * A sheet used to render where it stood in the tree, which made two things
+ * impossible to state: what is *underneath* a modal (so it could be taken out
+ * of the tab order) and what is on *top* of another one (so the confirmation
+ * over a form does not leave the form beneath it still typeable). Both are
+ * answers about the whole app rather than about one component, so they live in
+ * one module-level list — the same reasoning as `useBook`.
+ *
+ * Each sheet portals into its own host element under `<body>`, which buys two
+ * more things. Being outside `#root` is what lets `#root` be marked `inert`
+ * without the sheet inerting itself. And a `position: fixed` element is
+ * positioned against the nearest transformed ancestor rather than the viewport,
+ * so a sheet opened from a page — Goals, Bills, Settings — used to be measured
+ * against `main` while `animate-page-forward` was still running a transform on
+ * it, and landed offset for the first 260ms after a page change.
+ */
+const layerStack: HTMLElement[] = []
+
+/**
+ * Takes the app out of the tab order under a modal, and the lower sheets out
+ * from under the top one.
+ *
+ * `inert` is one attribute where the alternative is a hand-written focus trap:
+ * it removes the subtree from the tab order, from hit testing and from the
+ * accessibility tree at once, which is all three of the things a trap is
+ * approximating. Where it is unsupported the app behaves exactly as it did
+ * before — the sheet still works, it is just still possible to tab behind it.
+ */
+function syncLayers() {
+  const root = document.getElementById('root')
+  if (root) root.inert = layerStack.length > 0
+  layerStack.forEach((el, i) => {
+    el.inert = i < layerStack.length - 1
+  })
+  // The scroll lock belongs to the STACK, not to any one sheet. Held per sheet,
+  // closing a confirmation over a form released it while the form was still
+  // open, and the page behind started scrolling again mid-edit.
+  document.body.style.overflow = layerStack.length > 0 ? 'hidden' : ''
+}
+
+/**
+ * A place under `<body>` for one sheet to render into, and its place in the
+ * stack above.
+ *
+ * The host is attached in a *layout* effect rather than a passive one: a
+ * passive effect runs after paint, so the sheet would spend its first frame in
+ * a detached node and the entrance animation would start a frame late — on the
+ * one animation whose whole job is to look like it came out of the button you
+ * just pressed.
+ */
+function useModalLayer(shown: boolean) {
+  const [host] = useState(() => (typeof document === 'undefined' ? null : document.createElement('div')))
+  useLayoutEffect(() => {
+    if (!shown || !host) return
+    document.body.appendChild(host)
+    layerStack.push(host)
+    syncLayers()
+    return () => {
+      const at = layerStack.indexOf(host)
+      if (at !== -1) layerStack.splice(at, 1)
+      host.remove()
+      syncLayers()
+    }
+  }, [shown, host])
+  return host
+}
+
 /**
  * Keeps a sheet mounted long enough to animate itself out.
  *
@@ -605,6 +698,7 @@ export function Sheet({
   footer,
   wide,
   origin,
+  onSubmit,
 }: {
   open: boolean
   onClose: () => void
@@ -618,14 +712,29 @@ export function Sheet({
    * sheet grows from whatever was pressed just before it opened.
    */
   origin?: Origin
+  /**
+   * Makes this sheet a real `<form>`, so Enter saves it.
+   *
+   * There was no `<form>` anywhere in the app, which meant that pressing Enter
+   * in a sheet did nothing at all — while the desktop table's inline editors,
+   * over the same rows, committed on Enter. It also means a password manager
+   * has a submission to recognise, and the browser has something to autofill
+   * into.
+   *
+   * The primary action then carries `type="submit"`; everything else keeps
+   * `Button`'s default `type="button"` and is unaffected.
+   */
+  onSubmit?: () => void
 }) {
   const inset = useViewportInset()
   const phase = useSheetPhase(open)
   const shown = phase !== 'closed'
+  const host = useModalLayer(shown)
+  const frame = useRef<HTMLDivElement>(null)
   // `shown`, not `open`: the sheet renders nothing until its phase has caught
   // up, so on the render `open` first becomes true there is no content node to
   // measure — and the effect would never run again to find one.
-  const body = useMorphHeight(shown)
+  const morphed = useMorphHeight(shown)
   useEffect(watchTaps, [])
 
   /**
@@ -652,9 +761,9 @@ export function Sheet({
    * A sheet on its way out should look like the sheet that was there; it is
    * leaving, not changing.
    */
-  const held = useRef({ title, children, footer })
-  if (open) held.current = { title, children, footer }
-  const view = open ? { title, children, footer } : held.current
+  const held = useRef({ title, children, footer, onSubmit })
+  if (open) held.current = { title, children, footer, onSubmit }
+  const view = open ? { title, children, footer, onSubmit } : held.current
 
   useEffect(() => {
     if (!open) return
@@ -663,19 +772,93 @@ export function Sheet({
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  // Held for the whole of the exit too — releasing it early lets the page
-  // behind jump back to its scroll position while the sheet is still leaving.
+  /**
+   * Focus goes into the sheet on the way in, and back where it came from on the
+   * way out.
+   *
+   * The sheet's own frame takes it, rather than the first control inside it: a
+   * sheet is read before it is filled in, and focusing the first field would
+   * raise the keyboard over the form on a phone before anybody had asked for
+   * it. A sheet that genuinely wants a field focused says so itself, as
+   * `TransactionForm` does with the amount.
+   *
+   * Restoring is the half that is invisible until it is missing. Without it,
+   * closing a sheet leaves focus on `<body>` — so the next Tab starts from the
+   * top of the page rather than from the control that opened the sheet, and a
+   * screen reader loses its place entirely.
+   */
+  const opener = useRef<HTMLElement | null>(null)
+  const took = useRef(false)
+  useEffect(() => {
+    if (!open) return
+    opener.current = document.activeElement as HTMLElement | null
+    took.current = false
+  }, [open])
+
+  /**
+   * Focus goes home when the sheet is *gone*, not when it starts leaving.
+   *
+   * Keyed on `shown` rather than `open` for a reason that cost a debugging
+   * round: `open` turns false at the start of the 280ms exit, and until the
+   * layer comes off the stack the app root is still `inert` — and focusing
+   * into an inert subtree does nothing at all, silently. Restoring at the top
+   * of the exit therefore looked exactly like not restoring at all.
+   *
+   * `useModalLayer` clears the flag in a *layout* effect, and this is a passive
+   * one, so by the time this runs the root is interactive again.
+   */
   useEffect(() => {
     if (!shown) return
-    document.body.style.overflow = 'hidden'
     return () => {
-      document.body.style.overflow = ''
+      const back = opener.current
+      // `isConnected` because what opened the sheet is quite often gone by the
+      // time it closes — the row that was deleted, the chip that was cleared.
+      if (back?.isConnected) back.focus({ preventScroll: true })
     }
   }, [shown])
 
-  if (!shown) return null
+  /**
+   * `shown` as well as `open`, and this is the same trap `useMorphHeight`
+   * carries a note about: on the render where `open` first turns true the phase
+   * has not caught up, `Sheet` still returns `null`, and there is no frame to
+   * focus. An effect keyed on `open` alone fires exactly once, against a ref
+   * that is still null, and never looks again — so the sheet opens with focus
+   * left behind on the page underneath, which is precisely the bug this whole
+   * change exists to fix. Verified in a browser rather than reasoned about.
+   */
+  useEffect(() => {
+    if (!open || !shown || took.current) return
+    took.current = true
+    frame.current?.focus({ preventScroll: true })
+  }, [open, shown])
+
+  if (!shown || !host) return null
   const leaving = phase === 'closing'
-  return (
+  const body = (
+    <>
+      {/* The scroller carries the animated height; the padding moved inside
+          it so what is measured is the whole of what has to fit. */}
+      <div
+        className={cx('overflow-y-auto', morphed.morph && 'morph-height')}
+        style={{ height: morphed.height }}
+      >
+        <div
+          ref={morphed.content}
+          className={cx('px-5 md:px-4', view.footer ? 'pb-3' : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]')}
+        >
+          {view.children}
+        </div>
+      </div>
+      {view.footer && (
+        // Real bottom padding (not just the safe-area inset, which is 0 on
+        // desktop) so the action never jams against the sheet's edge.
+        <div className="border-t border-hairline bg-surface px-5 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-4 md:pb-3.5">
+          {view.footer}
+        </div>
+      )}
+    </>
+  )
+  return createPortal(
     <div className="fixed inset-0 z-50">
       <div
         className={cx('absolute inset-0 bg-black/40', leaving ? 'animate-fade-out' : 'animate-fade')}
@@ -712,10 +895,17 @@ export function Sheet({
         }}
       >
         <div
+          ref={frame}
           role="dialog"
+          aria-modal="true"
           aria-label={view.title}
+          // Focusable only programmatically: this is where focus lands when the
+          // sheet opens, and it must not become a stop of its own on the way
+          // through.
+          tabIndex={-1}
           onClick={(e) => e.stopPropagation()}
           className={cx(
+            'outline-none',
             // Always leave a strip of backdrop above the sheet so tap-to-dismiss
             // has a target, even when the keyboard has shrunk the viewport.
             'relative flex max-h-full w-full flex-col overflow-hidden bg-surface sm:max-h-[92%]',
@@ -732,6 +922,7 @@ export function Sheet({
           <div className="flex items-center justify-between px-5 pb-2 pt-4 md:px-4 md:pt-3">
             <h2 className="text-lg font-semibold md:text-base">{view.title}</h2>
             <button
+              type="button"
               onClick={onClose}
               aria-label="Close"
               className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-2 transition-colors hover:text-ink active:scale-95"
@@ -739,29 +930,32 @@ export function Sheet({
               <X size={16} />
             </button>
           </div>
-          {/* The scroller carries the animated height; the padding moved inside
-              it so what is measured is the whole of what has to fit. */}
-          <div
-            className={cx('overflow-y-auto', body.morph && 'morph-height')}
-            style={{ height: body.height }}
-          >
-            <div
-              ref={body.content}
-              className={cx('px-5 md:px-4', view.footer ? 'pb-3' : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]')}
+          {view.onSubmit ? (
+            /* `min-h-0` so the form can be squeezed by `max-h-full` above it:
+               the scroller inside is allowed to shrink because `overflow-y:
+               auto` zeroes its automatic minimum size, and an ordinary flex
+               item between the two would put that minimum back and let a tall
+               sheet grow past the screen instead of scrolling.
+               `noValidate` because every field here is already gated by
+               `canSave`, and a native validation bubble would be the one piece
+               of unstyled browser UI left in a sheet. */
+            <form
+              noValidate
+              className="flex min-h-0 flex-col"
+              onSubmit={(e) => {
+                e.preventDefault()
+                view.onSubmit?.()
+              }}
             >
-              {view.children}
-            </div>
-          </div>
-          {view.footer && (
-            // Real bottom padding (not just the safe-area inset, which is 0 on
-            // desktop) so the action never jams against the sheet's edge.
-            <div className="border-t border-hairline bg-surface px-5 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] md:px-4 md:pb-3.5">
-              {view.footer}
-            </div>
+              {body}
+            </form>
+          ) : (
+            body
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    host,
   )
 }
 
@@ -953,6 +1147,7 @@ export function FilterChip({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       aria-expanded={chevron ? !!open : undefined}
       className={cx(
@@ -1154,6 +1349,7 @@ export function MonthStepper({
       )}
     >
       <button
+        type="button"
         className={arrow('l')}
         aria-label={months === 12 ? 'Previous year' : 'Previous month'}
         onClick={() => step(-1)}
@@ -1162,6 +1358,7 @@ export function MonthStepper({
       </button>
       <span className={cx('text-center text-sm font-semibold', chip ? 'w-28' : 'w-32 md:w-28')}>{label(month)}</span>
       <button
+        type="button"
         className={arrow('r')}
         aria-label={months === 12 ? 'Next year' : 'Next month'}
         disabled={!canGoForward}

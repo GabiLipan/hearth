@@ -21,6 +21,8 @@ import { fmtFullDate } from '../lib/dates'
 import { create, update, remove } from '../lib/data'
 import { useApp } from '../state/AppContext'
 import { Sheet, Field, TextInput, Select, Segmented, Button } from './ui'
+import { confirmAction } from './confirm'
+import { toast } from './toast'
 import { CategoryPicker } from './CategoryPicker'
 import { nameOf } from './PersonDot'
 
@@ -221,9 +223,12 @@ export function TransactionForm({
       const dup = findLikelyDuplicate({ date, payee: payee.trim(), amountMinor: signed }, existing)
       if (
         dup &&
-        !confirm(
-          `This looks like a duplicate of “${dup.payee}” (${money(dup.amountMinor)}) on ${fmtFullDate(dup.date)}. Add it anyway?`,
-        )
+        !(await confirmAction({
+          title: 'This looks like a duplicate',
+          body: `There is already “${dup.payee}” for ${money(dup.amountMinor)} on ${fmtFullDate(dup.date)}.`,
+          confirmLabel: 'Add anyway',
+          cancelLabel: 'Don’t add',
+        }))
       ) {
         return
       }
@@ -259,7 +264,22 @@ export function TransactionForm({
       // …and, if asked, applies what it just learned backwards. `similar` is
       // already filtered to what this device may change, so the predicate here
       // passes everything through.
-      if (applySimilar && similar.length > 0) await applyCategory(similar, categoryId!, () => true)
+      if (applySimilar && similar.length > 0) {
+        // Captured BEFORE the writes: undoing means putting each row back where
+        // it was, and half of them may have had no category at all.
+        const before = similar.map((t) => ({ id: t.id, categoryId: t.categoryId }))
+        const { updated } = await applyCategory(similar, categoryId!, () => true)
+        if (updated > 0) {
+          toast(`${updated} other ${updated === 1 ? 'transaction' : 'transactions'} moved here too`, {
+            undo: async () => {
+              // `undefined` is what clears a field rather than leaving it
+              // alone, which is exactly right for a row that had no category
+              // before. See mapping.ts.
+              for (const row of before) await update('transactions', row.id, { categoryId: row.categoryId })
+            },
+          })
+        }
+      }
     }
     onClose()
   }
@@ -269,6 +289,8 @@ export function TransactionForm({
       open={open}
       onClose={onClose}
       title={editing ? 'Edit transaction' : 'Add transaction'}
+      // Enter saves, from any field in the sheet.
+      onSubmit={() => void save()}
       footer={
         !editable ? (
           <p className="text-sm text-ink-3">
@@ -283,8 +305,24 @@ export function TransactionForm({
               variant="danger"
               size="lg"
               onClick={async () => {
-                if (confirm('Delete this transaction?')) {
+                /* Still a confirmation rather than a delete-then-undo, and
+                   deliberately. A delete here is `set deleted_at` on the
+                   server, and nothing on the client may write that column back
+                   — `deletedAt` is readable but not writable (see mapping.ts) —
+                   so an "Undo" could only re-insert, which `on conflict do
+                   nothing` would quietly discard against the tombstone that is
+                   already there. An undo that silently does nothing is worse
+                   than a question. */
+                if (
+                  await confirmAction({
+                    title: 'Delete this transaction?',
+                    body: `“${payee.trim() || editing.payee}” will disappear from your reports and budgets too.`,
+                    confirmLabel: 'Delete',
+                    tone: 'danger',
+                  })
+                ) {
                   await remove('transactions', editing.id)
+                  toast('Transaction deleted')
                   onClose()
                 }
               }}
@@ -292,7 +330,9 @@ export function TransactionForm({
               Delete
             </Button>
           )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+          {/* No `onClick`: the sheet's `onSubmit` is what saves, and a handler
+              here as well would run it twice per press. */}
+          <Button type="submit" size="lg" className="flex-1" disabled={!canSave}>
             {editing ? 'Save changes' : 'Add transaction'}
           </Button>
         </div>

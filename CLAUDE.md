@@ -107,7 +107,10 @@ by a scrolling chart and the axis pinned beside it),
 two categories the palette gave one colour),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
-allow-lists), `session.ts` (auth, household, sync orchestration).
+allow-lists), `session.ts` (auth, household, sync orchestration),
+`components/confirm.tsx` (asking before something irreversible, in the app's own
+voice), `components/toast.tsx` (saying what just happened, and offering to take
+it back).
 
 ### Invariants — break these and things corrupt quietly
 
@@ -690,6 +693,63 @@ the single place a level comes from.
   like an arithmetic error. Sizing it to the thicker side and centring the
   thinner one inside keeps every ribbon exactly as thick at the hub as at its own
   end — which is the only claim the diagram makes.
+- **There is exactly one `<form>` per sheet, and every other button says
+  `type="button"`.** There was no form anywhere for a long time, so Enter did
+  nothing in any sheet — while the desktop table's inline editors, over the same
+  rows, committed on it. `Sheet` takes an `onSubmit` and wraps its scroller AND
+  its footer in a real form (the footer is where the primary action lives, so a
+  form around the body alone would not contain it). The cost is the trap that
+  comes with it: inside a form a button with no `type` submits, so "Delete"
+  beside "Save changes" would have saved the row it was about to remove.
+  `Button` therefore defaults to `type="button"` and every raw `<button>` in the
+  codebase carries one explicitly — the primary action is the one thing that
+  opts in with `type="submit"`, and it must NOT also carry an `onClick`, or
+  every press runs the save twice. The form wrapper is `min-h-0`, or a tall
+  sheet grows past the screen instead of scrolling: the scroller inside can
+  shrink only because `overflow-y: auto` zeroes its automatic minimum size, and
+  an ordinary flex item between it and `max-h-full` puts that minimum back.
+- **A sheet is a layer, not a place in the tree.** Every `Sheet` portals into
+  its own host under `<body>` and pushes it onto one module-level stack
+  (`layerStack` in `ui.tsx`), which is what makes three things statable at all:
+  `#root` goes `inert` while anything is open (the tab order, hit testing and
+  the accessibility tree all at once, which is what a hand-written focus trap is
+  approximating), a lower sheet goes `inert` under the confirmation raised from
+  inside it, and the scroll lock belongs to the STACK — held per sheet, closing
+  a confirmation over a form released it while the form was still open. The
+  portal also fixes a latent bug rather than only enabling this: `position:
+  fixed` is measured against the nearest transformed ancestor, so a sheet opened
+  from a page used to be positioned against `main` while `animate-page-forward`
+  was still running a transform on it.
+- **Focus goes home when the sheet is GONE, not when it starts leaving.** `open`
+  turns false at the top of the 280ms exit, and until the layer comes off the
+  stack `#root` is still `inert` — focusing into an inert subtree does nothing
+  at all, silently, so restoring there looks exactly like not restoring. The
+  restore is keyed on `shown` and is a passive effect, where `useModalLayer`
+  clears the flag in a layout one. Taking focus on the way IN has the mirror of
+  the `useMorphHeight` trap: on the render where `open` first turns true the
+  phase has not caught up, `Sheet` returns `null`, and an effect keyed on `open`
+  alone fires once against a null ref and never looks again.
+- **A native `confirm()` is not a dialog you can write.** Fourteen of them and
+  eight `alert()`s carried the most consequential moments in the app; they
+  render in the system font, ignore the theme, and in an installed PWA are
+  captioned with the origin. `Settings` was passing two paragraphs separated by
+  `\n\n` into a control with no paragraphs. `confirmAction()` and
+  `alertAction()` replace them and return promises, so the call sites keep the
+  shape they had. The name is deliberately not `confirm`: a module-scoped one
+  would shadow the global, and any call site left behind would go on compiling
+  as `if (confirm(…))` — where the value is now a Promise and therefore always
+  truthy, so every confirmation in the app would silently answer yes.
+- **A delete is still a question, not an undo.** The obvious improvement on a
+  confirmation is to do it and offer "Undo", and it is not available here: a
+  delete is `set deleted_at` on the server, `deletedAt` is readable but NOT
+  writable from the client (`mapping.ts`), and ids are client-generated with
+  `on conflict do nothing` — so an undo could only re-insert, which the server
+  would discard against the tombstone already sitting there. An undo that
+  silently does nothing is worse than a question. Undo is offered where the
+  reversal is an ordinary UPDATE, which is why bulk recategorisation has one and
+  deletion does not; that undo captures the previous `categoryId` of every row
+  BEFORE writing, including the rows that had none, since `undefined` is what
+  clears a field rather than leaving it alone.
 - **Transfer pairing is the one matcher with no tolerance.** Every other
   comparison in the app is fuzzy — `payeeSimilar`, the bill amount window, the
   duplicate check. `findTransferCandidates` requires `out === -in` exactly, and

@@ -23,6 +23,7 @@ import { createMany } from '../lib/data'
 import { useSyncState } from '../hooks/useSync'
 import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
+import { alertAction } from './confirm'
 import { Sheet, Button, Field, Select, Segmented, cx } from './ui'
 
 type Step = 'pick' | 'map' | 'review' | 'done'
@@ -84,12 +85,15 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       try {
         const extracted = await extractRowsFromPDF(file)
         if (extracted.filter((r) => r.valid).length === 0) {
-          alert('No transactions found in that PDF. If it is a scanned/photographed statement it has no text to read — try a CSV export instead.')
+          await alertAction('No transactions in that PDF', [
+            'Nothing in it could be read as a row.',
+            'If it is a scanned or photographed statement there is no text to read — a CSV export from your bank will work.',
+          ])
           return
         }
         await buildReview(extracted)
       } catch {
-        alert('That PDF could not be read. Try a CSV export from your bank instead.')
+        await alertAction('That PDF could not be read', 'Try a CSV export from your bank instead.')
       } finally {
         setReading(false)
       }
@@ -98,7 +102,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     const text = await file.text()
     const parsed = parseCSV(text)
     if (parsed.rows.length === 0) {
-      alert('Could not find any rows in that file.')
+      await alertAction('No rows in that file', 'Nothing in it looked like a list of transactions.')
       return
     }
     // What was chosen for this shape of file last time, if it still fits.
@@ -213,6 +217,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
             anything already imported, and auto-categorises from what it has learned.
           </p>
           <button
+            type="button"
             onClick={() => fileRef.current?.click()}
             disabled={reading}
             className="flex w-full flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-hairline bg-surface-2/50 py-12 text-ink-2 transition hover:border-accent/50 hover:text-ink disabled:opacity-60"

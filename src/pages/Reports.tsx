@@ -171,6 +171,7 @@ function ChoiceChip<T extends string>({
       {(close) =>
         options.map((o) => (
           <button
+            type="button"
             key={o.value}
             onClick={() => {
               onChange(o.value)
@@ -664,6 +665,7 @@ export default function Reports() {
         <h3 className="flex items-center gap-1.5 font-semibold md:text-sm">
           {drill && (
             <button
+              type="button"
               onClick={() => setDrill(null)}
               className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-ink-3 transition hover:bg-surface-2 hover:text-ink"
             >
@@ -788,6 +790,7 @@ export default function Reports() {
                       not both fire on the categories that have both. */}
                   <td className={cx(table.cell, 'pl-2 text-right')}>
                     <button
+                      type="button"
                       aria-label={`See ${s.name} transactions`}
                       title={`See ${s.name} transactions in ${monthLabel(month)}`}
                       onClick={(e) => {
@@ -1171,6 +1174,7 @@ export default function Reports() {
                   : 'Only the person whose account is on the other side can confirm it.'}
               </span>{' '}
               <button
+                type="button"
                 onClick={() => seeTransactions()}
                 className="underline underline-offset-2 hover:text-ink"
               >

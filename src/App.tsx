@@ -2,6 +2,8 @@ import { Routes, Route } from 'react-router-dom'
 import { AppProvider } from './state/AppContext'
 import { AuthGate } from './components/AuthGate'
 import { Layout } from './components/Layout'
+import { Toaster } from './components/toast'
+import { ConfirmHost } from './components/confirm'
 import Dashboard from './pages/Dashboard'
 import Activity from './pages/Activity'
 import Budgets from './pages/Budgets'
@@ -14,6 +16,11 @@ import RulesPage from './pages/Rules'
 export default function App() {
   return (
     <AppProvider>
+      {/* Outside `AuthGate`, so the sign-in screens can raise one too — and
+          outside `Layout`, because both portal to `<body>` and neither should
+          be unmounted by a page change. */}
+      <Toaster />
+      <ConfirmHost />
       <AuthGate>
         <Layout>
           <Routes>

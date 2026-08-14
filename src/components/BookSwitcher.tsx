@@ -84,6 +84,7 @@ export function BookLens() {
       width="w-56"
       trigger={({ open, toggle }) => (
         <button
+          type="button"
           onClick={toggle}
           aria-expanded={open}
           aria-label={`Showing ${BOOK_LABEL[book]}`}
@@ -99,6 +100,7 @@ export function BookLens() {
         <div>
           {BOOKS.map(({ id, icon: Each }) => (
             <button
+              type="button"
               key={id}
               onClick={() => {
                 setBook(id)

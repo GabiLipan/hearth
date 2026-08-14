@@ -14,6 +14,8 @@ import { useSyncState } from '../hooks/useSync'
 import {
   Card, Sheet, Button, Field, TextInput, Select, Empty, Progress, Toolbar, cx,
 } from '../components/ui'
+import { confirmAction } from '../components/confirm'
+import { toast } from '../components/toast'
 import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 
@@ -116,7 +118,7 @@ export default function Goals() {
                 >
                   <CategoryIcon icon={goal.icon} size={17} />
                 </span>
-                <button onClick={() => openForm(goal)} className="min-w-0 flex-1 text-left">
+                <button type="button" onClick={() => openForm(goal)} className="min-w-0 flex-1 text-left">
                   <p className="flex items-center gap-1.5 truncate font-medium">
                     {goal.name}
                     {goal.ownerId && <Lock size={12} className="shrink-0 text-ink-3" />}
@@ -221,6 +223,7 @@ function GoalForm({
       open={open}
       onClose={onClose}
       title={goal ? 'Edit goal' : 'New goal'}
+      onSubmit={() => void save()}
       footer={
         <div className="flex gap-2">
           {goal && (
@@ -228,16 +231,22 @@ function GoalForm({
               variant="danger"
               size="lg"
               onClick={async () => {
-                if (confirm(`Delete "${goal.name}"? The money and its transfers stay where they are.`)) {
-                  await remove('goals', goal.id)
-                  onClose()
-                }
+                const ok = await confirmAction({
+                  title: `Delete “${goal.name}”?`,
+                  body: 'The money and the transfers that funded it stay exactly where they are — only the pot goes.',
+                  confirmLabel: 'Delete goal',
+                  tone: 'danger',
+                })
+                if (!ok) return
+                await remove('goals', goal.id)
+                toast(`“${goal.name}” deleted`)
+                onClose()
               }}
             >
               Delete
             </Button>
           )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+          <Button type="submit" size="lg" className="flex-1" disabled={!canSave}>
             Save
           </Button>
         </div>
@@ -269,6 +278,7 @@ function GoalForm({
           <div className="flex flex-wrap gap-1.5">
             {CATEGORY_ICON_KEYS.slice(0, 24).map((key) => (
               <button
+                type="button"
                 key={key}
                 onClick={() => setIcon(key)}
                 aria-label={key}
@@ -349,8 +359,9 @@ function FundGoal({ goal, open, onClose }: { goal: Goal | null; open: boolean; o
       open={open}
       onClose={onClose}
       title={goal ? `Add to ${goal.name}` : 'Add money'}
+      onSubmit={() => void save()}
       footer={
-        <Button size="lg" className="w-full" disabled={!canSave || busy} onClick={save}>
+        <Button type="submit" size="lg" className="w-full" disabled={!canSave || busy}>
           {busy ? 'Moving…' : 'Move money'}
         </Button>
       }

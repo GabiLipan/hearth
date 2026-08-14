@@ -159,7 +159,7 @@ export default function RulesPage() {
         <Card className="mb-3 flex items-center gap-2 px-4 py-2.5 text-sm md:mb-2.5 md:px-3 md:py-2">
           <Check size={16} className="shrink-0 text-good-text" />
           <span className="min-w-0 flex-1">{done}</span>
-          <button onClick={() => setDone(null)} className="shrink-0 text-ink-3 hover:text-ink">
+          <button type="button" onClick={() => setDone(null)} className="shrink-0 text-ink-3 hover:text-ink">
             Dismiss
           </button>
         </Card>
@@ -208,6 +208,7 @@ export default function RulesPage() {
                         </p>
                       </div>
                       <button
+                        type="button"
                         onClick={() => void removeRow('rules', r.id)}
                         aria-label={`Forget rule ${r.match}`}
                         className="shrink-0 p-1 text-ink-3 hover:text-critical-text"
@@ -290,6 +291,7 @@ export default function RulesPage() {
                             cov && cov.all.length > 0 && <Chip>up to date</Chip>
                           )}
                           <button
+                            type="button"
                             onClick={() => void removeRow('rules', r.id)}
                             aria-label={`Forget rule ${r.match}`}
                             className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-critical/10 hover:text-critical-text"

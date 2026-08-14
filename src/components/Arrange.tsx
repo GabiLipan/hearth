@@ -438,6 +438,7 @@ export function Arrange({
         {editing && !lifted && (
           <div className="absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">
             <button
+              type="button"
               onClick={() => onLayout(setSpan(layout, item.id, nextSpan(item.span, columns)))}
               aria-label={`Change the width of ${def.label}`}
               title="Width"
@@ -446,6 +447,7 @@ export function Arrange({
               <WidthGlyph filled={effectiveSpan(item.span, columns)} of={columns} />
             </button>
             <button
+              type="button"
               onClick={() => onLayout(toggle(layout, item.id))}
               aria-label={`Hide ${def.label}`}
               title="Hide"
@@ -504,6 +506,7 @@ export function Arrange({
           <div className="flex flex-wrap gap-2">
             {hidden.map((item) => (
               <button
+                type="button"
                 key={item.id}
                 onClick={() => onLayout(toggle(layout, item.id))}
                 className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3.5 py-2 text-sm font-medium text-ink-2 hover:text-ink"
@@ -524,6 +527,7 @@ export function Arrange({
 
       <div className="mt-5 flex justify-center">
         <button
+          type="button"
           onClick={() => onEditing(!editing)}
           className={cx(
             'inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition',
@@ -606,6 +610,7 @@ function VariantPicker({
 
   const row = (label: string, chosen: boolean, onClick: () => void) => (
     <button
+      type="button"
       key={label}
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
@@ -621,6 +626,7 @@ function VariantPicker({
       width="w-48"
       trigger={({ open, toggle: press }) => (
         <button
+          type="button"
           onClick={press}
           data-no-drag
           aria-expanded={open}

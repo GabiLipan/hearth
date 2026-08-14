@@ -350,6 +350,7 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
         <h3 className="flex min-w-0 flex-1 items-center gap-1 font-semibold md:text-sm">
           {drill && (
             <button
+              type="button"
               onClick={() => setDrill(null)}
               className="flex items-center gap-0.5 rounded-full px-1 py-0.5 text-ink-3 transition hover:bg-surface-2 hover:text-ink"
             >
@@ -384,6 +385,7 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
         <div className="mt-2 flex flex-wrap gap-1.5">
           {slices.filter((s) => canDrill(s.categoryId)).map((s) => (
             <button
+              type="button"
               key={s.categoryId}
               onClick={() => setDrill(s.categoryId)}
               className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-1 text-xs font-medium text-ink-2 transition hover:text-ink"

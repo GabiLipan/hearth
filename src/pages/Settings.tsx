@@ -55,6 +55,8 @@ import { rpc } from '../lib/api'
 import { fmtFullDate, fmtTime } from '../lib/dates'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
+import { alertAction, confirmAction } from '../components/confirm'
+import { toast } from '../components/toast'
 import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, useWide, cx } from '../components/ui'
 import {
   claimAccount,
@@ -131,10 +133,14 @@ function HouseholdCard() {
           <Button
             variant="subtle"
             disabled={busy || joinCode.trim().length < 6}
-            onClick={() => {
-              if (confirm('Joining replaces this device\u2019s data with that household\u2019s. Continue?')) {
-                void run(() => joinHousehold(joinCode))
-              }
+            onClick={async () => {
+              const ok = await confirmAction({
+                title: 'Join that household?',
+                body: 'Everything on this device is replaced by what is in that household.',
+                confirmLabel: 'Join',
+                tone: 'danger',
+              })
+              if (ok) void run(() => joinHousehold(joinCode))
             }}
           >
             Join
@@ -149,10 +155,14 @@ function HouseholdCard() {
         <Button
           size="sm"
           variant="ghost"
-          onClick={() => {
-            if (confirm('Leave this household? Your data stays with the household; this device is disconnected from it.')) {
-              void run(leaveHousehold)
-            }
+          onClick={async () => {
+            const ok = await confirmAction({
+              title: 'Leave this household?',
+              body: 'Your data stays with the household. This device is disconnected from it.',
+              confirmLabel: 'Leave',
+              tone: 'danger',
+            })
+            if (ok) void run(leaveHousehold)
           }}
         >
           Leave household
@@ -219,7 +229,7 @@ function Recoverable() {
       await syncNow()
       await refresh()
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'That did not work.')
+      await alertAction('That did not work', e instanceof Error ? e.message : undefined)
     } finally {
       setBusy(null)
       setArming(null)
@@ -301,10 +311,13 @@ function Recoverable() {
               size="sm"
               variant="subtle"
               disabled={busy !== null}
-              onClick={() => {
-                if (confirm(`Take ownership of “${a.name}”? You will be able to see and change everything on it.`)) {
-                  void run(a.id, () => claimAccount(a.id))
-                }
+              onClick={async () => {
+                const ok = await confirmAction({
+                  title: `Take ownership of “${a.name}”?`,
+                  body: 'You will be able to see and change everything on it.',
+                  confirmLabel: 'Take ownership',
+                })
+                if (ok) void run(a.id, () => claimAccount(a.id))
               }}
             >
               Take ownership
@@ -325,10 +338,16 @@ function UnsavedChanges() {
       <SectionTitle
         action={
           <button
-            onClick={() => {
-              if (confirm(`Discard ${deadLetters.length} change${deadLetters.length === 1 ? '' : 's'} that could not be saved?`)) {
-                void discardAllDeadLetters()
-              }
+            type="button"
+            onClick={async () => {
+              const count = deadLetters.length
+              const ok = await confirmAction({
+                title: `Discard ${count} change${count === 1 ? '' : 's'}?`,
+                body: 'They could not be saved and will be given up for good. What is already on the server is untouched.',
+                confirmLabel: 'Discard',
+                tone: 'danger',
+              })
+              if (ok) void discardAllDeadLetters()
             }}
             className="text-sm font-medium text-accent"
           >
@@ -538,7 +557,7 @@ function CategoriesSection() {
     <section>
       <SectionTitle
         action={
-          <button onClick={() => open('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
+          <button type="button" onClick={() => open('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
             <Plus size={14} /> Add
           </button>
         }
@@ -620,16 +639,23 @@ function DataSection() {
               // "Replaces" was never true — `importJSON` adds, and ids are
               // preserved so re-importing the same file is a no-op rather than
               // a second copy of everything.
-              if (!confirm('This adds the backup’s contents to what is already here. Continue?')) return
+              const ok = await confirmAction({
+                title: 'Restore from this backup?',
+                body: 'Its contents are ADDED to what is already here. Rows keep their ids, so restoring the same file twice is not a second copy of everything.',
+                confirmLabel: 'Restore',
+              })
+              if (!ok) return
               try {
                 const { added, skippedPrivate } = await importJSON(await f.text())
-                alert(
-                  skippedPrivate > 0
-                    ? `Restored ${added} row${added === 1 ? '' : 's'}. ${skippedPrivate} were somebody else’s private categories, budgets or goals, so they were left alone — the server would have refused them.`
-                    : `Restored ${added} row${added === 1 ? '' : 's'}.`,
-                )
+                if (skippedPrivate > 0) {
+                  await alertAction(`Restored ${added} row${added === 1 ? '' : 's'}`, [
+                    `${skippedPrivate} were somebody else’s private categories, budgets or goals, so they were left alone — the server would have refused them.`,
+                  ])
+                } else {
+                  toast(`Restored ${added} row${added === 1 ? '' : 's'}`, { tone: 'success' })
+                }
               } catch (err) {
-                alert(err instanceof Error ? err.message : 'That file could not be imported.')
+                await alertAction('That file could not be imported', err instanceof Error ? err.message : undefined)
               }
             }}
           />
@@ -639,14 +665,27 @@ function DataSection() {
           <Button
             variant="danger"
             onClick={async () => {
-              if (
-                confirm(
-                  'Delete every account you own and everything on it, along with your own budgets, goals and categories, and the household’s shared ones? Accounts other people own are untouched, and so is anything private to them. Export a backup first if you want a copy.',
-                ) &&
-                confirm('Really erase everything of yours? This cannot be undone.')
-              ) {
-                await clearAllData()
-              }
+              /* Still asked twice. The second question is not ceremony: the
+                 first describes a scope somebody has to read, and the whole
+                 point of the second is that it is answered after reading it. */
+              const scope = await confirmAction({
+                title: 'Erase everything of yours?',
+                body: [
+                  'Every account you own goes, and everything recorded on it — along with your own budgets, goals and categories, and the household’s shared ones.',
+                  'Accounts other people own are untouched, and so is anything private to them.',
+                  'Export a backup first if you want a copy.',
+                ],
+                confirmLabel: 'Continue',
+                tone: 'danger',
+              })
+              if (!scope) return
+              const sure = await confirmAction({
+                title: 'Really erase it all?',
+                body: 'This cannot be undone.',
+                confirmLabel: 'Erase everything',
+                tone: 'danger',
+              })
+              if (sure) await clearAllData()
             }}
           >
             <Trash2 size={15} /> Erase everything
@@ -737,6 +776,7 @@ function SyncAndAccount() {
   return (
     <div>
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface-2/50 active:bg-surface-2"
@@ -1153,6 +1193,7 @@ function MembersCard() {
           {members.map((m) => (
             <li key={m.userId}>
               <button
+                type="button"
                 onClick={() => setOpenId(m.userId)}
                 className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 md:px-3 desktop:py-2"
               >
@@ -1554,7 +1595,7 @@ function AccountsSection() {
     <section>
       <SectionTitle
         action={
-          <button onClick={() => openForm('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
+          <button type="button" onClick={() => openForm('new')} className="flex items-center gap-1 text-sm font-medium text-accent">
             <Plus size={14} /> Add
           </button>
         }
@@ -1577,6 +1618,7 @@ function AccountsSection() {
             return (
               <li key={a.id}>
                 <button
+                  type="button"
                   onClick={() => (editable ? openForm(a) : undefined)}
                   className={cx(
                     'flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2',
@@ -1686,14 +1728,33 @@ function AccountAccessSheet({ account, open, onClose }: { account: Account; open
         .filter((g) => g.userId !== userId)
         .map((g) => nameOf(memberMap.get(g.userId)))
       const willVanish = next === 'none' || !canSeeAccount(next)
-      const message = willVanish
-        ? `Remove your own access to "${account.name}"?\n\nIt will disappear from your app straight away, along with its balance and everything recorded on it. ${
-            others.length ? `${others.join(' and ')} will still own it and can give it back.` : ''
-          }`
-        : `Reduce your own access to "${account.name}" to ${LEVEL_LABEL[next].toLowerCase()}?\n\nYou will not be able to undo this yourself. ${
-            others.length ? `${others.join(' and ')} can restore it.` : ''
-          }`
-      if (!confirm(message)) return
+      /* Two paragraphs, which is why this could never be a `confirm()`: it was
+         passing `\n\n` to a control that has no paragraphs, so the warning and
+         the way out of it ran together into one wall of text. */
+      const ok = await confirmAction(
+        willVanish
+          ? {
+              title: `Remove your own access to “${account.name}”?`,
+              body: [
+                'It disappears from your app straight away, along with its balance and everything recorded on it.',
+                others.length
+                  ? `${others.join(' and ')} will still own it and can give it back.`
+                  : 'Nobody else owns it, so nobody will be able to give it back to you.',
+              ],
+              confirmLabel: 'Remove my access',
+              tone: 'danger',
+            }
+          : {
+              title: `Reduce your own access to ${LEVEL_LABEL[next].toLowerCase()}?`,
+              body: [
+                `You will not be able to undo this yourself on “${account.name}”.`,
+                others.length ? `${others.join(' and ')} can restore it.` : 'Nobody else owns it, so nobody can restore it.',
+              ],
+              confirmLabel: 'Reduce my access',
+              tone: 'danger',
+            },
+      )
+      if (!ok) return
     }
     await setAccountLevel(account.id, uid, next, grants.find((g) => g.userId === uid))
   }
@@ -1944,18 +2005,26 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
   async function deleteAccount() {
     if (!account?.id) return
     const used = await transactionsOn(account.id)
-    const warning =
-      used > 0
-        ? `Delete "${account.name}" and the ${used} transaction${used === 1 ? '' : 's'} on it? They disappear from your reports and budgets too. This cannot be undone.`
-        : `Delete account "${account.name}"? This cannot be undone.`
-    if (!confirm(warning)) return
+    const ok = await confirmAction({
+      title: `Delete “${account.name}”?`,
+      body:
+        used > 0
+          ? [
+              `The ${used} transaction${used === 1 ? '' : 's'} on it go too, and disappear from your reports and budgets.`,
+              'It can be brought back from the bin in Settings until somebody deletes it for good.',
+            ]
+          : 'It can be brought back from the bin in Settings until somebody deletes it for good.',
+      confirmLabel: 'Delete account',
+      tone: 'danger',
+    })
+    if (!ok) return
 
     setDeleting(true)
     try {
       await removeAccount(account.id, used > 0)
       onClose()
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'That account could not be deleted.')
+      await alertAction('That account could not be deleted', e instanceof Error ? e.message : undefined)
     } finally {
       setDeleting(false)
     }
@@ -1966,6 +2035,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
       open={open}
       onClose={onClose}
       title={account ? 'Edit account' : 'New account'}
+      onSubmit={() => void save()}
       footer={
         <div className="flex gap-2">
           {canDelete && (
@@ -1973,7 +2043,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
               {deleting ? 'Deleting…' : 'Delete'}
             </Button>
           )}
-          <Button size="lg" className="flex-1" disabled={!canSave || deleting} onClick={save}>
+          <Button type="submit" size="lg" className="flex-1" disabled={!canSave || deleting}>
             Save
           </Button>
         </div>
@@ -2114,15 +2184,24 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
     if (!category?.id) return
     const used = await db.transactions.where('categoryId').equals(category.id).count()
     if (used > 0) {
-      alert(`"${category.name}" is used by ${used} transactions, so it can't be deleted. Recategorise them first.`)
+      await alertAction(`“${category.name}” is still in use`, [
+        `${used} transaction${used === 1 ? ' is' : 's are'} filed under it, so it cannot be deleted.`,
+        'Recategorise them first — Activity can do the lot in one go from the payee filter.',
+      ])
       return
     }
-    if (confirm(`Delete category "${category.name}"?`)) {
-      const budgets = await db.budgets.where('categoryId').equals(category.id).toArray()
-      for (const b of budgets) await removeRow('budgets', b.id)
-      await removeRow('categories', category.id)
-      onClose()
-    }
+    const ok = await confirmAction({
+      title: `Delete “${category.name}”?`,
+      body: 'Nothing is filed under it, so nothing else changes. Any budget set for it goes too.',
+      confirmLabel: 'Delete category',
+      tone: 'danger',
+    })
+    if (!ok) return
+    const budgets = await db.budgets.where('categoryId').equals(category.id).toArray()
+    for (const b of budgets) await removeRow('budgets', b.id)
+    await removeRow('categories', category.id)
+    toast(`“${category.name}” deleted`)
+    onClose()
   }
 
   return (
@@ -2130,6 +2209,7 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
       open={open}
       onClose={onClose}
       title={category ? 'Edit category' : 'New category'}
+      onSubmit={() => void save()}
       footer={
         <div className="flex gap-2">
           {category?.id && (
@@ -2137,7 +2217,7 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
               Delete
             </Button>
           )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+          <Button type="submit" size="lg" className="flex-1" disabled={!canSave}>
             Save
           </Button>
         </div>

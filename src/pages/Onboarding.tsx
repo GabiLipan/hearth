@@ -55,58 +55,66 @@ function SignIn() {
   const [password, setPassword] = useState('')
   const { busy, error, notice, setNotice, run } = useRunner()
 
+  const submit = () =>
+    run(async () => {
+      if (mode === 'signup') {
+        await signUp(email.trim(), password)
+        setNotice('Check your email for a confirmation link, then sign in.')
+      } else {
+        await signIn(email.trim(), password)
+      }
+    })
+
   return (
     <Shell>
-      <Card className="space-y-3 p-5">
-        <p className="text-sm text-ink-2">
-          Your data lives in your own private database, and only you and whoever you invite can read it. Sign in to
-          reach it from every device.
-        </p>
-        <Segmented
-          value={mode}
-          onChange={setMode}
-          options={[
-            { value: 'signin', label: 'Sign in' },
-            { value: 'signup', label: 'Create account' },
-          ]}
-        />
-        <Field label="Email">
-          <TextInput
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            placeholder="you@example.com"
-          />
-        </Field>
-        <Field label="Password" hint={mode === 'signup' ? 'At least 6 characters. Longer is better.' : undefined}>
-          <TextInput
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-            placeholder="••••••••"
-          />
-        </Field>
-        {error && <p className="text-sm text-critical-text">{error}</p>}
-        {notice && <p className="text-sm text-good-text">{notice}</p>}
-        <Button
-          size="lg"
-          className="w-full"
-          disabled={busy || !email.trim() || password.length < 6}
-          onClick={() =>
-            run(async () => {
-              if (mode === 'signup') {
-                await signUp(email.trim(), password)
-                setNotice('Check your email for a confirmation link, then sign in.')
-              } else {
-                await signIn(email.trim(), password)
-              }
-            })
-          }
+      {/* A real form, so Enter signs in from either field and a password
+          manager has a submission to recognise and offer to save. This screen
+          is the first thing anybody touches, and it used to be the one place in
+          the app where the obvious keystroke did nothing at all. */}
+      <Card className="p-5">
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!busy && email.trim() && password.length >= 6) void submit()
+          }}
         >
-          <Cloud size={16} /> {busy ? 'Working…' : mode === 'signup' ? 'Create account' : 'Sign in'}
-        </Button>
+          <p className="text-sm text-ink-2">
+            Your data lives in your own private database, and only you and whoever you invite can read it. Sign in to
+            reach it from every device.
+          </p>
+          <Segmented
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: 'signin', label: 'Sign in' },
+              { value: 'signup', label: 'Create account' },
+            ]}
+          />
+          <Field label="Email">
+            <TextInput
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              placeholder="you@example.com"
+            />
+          </Field>
+          <Field label="Password" hint={mode === 'signup' ? 'At least 6 characters. Longer is better.' : undefined}>
+            <TextInput
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+              placeholder="••••••••"
+            />
+          </Field>
+          {error && <p className="text-sm text-critical-text">{error}</p>}
+          {notice && <p className="text-sm text-good-text">{notice}</p>}
+          <Button type="submit" size="lg" className="w-full" disabled={busy || !email.trim() || password.length < 6}>
+            <Cloud size={16} /> {busy ? 'Working…' : mode === 'signup' ? 'Create account' : 'Sign in'}
+          </Button>
+        </form>
       </Card>
     </Shell>
   )
@@ -140,25 +148,30 @@ function ChooseHousehold() {
 
         <div className="space-y-2">
           <p className="text-sm font-medium">Been given a code?</p>
-          <div className="flex gap-2">
+          {/* A code is typed and then submitted, so Enter is the natural way to
+              send it — the button is the alternative, not the only way. */}
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!busy && code.trim().length >= 6) void run(async () => void (await joinHousehold(code)))
+            }}
+          >
             <TextInput
               value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               placeholder="INVITE CODE"
               className="flex-1 uppercase tracking-widest"
+              autoComplete="one-time-code"
             />
-            <Button
-              variant="subtle"
-              disabled={busy || code.trim().length < 6}
-              onClick={() => run(async () => void (await joinHousehold(code)))}
-            >
+            <Button type="submit" variant="subtle" disabled={busy || code.trim().length < 6}>
               Join
             </Button>
-          </div>
+          </form>
         </div>
 
         {error && <p className="text-sm text-critical-text">{error}</p>}
-        <button onClick={() => void signOut()} className="flex items-center gap-1.5 text-sm text-ink-3 hover:text-ink-2">
+        <button type="button" onClick={() => void signOut()} className="flex items-center gap-1.5 text-sm text-ink-3 hover:text-ink-2">
           <LogOut size={14} /> Sign out
         </button>
       </Card>

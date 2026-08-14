@@ -152,6 +152,7 @@ export function Layout({ children }: { children: ReactNode }) {
             {!collapsed && <span className="truncate text-lg font-bold tracking-tight">Hearth</span>}
           </div>
           <button
+            type="button"
             onClick={toggleSidebar}
             aria-expanded={!collapsed}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -163,6 +164,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
 
         <button
+          type="button"
           onClick={() => setAddOpen(true)}
           title={collapsed ? 'Add transaction' : undefined}
           aria-label="Add transaction"
@@ -251,6 +253,7 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* Mobile FAB. It withdraws while the sheet is open, so the sheet reads as
           the button itself having opened up rather than as something covering it. */}
       <button
+        type="button"
         onClick={() => setAddOpen(true)}
         aria-label="Add transaction"
         aria-expanded={addOpen}
@@ -497,6 +500,7 @@ function UpdateBanner() {
       <ArrowDownToLine size={15} className="shrink-0 text-accent" />
       <span className="min-w-0 flex-1 truncate">A new version of Hearth is ready</span>
       <button
+        type="button"
         onClick={() => {
           setTaking(true)
           void installUpdate()

@@ -494,6 +494,7 @@ export default function Activity() {
               a toolbar rather than of a sentence. */}
           {origin && (
             <button
+              type="button"
               onClick={() => {
                 clearDrill()
                 navigate(origin.path)
@@ -508,6 +509,7 @@ export default function Activity() {
             {book !== 'all' && <span className="text-ink-3">{` · ${BOOK_LABEL[book]}`}</span>}
           </p>
           <button
+            type="button"
             onClick={clearDrill}
             className="order-3 ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-ink-2 ring-1 ring-hairline transition hover:text-ink md:ml-0"
           >
@@ -560,6 +562,7 @@ export default function Activity() {
                             return (
                               <li key={t.id}>
                                 <button
+                                  type="button"
                                   onClick={() => setEditing(t)}
                                   className={cx(
                                     'flex w-full items-center gap-3 px-4 py-3 text-left transition-colors',
@@ -967,6 +970,7 @@ function AskedOfMe({ txns, onOpen }: { txns: Transaction[]; onOpen: (t: Transact
         {asked.slice(0, 6).map((t) => (
           <li key={t.id}>
             <button
+              type="button"
               onClick={() => onOpen(t)}
               className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2/50 md:px-3 md:py-2.5"
             >
@@ -1096,6 +1100,7 @@ function ControlTrigger({
 }) {
   return (
     <button
+      type="button"
       onClick={toggle}
       aria-expanded={open}
       className={cx(
@@ -1155,6 +1160,7 @@ function SearchChip({ value, onChange }: { value: string; onChange: (next: strin
         className="h-9 w-full rounded-full bg-surface-2 pl-9 pr-9 text-sm text-ink outline-none ring-1 ring-transparent transition-shadow placeholder:text-ink-3 focus:ring-2 focus:ring-accent/60"
       />
       <button
+        type="button"
         aria-label="Close search"
         onClick={() => {
           onChange('')
@@ -1260,6 +1266,7 @@ function CategoryFilter({
               standing start is one press; getting to a standing start used to
               be as many presses as you have categories. */}
           <button
+            type="button"
             onClick={() => onChange(value === null ? new Set() : null)}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
           >
@@ -1272,6 +1279,7 @@ function CategoryFilter({
             const on = value === null || value.has(c.id)
             return (
               <button
+                type="button"
                 key={c.id}
                 onClick={() => toggle(c.id)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
@@ -1307,6 +1315,7 @@ function MoreChip({ onImport }: { onImport: () => void }) {
     >
       {(close) => (
         <button
+          type="button"
           onClick={() => {
             onImport()
             close()
@@ -1377,6 +1386,7 @@ function AccountFilter({
       {() => (
         <div className="max-h-72 overflow-y-auto">
           <button
+            type="button"
             onClick={() => onChange(null)}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
           >
@@ -1388,6 +1398,7 @@ function AccountFilter({
             const on = value === null || value.has(a.id)
             return (
               <button
+                type="button"
                 key={a.id}
                 onClick={() => toggle(a.id)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
@@ -1454,6 +1465,7 @@ function MonthJump({
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <button
+              type="button"
               onClick={() => setYear((y) => y - 1)}
               disabled={year <= firstYear}
               aria-label="Previous year"
@@ -1463,6 +1475,7 @@ function MonthJump({
             </button>
             <span className="text-sm font-semibold tabular">{year}</span>
             <button
+              type="button"
               onClick={() => setYear((y) => y + 1)}
               disabled={year >= lastYear}
               aria-label="Next year"
@@ -1477,6 +1490,7 @@ function MonthJump({
               const has = months.has(key)
               return (
                 <button
+                  type="button"
                   key={key}
                   disabled={!has}
                   onClick={() => {

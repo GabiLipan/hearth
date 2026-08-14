@@ -327,6 +327,7 @@ function AmountInput({
 function SuggestionButton({ minor, money, onAccept }: { minor: number; money: MoneyFn; onAccept: () => void }) {
   return (
     <button
+      type="button"
       onClick={onAccept}
       className="whitespace-nowrap rounded-full px-2 py-0.5 text-xs text-ink-3 ring-1 ring-hairline transition-colors hover:text-ink hover:ring-ink-3/40"
       title="Use this amount"
@@ -431,6 +432,7 @@ function BudgetCard({
       <div className="mt-2.5 flex items-center gap-2">
         {budget != null && (
           <button
+            type="button"
             onClick={() => nudge(-step)}
             aria-label={`Reduce ${row.category.name} budget`}
             className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-lg text-ink-2 active:scale-95"
@@ -441,6 +443,7 @@ function BudgetCard({
         <AmountInput value={budget} symbol={symbol} className="flex-1" onCommit={(minor) => onCommit(row, minor)} />
         {budget != null && (
           <button
+            type="button"
             onClick={() => nudge(step)}
             aria-label={`Increase ${row.category.name} budget`}
             className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-lg text-ink-2 active:scale-95"

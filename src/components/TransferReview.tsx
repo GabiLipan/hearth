@@ -139,7 +139,7 @@ export function TransferReview() {
           {autoLinked} {autoLinked === 1 ? 'transfer' : 'transfers'} between your accounts linked — both
           sides are out of your spending and income totals.
         </span>
-        <button onClick={() => setAutoLinked(0)} className="shrink-0 text-ink-3 hover:text-ink">
+        <button type="button" onClick={() => setAutoLinked(0)} className="shrink-0 text-ink-3 hover:text-ink">
           Dismiss
         </button>
       </Card>

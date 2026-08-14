@@ -21,6 +21,8 @@ import {
 import { parseAmount, currencySymbol } from '../lib/money'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, Toolbar, table, ScrollTable, cx } from '../components/ui'
+import { confirmAction } from '../components/confirm'
+import { toast } from '../components/toast'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 
@@ -301,7 +303,7 @@ export default function Bills() {
                   <ul className="divide-y divide-hairline">
                     {section.bills.map((b) => (
                       <li key={b.id} className="flex items-center gap-3 px-4 py-3">
-                        <button onClick={() => openForm(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                        <button type="button" onClick={() => openForm(b)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                           <CategoryDot category={b.categoryId ? catMap.get(b.categoryId) : undefined} />
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{b.name}</p>
@@ -318,6 +320,7 @@ export default function Bills() {
                         {!b.autoPost && (
                           <div className="flex shrink-0 flex-col gap-1.5">
                             <button
+                              type="button"
                               onClick={() =>
                                 void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO()).then(() => syncNow())
                               }
@@ -328,6 +331,7 @@ export default function Bills() {
                               <Check size={15} />
                             </button>
                             <button
+                              type="button"
                               onClick={() => void skipBill(b).then(() => syncNow())}
                               title="Skip this one"
                               aria-label={`Skip ${b.name}`}
@@ -383,6 +387,7 @@ export default function Bills() {
                         <tr key={b.id} className={table.row}>
                           <td className={cx(table.cell, 'pl-3 pr-3', table.pinned)}>
                             <button
+                              type="button"
                               onClick={() => openForm(b)}
                               className="block w-full truncate text-left font-medium hover:text-accent"
                             >
@@ -414,6 +419,7 @@ export default function Bills() {
                             {!b.autoPost && (
                               <div className="flex justify-end gap-1">
                                 <button
+                                  type="button"
                                   onClick={() =>
                                     void postBill(b, daysUntil(b.nextDue) < 0 ? b.nextDue : todayISO()).then(() =>
                                       syncNow(),
@@ -426,6 +432,7 @@ export default function Bills() {
                                   <Check size={14} />
                                 </button>
                                 <button
+                                  type="button"
                                   onClick={() => void skipBill(b).then(() => syncNow())}
                                   title="Skip this one"
                                   aria-label={`Skip ${b.name}`}
@@ -505,6 +512,7 @@ export default function Bills() {
           <div className={SIDE_GRID}>
             {paused.map((b) => (
               <button
+                type="button"
                 key={b.id}
                 onClick={() => openForm(b)}
                 className="flex items-center gap-3 rounded-2xl bg-surface px-4 py-3 text-left opacity-60 ring-1 ring-hairline transition hover:opacity-100 md:gap-2 md:rounded-xl desktop:px-2.5 desktop:py-2"
@@ -578,10 +586,17 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
   }
 
   async function deleteBill() {
-    if (bill?.id && confirm(`Delete "${bill.name}"? Past transactions are kept.`)) {
-      await removeRow('bills', bill.id)
-      onClose()
-    }
+    if (!bill?.id) return
+    const ok = await confirmAction({
+      title: `Delete “${bill.name}”?`,
+      body: 'The payments already recorded against it are kept — only the schedule goes.',
+      confirmLabel: 'Delete bill',
+      tone: 'danger',
+    })
+    if (!ok) return
+    await removeRow('bills', bill.id)
+    toast(`“${bill.name}” deleted`)
+    onClose()
   }
 
   return (
@@ -589,6 +604,7 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
       open={open}
       onClose={onClose}
       title={bill?.id ? 'Edit bill' : 'New bill'}
+      onSubmit={() => void save()}
       footer={
         <div className="flex gap-2">
           {bill?.id && (
@@ -596,7 +612,7 @@ function BillForm({ bill, open, onClose }: { bill?: Bill; open: boolean; onClose
               Delete
             </Button>
           )}
-          <Button size="lg" className="flex-1" disabled={!canSave} onClick={save}>
+          <Button type="submit" size="lg" className="flex-1" disabled={!canSave}>
             {bill?.id ? 'Save changes' : 'Add bill'}
           </Button>
         </div>
