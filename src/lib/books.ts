@@ -179,6 +179,21 @@ export function accountsInBook(book: BookId, books: BookMap): Set<string> {
 export type Flow =
   /** Money one of us put into the household from a private account. */
   | 'contribution'
+  /**
+   * The same event, with only one row on this device.
+   *
+   * Either the far leg is in an account I am not on — my partner linked it
+   * herself, and her private account is not mine to read — or there is no far
+   * leg at all, because she is not using the app and somebody tagged the
+   * arrival with `contributorId`.
+   *
+   * Kept apart from `contribution` for one reason, and it is arithmetic rather
+   * than vocabulary: `bookTotals` drops contributions under the `all` book,
+   * because there both legs are in view and counting either would double-count.
+   * With only one row there is nothing to double-count, and dropping it deletes
+   * real income from Everything. Everywhere else the two behave identically.
+   */
+  | 'contribution-unpaired'
   /** Money paid into a joint account from outside the household entirely. */
   | 'external-income'
   /** The household spending its money. */
@@ -256,7 +271,11 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
       if (here === 'household') {
         // Crossing out of the household, or in from a private account —
         // including one I will never see, which is precisely a contribution.
-        out.set(t.id, t.amountMinor > 0 ? 'contribution' : 'withdrawal')
+        // `unseen` is the exact test for "only one row here": a partner in an
+        // `others` account is still a second row this device holds, and under
+        // Everything both of them are in view.
+        if (t.amountMinor > 0) out.set(t.id, unseen ? 'contribution-unpaired' : 'contribution')
+        else out.set(t.id, 'withdrawal')
         continue
       }
       // My account. Crossing into the household is a contribution; anything
@@ -272,7 +291,13 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
     }
 
     if (here === 'household') {
-      out.set(t.id, t.amountMinor > 0 ? 'external-income' : 'household-spend')
+      // Somebody has said whose money this is, and there is no transfer to
+      // disagree with — the far leg is in an account that will never be in this
+      // app, so pairing is not a thing that can happen later. Money IN only:
+      // the server checks the same, because a negative contribution would
+      // credit the household with money it never had.
+      if (t.contributorId && t.amountMinor > 0) out.set(t.id, 'contribution-unpaired')
+      else out.set(t.id, t.amountMinor > 0 ? 'external-income' : 'household-spend')
     } else if (t.paidForHousehold && t.amountMinor < 0) {
       // Money OUT of a personal account only. A refund arriving back on the
       // card is not a contribution to anything, and flagging one would credit
@@ -322,7 +347,12 @@ export const CONTRIBUTION_CUTOFF_DAY = 25
  * obviously "for".
  */
 export function effectiveMonth(t: Transaction, flow: Flow | undefined): string {
-  if (flow !== 'contribution') return monthKey(t.date)
+  // Both readings of a contribution, or the shift would depend on whether the
+  // OTHER person happens to use the app — which is exactly the accident this
+  // whole mechanism exists to stop mattering. An arrival nobody has claimed is
+  // still not shifted: until somebody says it is a contribution it is ordinary
+  // income, and guessing would move a tax refund into next month.
+  if (flow !== 'contribution' && flow !== 'contribution-unpaired') return monthKey(t.date)
   const day = Number(t.date.slice(8, 10))
   if (day < CONTRIBUTION_CUTOFF_DAY) return monthKey(t.date)
   return shiftMonth(monthKey(t.date), 1)
@@ -442,6 +472,20 @@ export function bookTotals(
         if (row.amountMinor > 0) t.contributions += row.amountMinor
         else t.contributed -= row.amountMinor
         break
+      case 'contribution-unpaired':
+        // Always positive: `classifyFlows` only sets this on money coming in,
+        // and the server's check constraint says the same, so there is no
+        // second branch to write here.
+        //
+        // Under Everything there is no household to contribute TO — the money
+        // simply arrived in the visible pool from outside it, which is what
+        // `externalIncome` means and, load-bearingly, the only inflow the Sankey
+        // draws in that book. Filing it as a contribution there would leave the
+        // diagram's left side short and conjure a "from what was already there"
+        // band to cover the difference.
+        if (book === 'all') t.externalIncome += row.amountMinor
+        else t.contributions += row.amountMinor
+        break
       case 'withdrawal':
         // Kept apart from salary, so "Earned" on the personal book stays a
         // figure about work rather than one that moves when we reimburse
@@ -515,6 +559,11 @@ export function bookTotalsInRange(
       case 'contribution':
         if (row.amountMinor > 0) t.contributions += row.amountMinor
         else t.contributed -= row.amountMinor
+        break
+      // See `bookTotals` for why Everything files this as outside income.
+      case 'contribution-unpaired':
+        if (book === 'all') t.externalIncome += row.amountMinor
+        else t.contributions += row.amountMinor
         break
       case 'withdrawal':
         if (row.amountMinor > 0) t.returned += row.amountMinor
@@ -636,19 +685,27 @@ export function spendsIn(
  *
  * Attribution does not use `created_by`. That is whoever entered the row, which
  * for an imported statement is whoever did the importing, not whose money it
- * was. It uses the far leg instead:
+ * was. It asks three questions, in this order:
  *
- *   - far leg in one of MY accounts → mine
- *   - far leg not visible at all    → somebody else's, because the only accounts
- *                                     hidden from me belong to the other people
- *                                     in the household
+ *   1. has somebody SAID whose this is (`contributorId`)? → that person
+ *   2. far leg in one of MY accounts                      → mine
+ *   3. far leg not visible at all                         → somebody else's
  *
- * The honest limit is `otherMinor`. An arrival nobody has linked to anything is
+ * The third is an inference, and worth knowing about because it is confidently
+ * wrong in one case: a leg whose partner row has gone — the far account deleted,
+ * or the other row deleted after linking — is indistinguishable from a leg whose
+ * partner was never visible, and gets read as the other person's. That is right
+ * for a contribution they linked on their own device, which is what it is for,
+ * and it is why (1) exists above it: an explicit answer never has to fight a
+ * guess. A row that reads as theirs when you know it was yours is an orphaned
+ * transfer, not a mystery — check whether Activity names the far account.
+ *
+ * The honest limit is `otherMinor`. An arrival nobody has linked OR tagged is
  * indistinguishable from money paid in from outside the household — both are
  * just a credit in the joint account — so the two share a bucket rather than
  * the app pretending it can tell a salary transfer from a tax refund. Linking
- * is what moves money out of that bucket and onto a name, and each of us can
- * only link our own.
+ * moves money out of that bucket and onto a name; so does tagging, which is the
+ * only route open when the other person is not using the app at all.
  */
 export interface ContributionSplit {
   mineMinor: number
@@ -662,6 +719,8 @@ export function contributionSplit(
   flows: Map<string, Flow>,
   month: string,
   books: BookMap,
+  /** Needed to tell "I tagged this as mine" from "I tagged this as theirs". */
+  userId?: string,
 ): ContributionSplit {
   const legs = new Map<string, Transaction[]>()
   for (const t of txns) {
@@ -682,7 +741,18 @@ export function contributionSplit(
       out.otherMinor += t.amountMinor
       continue
     }
-    if (flow !== 'contribution') continue
+    if (flow !== 'contribution' && flow !== 'contribution-unpaired') continue
+
+    // Said outright, and it wins — the same shape as `bookOverride` on an
+    // account, and checked first for the same reason: an explicit answer must
+    // not be something the inference below can quietly outvote. Note this is
+    // reachable on a LINKED contribution too, where it is a correction rather
+    // than a substitute.
+    if (t.contributorId) {
+      if (t.contributorId === userId) out.mineMinor += t.amountMinor
+      else out.theirsMinor += t.amountMinor
+      continue
+    }
 
     const partner = t.transferId ? legs.get(t.transferId)?.find((l) => l.id !== t.id) : undefined
     // No partner row means an account this device is not on, which in a

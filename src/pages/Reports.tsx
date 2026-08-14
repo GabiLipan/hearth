@@ -280,8 +280,8 @@ export default function Reports() {
    * account, which we can both read.
    */
   const split = useMemo(
-    () => contributionSplit(txns ?? [], flows, month, books),
-    [txns, flows, month, books],
+    () => contributionSplit(txns ?? [], flows, month, books, userId),
+    [txns, flows, month, books, userId],
   )
   const partner = useMemo(() => {
     const others = [...memberMap.values()].filter((m) => m.userId !== userId)
@@ -1168,10 +1168,18 @@ export default function Reports() {
                 </>
               )}
               .{' '}
+              {/* Two different sentences, because there are now two different
+                  situations and only one of them is out of your hands. If the
+                  far side is on somebody's device, they have to confirm it and
+                  you can only ask. If they are not using the app at all, there
+                  is no far side to wait for and saying whose it was is the
+                  whole of the fix — which is a thing you can do yourself. */}
               <span className="text-ink-3">
-                {partner
-                  ? `Only ${partner} can confirm the far side, from their own device.`
-                  : 'Only the person whose account is on the other side can confirm it.'}
+                {unexplained.inCount > 0 && partner
+                  ? `Pair it from ${partner}'s device, or — if the account it came from is not in Hearth — say it was theirs and it will count towards the month it was for.`
+                  : partner
+                    ? `Only ${partner} can confirm the far side, from their own device.`
+                    : 'Only the person whose account is on the other side can confirm it.'}
               </span>{' '}
               <button
                 type="button"

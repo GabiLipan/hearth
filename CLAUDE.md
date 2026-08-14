@@ -62,6 +62,7 @@ read-only detector that reports which are present — run it when unsure.
 | `15-purge-account.sql` | `purge_account` — the bottom of the bin: destroy a deleted account and its rows for good |
 | `16-explain-requests.sql` | `transactions.explain_requested_*` — ask the one person who can see the other half of a row |
 | `17-account-appearance.sql` | `accounts.slot` + `accounts.icon` — an account gets a colour and an icon, like a category |
+| `18-contributions.sql` | `transactions.contributor_id` — say who paid money in, where the far leg is in an account that will never be in the app |
 
 All are re-runnable, with **one ordering trap**: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
@@ -96,6 +97,8 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 (suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
+`contributors.ts` (naming the person behind an arrival whose far leg does not
+exist, and remembering the name for next month),
 `categoryTree.ts` (what a drag on the category list means, and what it writes),
 `layout.ts` (which sections a page shows, in what order, how wide, in which
 shape, and what else each one lets you decide — home and Reports share it),
@@ -452,6 +455,28 @@ the single place a level comes from.
   above them. One honest limit: the household book is normally identical on both
   screens, and this is the only thing that breaks that — a row in a private
   account is invisible to the other person.
+- **A contribution with one row is not a contribution with two, and `bookTotals`
+  can tell.** Under the `all` book contributions are SKIPPED, because there both
+  legs are in view and counting either would double-count. That is right only
+  while there are two legs. A contribution your partner linked on her own
+  device, or one tagged with `contributorId` because she is not using the app at
+  all, is a single row — and skipping it silently deleted real income from
+  Everything. Hence `contribution-unpaired`, which is an ordinary contribution
+  everywhere except there, where it counts as `externalIncome`: not as a
+  euphemism, but because that is the only inflow band `spendFlow` draws under
+  `all`, so filing it as a contribution would leave the Sankey's left side short
+  and conjure a "from what was already there" band to cover the difference. Note
+  the `switch` in `bookTotals` has **no exhaustiveness check** — a new `Flow`
+  falls through it silently, and `tsc` will not say so.
+- **Attribution by far leg is confidently wrong about an orphaned transfer.**
+  `contributionSplit` reads "no partner row" as "the other person's", which is
+  right for a leg they linked themselves and is also what you get when the
+  partner row has been DELETED — `remove()` soft-deletes one row and nothing
+  clears the other's `transfer_id`. So deleting a duplicate leg after a
+  re-import turns your own contribution into your partner's, on the Sankey, for
+  ever. `contributorId` is checked first precisely so an explicit answer never
+  has to fight the inference; the tell is Activity showing the bare word
+  "Transfer" rather than "Transfer from <account>".
 - **A budget is per month, so "the budget" is never a single number.** `useBudgets()`
   returns every month; `useBudgetsForMonth()` returns one. Handing the whole lot to a
   view that assumes one month renders each category once per month it was ever

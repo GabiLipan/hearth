@@ -17,7 +17,8 @@ import {
   useDesktop,
   type CellRef,
 } from '../components/InlineCell'
-import { accountsInBook, BOOK_LABEL } from '../lib/books'
+import { accountsInBook, BOOK_LABEL, type BookMap } from '../lib/books'
+import { applyContributor, learnContributors, suggestContributor, taggable } from '../lib/contributors'
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
 import { useSticky, useStickyIds } from '../lib/sticky'
@@ -31,6 +32,7 @@ import { TransactionForm } from '../components/TransactionForm'
 import { ImportWizard } from '../components/ImportWizard'
 import { TransferReview } from '../components/TransferReview'
 import { nameOf } from '../components/PersonDot'
+import { toast } from '../components/toast'
 import { useSyncState } from '../hooks/useSync'
 
 /**
@@ -121,6 +123,7 @@ export default function Activity() {
   const levels = useMyLevels()
   const txns = useAllTransactions()
   const books = useBooks()
+  const memberMap = useMemberMap()
   const [book, setBook] = useBook()
   const searching = query.trim().length > 0
 
@@ -476,6 +479,12 @@ export default function Activity() {
           rows it cannot. */}
       <AskedOfMe txns={txns ?? []} onOpen={setEditing} />
 
+      {/* And the third: arrivals whose far leg does not exist at all, because
+          the person who sent them is not using the app. Nothing can pair these,
+          so the only thing that can resolve one is somebody saying whose it
+          was — and having said it twice, this offers the answer. */}
+      <SuggestedContributions txns={txns ?? []} books={books} />
+
       {/* What a drill-through narrowed the list to, and both ways out of it.
           A filter this strong has to be visible: without the banner the page
           simply looks like a history that stops.
@@ -594,11 +603,20 @@ export default function Activity() {
                                     <p className="flex items-center gap-1 truncate text-sm text-ink-3">
                                       {!transfer && (looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
                                       <span className="truncate">
+                                        {/* A tagged arrival takes the place of
+                                            "Uncategorised" and not of a real
+                                            category: saying whose money it was
+                                            is an answer to a different
+                                            question, and hiding a category
+                                            somebody chose to show it would be
+                                            trading one fact for another. */}
                                         {transfer
                                           ? transferLine(t, partnerLeg.get(t.id), accMap)
                                           : cat
                                             ? fullName(cat, catMap)
-                                            : 'Uncategorised'}
+                                            : t.contributorId
+                                              ? `Paid in by ${nameOf(memberMap.get(t.contributorId))}`
+                                              : 'Uncategorised'}
                                         {t.note ? ` · ${t.note}` : ''}
                                       </span>
                                     </p>
@@ -991,6 +1009,111 @@ function AskedOfMe({ txns, onOpen }: { txns: Transaction[]; onOpen: (t: Transact
       </ul>
       {asked.length > 6 && (
         <p className="px-4 pb-3 text-xs text-ink-3 md:px-3">and {asked.length - 6} more</p>
+      )}
+    </Card>
+  )
+}
+
+/**
+ * Arrivals this device could name, if somebody confirmed it.
+ *
+ * The third of the three cards above the list, and the one for the case neither
+ * of the others can reach. `TransferReview` offers pairs both legs of which are
+ * here; `AskedOfMe` carries questions about rows whose other half is on the
+ * other person's device. This is for money whose other half is on NO device —
+ * a household member who is not using the app — where the only thing that can
+ * ever resolve the row is a person saying whose it was.
+ *
+ * It suggests and does not apply, which is the same posture as everything else
+ * on this screen: accepting moves the money onto a name AND into the month it
+ * was for, so a wrong guess applied quietly would be wrong in a way nobody
+ * could see. See `lib/contributors.ts`.
+ *
+ * Rows this device may not edit are filtered out rather than offered and
+ * refused — `transactions_update` would reject them, minutes later, as dead
+ * letters in Settings.
+ */
+function SuggestedContributions({ txns, books }: { txns: Transaction[]; books: BookMap }) {
+  const { money } = useApp()
+  const { userId } = useSyncState()
+  const members = useMemberMap()
+  const accMap = useAccountMap()
+  const levels = useMyLevels()
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+
+  const learned = useMemo(() => learnContributors(txns, books), [txns, books])
+  const rows = useMemo(() => {
+    if (learned.size === 0) return []
+    return txns
+      .filter(
+        (t) =>
+          !t.contributorId &&
+          !dismissed.has(t.id) &&
+          taggable(t, books) &&
+          canEditTransaction(t, levelOn(t.accountId, levels), userId) &&
+          suggestContributor(t.payee, learned) !== undefined,
+      )
+      .sort((a, b) => b.date.localeCompare(a.date))
+    // `levels` is a fresh Map each render — the inputs that change the answer
+    // are the rows and what has been learned from them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txns, books, learned, dismissed, userId])
+
+  if (rows.length === 0) return null
+
+  return (
+    <Card className="mb-3 md:mb-2.5">
+      <div className="flex flex-wrap items-baseline gap-x-2 px-4 py-3 pb-1 md:px-3">
+        <h3 className="font-semibold md:text-sm">Paid in by</h3>
+        <p className="text-sm text-ink-3 md:text-xs">
+          These look like money one of you moved in. Confirming counts it towards the month it was for.
+        </p>
+      </div>
+      <ul className="divide-y divide-hairline">
+        {rows.slice(0, 6).map((t) => {
+          const who = suggestContributor(t.payee, learned)!
+          return (
+            <li key={t.id} className="flex items-center gap-3 px-4 py-3 md:px-3 md:py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium md:text-sm">{t.payee}</p>
+                <p className="truncate text-xs text-ink-3">
+                  {fmtFullDate(t.date)} · {accMap.get(t.accountId)?.name ?? 'an account'} ·{' '}
+                  <span className="tabular">{money(t.amountMinor, { sign: true })}</span>
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => {
+                  void (async () => {
+                    const previous = t.contributorId
+                    await applyContributor([t], who, () => true)
+                    toast(`Counted as ${nameOf(members.get(who))} putting money in`, {
+                      undo: () => update('transactions', t.id, { contributorId: previous }),
+                    })
+                  })()
+                }}
+              >
+                {members.get(who)?.userId === userId ? 'You' : nameOf(members.get(who))}
+              </Button>
+              {/* Session-only, and deliberately not stored. Declining says "not
+                  this row", not "stop learning this payee" — the tagged rows
+                  are the teaching, so silencing it for good means untagging
+                  them. */}
+              <button
+                type="button"
+                aria-label="Not that"
+                title="Leave this one alone"
+                onClick={() => setDismissed((s) => new Set(s).add(t.id))}
+                className="shrink-0 rounded-lg p-1.5 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                <X size={16} />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      {rows.length > 6 && (
+        <p className="px-4 pb-3 text-xs text-ink-3 md:px-3">and {rows.length - 6} more</p>
       )}
     </Card>
   )

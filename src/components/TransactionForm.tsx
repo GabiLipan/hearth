@@ -16,6 +16,7 @@ import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { dateWindow, todayISO } from '../lib/dates'
 import { learnRule, suggestCategory, prettyPayee, similarTo, applyCategory } from '../lib/rules'
+import { applyContributor, learnContributors, similarArrivals, suggestContributor } from '../lib/contributors'
 import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
 import { create, update, remove } from '../lib/data'
@@ -80,6 +81,10 @@ export function TransactionForm({
   const [accountId, setAccountId] = useState<string | undefined>()
   const [note, setNote] = useState('')
   const [forHousehold, setForHousehold] = useState(false)
+  const [contributorId, setContributorId] = useState<string | undefined>()
+  /** Whether the contributor on screen was proposed rather than chosen. */
+  const [contributorGuessed, setContributorGuessed] = useState(false)
+  const [tagSimilar, setTagSimilar] = useState(false)
   const [suggested, setSuggested] = useState(false)
   const [applySimilar, setApplySimilar] = useState(false)
   const [scanState, setScanState] = useState<string | null>(null)
@@ -110,6 +115,7 @@ export function TransactionForm({
       setAccountId(editing.accountId)
       setNote(editing.note ?? '')
       setForHousehold(!!editing.paidForHousehold)
+      setContributorId(editing.contributorId)
     } else {
       setKind('expense')
       setAmount('')
@@ -119,10 +125,13 @@ export function TransactionForm({
       setAccountId(accounts[0]?.id)
       setNote('')
       setForHousehold(false)
+      setContributorId(undefined)
       setTimeout(() => amountRef.current?.focus(), 60)
     }
     setSuggested(false)
     setApplySimilar(false)
+    setContributorGuessed(false)
+    setTagSimilar(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing])
 
@@ -228,6 +237,74 @@ export function TransactionForm({
   const offerHousehold = kind === 'expense' && !!accountId && !books.household.has(accountId)
 
   /**
+   * Whether "who paid this in?" is even a question — the mirror image of the
+   * one above, and gated on the opposite side of the same test.
+   *
+   * Money IN to an account that IS the household's, and not already half of a
+   * transfer. A transfer answers the question properly, with two real rows, and
+   * this must never look like a way to overrule one: `classifyFlows` reads the
+   * tag only where there is no `transferId`, so offering it here would be
+   * offering a control that does nothing.
+   *
+   * There also has to be somebody other than you to name. In a household of one
+   * the whole feature is meaningless, and an empty picker is worse than none.
+   */
+  const members = useMemo(() => [...memberMap.values()], [memberMap])
+  const offerContributor =
+    kind === 'income' &&
+    !!accountId &&
+    books.household.has(accountId) &&
+    !editing?.transferId &&
+    members.length > 1
+
+  /**
+   * What the rows already tagged say about who pays in under this name.
+   *
+   * Read from the whole history, like `similar` above and for the same reason —
+   * "this payee has been hers before" is a claim about everything ever recorded
+   * — and gated on the offer, so an expense form never touches the table.
+   */
+  const learnedContributors =
+    useLiveQuery(async () => {
+      if (!open || !offerContributor) return new Map<string, string>()
+      return learnContributors(await db.transactions.toArray(), books)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, offerContributor, books]) ?? new Map<string, string>()
+
+  /**
+   * Propose the person this payee has been before.
+   *
+   * The same shape as the category suggester: it fills an empty field, and it
+   * will replace its OWN previous answer as you keep typing, but it never
+   * overwrites a person you chose yourself. Declining is doing nothing, which is
+   * the whole posture — accepting moves money between months as well as onto a
+   * name.
+   */
+  useEffect(() => {
+    if (!open || !offerContributor || settledPayee.trim().length < 3) return
+    if (contributorId !== undefined && !contributorGuessed) return
+    const guess = suggestContributor(settledPayee, learnedContributors)
+    if (guess && guess !== contributorId) {
+      setContributorId(guess)
+      setContributorGuessed(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settledPayee, open, offerContributor, learnedContributors])
+
+  /** Other arrivals from this payee that are not tagged to the same person. */
+  const similarArrivalRows =
+    useLiveQuery(async () => {
+      if (!open || !offerContributor || !contributorId || settledPayee.trim().length < 3) return []
+      const all = await db.transactions.toArray()
+      return similarArrivals(settledPayee, contributorId, all, books, editing?.id).filter((t) =>
+        canEditTransaction(t, levelOn(t.accountId, levels), userId),
+      )
+      // `levels` is a fresh Map each render, so it is deliberately not a
+      // dependency — the query re-runs on the inputs that change the answer.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, offerContributor, contributorId, settledPayee, editing?.id, userId, books]) ?? []
+
+  /**
    * How wide the amount field is, and how big its number.
    *
    * Grows first, then shrinks the type once growing would push it past the
@@ -285,6 +362,10 @@ export function TransactionForm({
         // rather than leaving the old one in place (see mapping.ts).
         note: note.trim() || undefined,
         paidForHousehold: forHousehold && offerHousehold,
+        // Explicitly undefined rather than omitted, so clearing the person
+        // actually clears it — and gated on the offer, so switching a row from
+        // income to expense drops a tag that would no longer mean anything.
+        contributorId: offerContributor ? contributorId : undefined,
       })
     } else {
       await create('transactions', {
@@ -295,6 +376,10 @@ export function TransactionForm({
         accountId: accountId!,
         note: note.trim() || undefined,
         paidForHousehold: forHousehold && offerHousehold,
+        // Explicitly undefined rather than omitted, so clearing the person
+        // actually clears it — and gated on the offer, so switching a row from
+        // income to expense drops a tag that would no longer mean anything.
+        contributorId: offerContributor ? contributorId : undefined,
         createdBy: userId,
         createdAt: new Date().toISOString(),
       })
@@ -320,6 +405,22 @@ export function TransactionForm({
             },
           })
         }
+      }
+    }
+    // The same offer on the other side: this arrival is hers, and so are the
+    // three the importer brought in last spring. Nothing is learned explicitly —
+    // `learnContributors` reads the tagged rows back — so tagging these IS the
+    // teaching, and untagging them un-teaches it.
+    if (offerContributor && contributorId && tagSimilar && similarArrivalRows.length > 0) {
+      const before = similarArrivalRows.map((t) => ({ id: t.id, contributorId: t.contributorId }))
+      const { updated } = await applyContributor(similarArrivalRows, contributorId, () => true)
+      if (updated > 0) {
+        const who = nameOf(memberMap.get(contributorId))
+        toast(`${updated} other ${updated === 1 ? 'payment' : 'payments'} tagged as ${who}`, {
+          undo: async () => {
+            for (const row of before) await update('transactions', row.id, { contributorId: row.contributorId })
+          },
+        })
       }
     }
     onClose()
@@ -532,6 +633,50 @@ export function TransactionForm({
               </span>
             </span>
           </label>
+        )}
+
+        {/* The other half of the same idea: money arriving in a joint account
+            that one of us moved there. A transfer says this properly, with two
+            real rows — this is for the person who is not using the app, whose
+            far leg does not exist and never will. */}
+        {offerContributor && (
+          <div className="rounded-xl bg-surface-2 px-4 py-3">
+            <Field label="Paid in by">
+              <Select
+                value={contributorId ?? ''}
+                onChange={(e) => {
+                  setContributorId(e.target.value || undefined)
+                  setContributorGuessed(false)
+                }}
+              >
+                <option value="">Not sure — count it as other income</option>
+                {members.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.userId === userId ? `${nameOf(m)} (you)` : nameOf(m)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <p className="mt-1.5 text-xs text-ink-3">
+              {contributorGuessed
+                ? 'Suggested from what this payee has been before — change it if that is wrong.'
+                : 'Counts as money put into the household rather than income from outside it. Anything paid in from the 25th counts towards the following month.'}
+            </p>
+            {contributorId && similarArrivalRows.length > 0 && (
+              <label className="mt-2.5 flex cursor-pointer items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={tagSimilar}
+                  onChange={(e) => setTagSimilar(e.target.checked)}
+                  className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+                />
+                <span className="min-w-0">
+                  Tag the other {similarArrivalRows.length}{' '}
+                  {similarArrivalRows.length === 1 ? 'payment' : 'payments'} from this payee too
+                </span>
+              </label>
+            )}
+          </div>
         )}
 
         <Field label="Note (optional)">

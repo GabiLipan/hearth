@@ -498,8 +498,8 @@ export function FlowWidget({ data, options, controls }: WidgetProps) {
     [data.txns, data.flows, data.categories, data.book, data.books, count],
   )
   const split = useMemo(
-    () => contributionSplit(data.allTxns, data.flows, month(), data.books),
-    [data.allTxns, data.flows, data.books],
+    () => contributionSplit(data.allTxns, data.flows, month(), data.books, data.userId),
+    [data.allTxns, data.flows, data.books, data.userId],
   )
   const partner = useMemo(() => {
     const others = [...memberMap.values()].filter((m) => m.userId !== data.userId)

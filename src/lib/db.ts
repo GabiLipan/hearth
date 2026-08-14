@@ -48,6 +48,19 @@ export interface Transaction {
    */
   paidForHousehold?: boolean
   /**
+   * "This arrival is a contribution from this person, and there is no far leg."
+   *
+   * The escape hatch for the one case the book model cannot reason about: a
+   * household member who is not using the app, whose payment into the joint
+   * account is a lone positive row nothing can ever be paired with. Read ONLY
+   * where `transferId` is unset — two real rows beat a statement about one —
+   * and only on money coming IN, which the server also checks.
+   *
+   * Tagging a row changes no total. It changes whose the money is, and which
+   * month it counts towards. See `classifyFlows` and `18-contributions.sql`.
+   */
+  contributorId?: string
+  /**
    * Somebody who can see this row has asked whoever holds its other half to
    * explain it. Server-owned — `request_explanation` and `clear_explanation`
    * are the only writers — and meaningful only while the row is still unpaired:

@@ -61,8 +61,11 @@ export interface UnexplainedLeg {
  * Exported for the badge in Activity, which asks about one row at a time.
  */
 export function looksLikeTransfer(txn: Transaction): boolean {
-  // Already explained: half of a transfer, or recorded against a bill.
-  if (txn.transferId || txn.billId) return false
+  // Already explained: half of a transfer, recorded against a bill, or tagged
+  // with whose contribution it is. The last is the answer for a row that can
+  // never be paired at all, so a badge still asking about it would be asking a
+  // question that has been answered as fully as it ever can be.
+  if (txn.transferId || txn.billId || txn.contributorId) return false
   // Somebody has said what this is. A row filed under Groceries is not a
   // transfer, whatever the statement called it.
   if (txn.categoryId) return false

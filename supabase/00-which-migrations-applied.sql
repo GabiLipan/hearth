@@ -163,6 +163,16 @@ select '17-account-appearance.sql',
        'accounts.slot + accounts.icon exist'
 
 union all
+-- Until this reads true, the person picker on an arrival saves nothing: a
+-- contribution from somebody who is not using the app stays "other income", and
+-- stays in the month it landed rather than the month it was for.
+select '18-contributions.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'transactions'
+                  and column_name = 'contributor_id'),
+       'transactions.contributor_id exists'
+
+union all
 -- Not a migration: a state you can only reach by re-running 09 AFTER 10, which
 -- re-creates the two-argument link_transfer beside the three-argument one.
 -- PostgREST cannot then resolve the call — supabase-js drops `undefined`

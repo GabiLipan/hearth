@@ -152,7 +152,11 @@ describe('what each transaction is', () => {
     // Her salary is invisible to me. The incoming leg in the joint account is
     // all I get, and it is enough: money arrived in the household from outside
     // the household's own accounts.
-    expect(flowOf(3)).toBe('contribution')
+    //
+    // `-unpaired` says there is only one row here, which is what lets the
+    // Everything book count it — see the note on the flow. Everywhere else it
+    // behaves as an ordinary contribution.
+    expect(flowOf(3)).toBe('contribution-unpaired')
   })
 
   it('treats joint current to joint savings as a non-event', () => {
@@ -696,5 +700,181 @@ describe('saying which book an account is in', () => {
 
   it('leaves everything alone when it is not set', () => {
     expect(classifyAccounts(accounts, grantsByAccount, ME)).toEqual(books)
+  })
+})
+
+describe('saying who paid in, when there is no far leg to find', () => {
+  /**
+   * The case the far-leg model cannot reach: my wife is not using the app, so
+   * her payment into the joint account is a lone positive row that nothing can
+   * ever be paired with. `contributorId` is somebody saying whose it was.
+   */
+  const tagged = (over: Partial<Transaction> = {}) =>
+    txn({
+      accountId: 'joint',
+      amountMinor: 180000,
+      date: '2026-07-29',
+      payee: 'A KAMINSKA',
+      contributorId: HER,
+      ...over,
+    })
+
+  it('counts it towards the month it was for, like any other contribution', () => {
+    // The whole point. Money paid in on the 29th funds August; untagged, it
+    // was ordinary income and stayed in July.
+    const rows = [tagged()]
+    const flows = classifyFlows(rows, books)
+
+    expect(bookTotals(rows, flows, 'household', '2026-08', books).contributions).toBe(180000)
+    expect(bookTotals(rows, flows, 'household', '2026-07', books).contributions).toBe(0)
+  })
+
+  it('leaves the household no better and no worse off', () => {
+    // Tagging relabels and re-dates. It must not invent or remove money: the
+    // same rows, in the month each lands in, come to the same income either way.
+    const rows = [tagged()]
+    const untagged = [tagged({ contributorId: undefined })]
+
+    const withTag = bookTotals(rows, classifyFlows(rows, books), 'household', '2026-08', books)
+    const without = bookTotals(untagged, classifyFlows(untagged, books), 'household', '2026-07', books)
+
+    expect(withTag.income).toBe(without.income)
+    expect(withTag.net).toBe(without.net)
+    // What changed is which bucket it is in, and that is all.
+    expect(withTag.contributions).toBe(180000)
+    expect(without.externalIncome).toBe(180000)
+  })
+
+  it('puts it on her name rather than in the unattributed bucket', () => {
+    const rows = [tagged()]
+    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-08', books, ME)
+
+    expect(split.theirsMinor).toBe(180000)
+    expect(split.mineMinor).toBe(0)
+    expect(split.otherMinor).toBe(0)
+  })
+
+  it('tells my own tag from hers', () => {
+    const rows = [tagged({ contributorId: ME })]
+    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-08', books, ME)
+
+    expect(split.mineMinor).toBe(180000)
+    expect(split.theirsMinor).toBe(0)
+  })
+
+  it('beats the far-leg guess rather than being outvoted by it', () => {
+    // A linked contribution whose far leg is mine, tagged to her. The explicit
+    // answer wins: this is the correction path for an orphaned or mis-paired
+    // transfer, and an answer somebody typed must not lose to an inference.
+    const out = txn({ accountId: 'myPrivate', amountMinor: -180000, date: '2026-07-29', transferId: 'p' })
+    const arrive = tagged({ transferId: 'p' })
+    const rows = [out, arrive]
+    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-08', books, ME)
+
+    expect(split.theirsMinor).toBe(180000)
+    expect(split.mineMinor).toBe(0)
+  })
+
+  it('ignores a tag on money going out', () => {
+    // A withdrawal is a different claim with a different sign, and crediting
+    // the household with a negative contribution would invent money. The
+    // server's check constraint refuses the row; this refuses to read it.
+    const rows = [tagged({ amountMinor: -180000 })]
+    const flows = classifyFlows(rows, books)
+
+    expect(flows.get(rows[0].id)).toBe('household-spend')
+    expect(bookTotals(rows, flows, 'household', '2026-07', books).contributions).toBe(0)
+  })
+
+  it('ignores a tag on a personal account', () => {
+    // `contributorId` is a claim about money arriving in the HOUSEHOLD. On my
+    // own account it is just my income.
+    const rows = [tagged({ accountId: 'myPrivate' })]
+    const flows = classifyFlows(rows, books)
+
+    expect(flows.get(rows[0].id)).toBe('personal-income')
+    expect(bookTotals(rows, flows, 'mine', '2026-07', books).externalIncome).toBe(180000)
+  })
+
+  it('does not let a transfer be overruled by a tag', () => {
+    // Two real rows beat a statement about one. Both legs are here, so this is
+    // an ordinary internal movement and the tag has nothing to say about it.
+    const out = txn({ accountId: 'joint', amountMinor: -50000, date: '2026-07-29', transferId: 's' })
+    const into = txn({
+      accountId: 'jointSavings',
+      amountMinor: 50000,
+      date: '2026-07-29',
+      transferId: 's',
+      contributorId: HER,
+    })
+    const rows = [out, into]
+    const flows = classifyFlows(rows, books)
+
+    expect(flows.get(into.id)).toBe('internal')
+    expect(bookTotals(rows, flows, 'household', '2026-08', books).contributions).toBe(0)
+  })
+
+  it('still counts under Everything, where there is no second leg to double it', () => {
+    // The regression `contribution-unpaired` exists to prevent. `bookTotals`
+    // drops contributions under `all` because both legs are normally in view;
+    // with only one row, dropping it deletes real income from the book.
+    const rows = [tagged()]
+    const flows = classifyFlows(rows, books)
+    const all = bookTotals(rows, flows, 'all', '2026-08', books)
+
+    expect(all.income).toBe(180000)
+    // Filed as outside income there, which is what the Sankey draws in that
+    // book — as a contribution it would be income the diagram never showed.
+    expect(all.externalIncome).toBe(180000)
+    expect(all.contributions).toBe(0)
+  })
+
+  it('counts a contribution she linked on her own device under Everything too', () => {
+    // The same hole, reached the other way and pre-dating the tag: a leg with a
+    // `transferId` and no partner row on this device.
+    const herIn = txn({ accountId: 'joint', amountMinor: 180000, date: '2026-07-29', transferId: 'hers' })
+    const flows = classifyFlows([herIn], books)
+
+    expect(flows.get(herIn.id)).toBe('contribution-unpaired')
+    expect(bookTotals([herIn], flows, 'all', '2026-08', books).income).toBe(180000)
+  })
+
+  it('leaves a genuinely paired contribution alone under Everything', () => {
+    // Both legs visible, so counting either really would double it. This is the
+    // case the `all` guard was written for and it must keep working.
+    const out = txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-29', transferId: 'p' })
+    const into = txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-29', transferId: 'p' })
+    const rows = [out, into]
+
+    expect(bookTotals(rows, classifyFlows(rows, books), 'all', '2026-08', books).income).toBe(0)
+  })
+
+  it('does not shift an arrival nobody has claimed', () => {
+    // Until somebody says it is a contribution it is ordinary income, and
+    // guessing would move a tax refund into next month.
+    const rows = [tagged({ contributorId: undefined })]
+    const flows = classifyFlows(rows, books)
+
+    expect(bookTotals(rows, flows, 'household', '2026-07', books).externalIncome).toBe(180000)
+    expect(bookTotals(rows, flows, 'household', '2026-08', books).externalIncome).toBe(0)
+  })
+
+  it('keeps the categories adding up to the total above them', () => {
+    // The `spendsIn` invariant, re-checked with the new flow in the mix: a
+    // heading that disagrees with the donut under it reads as a bug even when
+    // both figures are right.
+    const cats: Category[] = [
+      { id: 'home', name: 'Home', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+      { id: 'groceries', name: 'Groceries', kind: 'expense', sortOrder: 1, updatedAt: 'x' },
+      { id: 'utilities', name: 'Utilities', kind: 'expense', sortOrder: 2, updatedAt: 'x' },
+      { id: 'shopping', name: 'Shopping', kind: 'expense', sortOrder: 3, updatedAt: 'x' },
+    ]
+    const rows = [...march(), tagged({ date: '2026-03-29' })]
+    const flows = classifyFlows(rows, books)
+    for (const book of ['household', 'mine', 'all'] as const) {
+      const total = bookTotals(rows, flows, book, '2026-03', books).spend
+      const byCat = bookSpendByCategory(rows, flows, cats, book, '2026-03', books)
+      expect(byCat.reduce((s, r) => s + r.totalMinor, 0)).toBe(total)
+    }
   })
 })
