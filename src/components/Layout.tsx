@@ -166,7 +166,12 @@ export function Layout({ children }: { children: ReactNode }) {
      * leave nothing for the bounce to move. See `lib/scroll.ts` for the two
      * cheaper fixes that were tried first and why neither survived.
      */
-    <div className="app-frame flex flex-col overflow-hidden md:flex-row">
+    /* `relative` so the top bar can be positioned against the FRAME. Safe in a
+       way it would not be on the scroller: this element's box is the viewport's
+       box, so anything absolutely positioned elsewhere in the app that resolves
+       here instead of the initial containing block lands in exactly the same
+       place. */
+    <div className="app-frame relative flex flex-col overflow-hidden md:flex-row">
       {/* Desktop / iPad sidebar. An ordinary flex item in a frame that does not
           scroll, so it needs nothing to hold it in place — `main` simply fills
           whatever width it leaves, at any viewport. */}
@@ -235,18 +240,27 @@ export function Layout({ children }: { children: ReactNode }) {
         </NavLink>
       </aside>
 
-      {/* The one thing that scrolls.
-          `overscroll-behavior` is deliberately left alone: this is the element
-          that rubber-bands now, and the bounce is the point.
-          `min-w-0` because this is the flex item beside the sidebar now, and a
-          flex item's automatic minimum is its CONTENT's width — without it one
-          wide table pushes the whole row instead of scrolling inside itself.
-          Deliberately NOT `relative`: that would make this the containing block
-          for every absolutely positioned descendant in the app. */}
-      <div id={APP_SCROLLER_ID} className="min-w-0 flex-1 overflow-y-auto">
-      {/* Mobile top bar. Sticks to the top of the scroller rather than the
-          document, which is the same place it used to stick to. */}
-      <header ref={headerRef} className="pt-safe sticky top-0 z-30 border-b border-hairline bg-page/80 backdrop-blur-md md:hidden">
+      {/*
+        Mobile top bar, over the scroller rather than inside it.
+
+        It was `sticky top-0` within the scroller, which is not a place a bounce
+        leaves alone: sticky never rises above its own natural position, so
+        pulling down past the top of a page carried the bar down with the
+        content — the same complaint as the tab bar, at the other end.
+
+        Absolute over the frame instead, with the scroller padded to match, so
+        the rows still pass BEHIND it and it keeps its frosted edge. A bar in
+        flow above the scroller would hold still just as well and would cut the
+        content off at a hard line instead, which is a different-looking app.
+
+        `--header-h` is what pads the scroller, so the measurement is now
+        load-bearing in a second place — Activity's month headings already stick
+        to it, and they still sit exactly where they did.
+      */}
+      <header
+        ref={headerRef}
+        className="pt-safe absolute inset-x-0 top-0 z-30 border-b border-hairline bg-page/80 backdrop-blur-md md:hidden"
+      >
         <div className="flex h-13 items-center gap-2 px-4 py-2.5">
           <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight">{title}</h1>
           {/* The book lens, on the pages that have one. It used to be a
@@ -265,32 +279,47 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <SyncBanner />
-      <UpdateBanner />
+      {/* The one thing that scrolls.
+          `overscroll-behavior` is deliberately left alone: this is the element
+          that rubber-bands now, and the bounce is the point.
+          `min-w-0` because this is the flex item beside the sidebar now, and a
+          flex item's automatic minimum is its CONTENT's width — without it one
+          wide table pushes the whole row instead of scrolling inside itself.
+          Deliberately NOT `relative`: that would make this the containing block
+          for every absolutely positioned descendant in the app.
+          The padding is the top bar's own height, since the bar sits OVER this
+          element rather than inside it. Zero on desktop, where the bar is
+          `md:hidden` and therefore measures nothing. */}
+      <div id={APP_SCROLLER_ID} className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)]">
+        <SyncBanner />
+        <UpdateBanner />
 
-      {/* Content — fills every pixel the sidebar leaves, at any viewport width.
-          Pages decide their own column counts from there. */}
-      {/* `max-md:overflow-x-clip` catches the sideways travel of a page change.
-          On a phone this element is exactly the width of the viewport, so it
-          clips where the viewport would have — and unlike the same rule on
-          <html>, it does not propagate to the viewport and take the fixed tab
-          bar's positioning with it. Desktop needs no clip: its page padding is
-          wider than the travel, and nothing there is full-bleed. */}
-      {/* Same inset on the content column: the sidebar is only half the top
-          edge, and the page title would otherwise sit under the clock. Left off
-          below `md`, where the sticky header already carries `pt-safe`. */}
-      <main className="w-full min-w-0 flex-1 px-4 pb-32 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-[calc(1rem_+_env(safe-area-inset-top))] xl:px-6">
-        {/* Desktop page title. Mobile gets the same title in its top bar. */}
-        <h1 className="mb-3 hidden text-xl font-bold tracking-tight md:block">{title}</h1>
-        {/* Keyed on the path so the animation restarts on every page change:
-            re-running one means a new element, not a re-applied class. */}
-        <div
-          key={pathname}
-          className={nav.dir === 0 ? 'animate-page' : nav.dir > 0 ? 'animate-page-forward' : 'animate-page-back'}
-        >
-          {children}
-        </div>
-      </main>
+        {/* Content — fills every pixel the sidebar leaves, at any viewport width.
+            Pages decide their own column counts from there. */}
+        {/* `max-md:overflow-x-clip` catches the sideways travel of a page change.
+            On a phone this element is exactly the width of the viewport, so it
+            clips where the viewport would have — and unlike the same rule on
+            <html>, it does not propagate to the viewport. */}
+        {/* Same inset on the content column: the sidebar is only half the top
+            edge, and the page title would otherwise sit under the clock. Left
+            off below `md`, where the top bar carries `pt-safe` and this
+            element's scroller is already padded past it. */}
+        {/* `pb-20` clears the FAB and nothing else. It was `pb-32`, for a tab
+            bar that used to be `fixed` and therefore lay OVER the end of the
+            page; the bar is in flow below this scroller now, so most of that
+            was simply a dead band under the last card. */}
+        <main className="w-full min-w-0 flex-1 px-4 pb-20 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-[calc(1rem_+_env(safe-area-inset-top))] xl:px-6">
+          {/* Desktop page title. Mobile gets the same title in its top bar. */}
+          <h1 className="mb-3 hidden text-xl font-bold tracking-tight md:block">{title}</h1>
+          {/* Keyed on the path so the animation restarts on every page change:
+              re-running one means a new element, not a re-applied class. */}
+          <div
+            key={pathname}
+            className={nav.dir === 0 ? 'animate-page' : nav.dir > 0 ? 'animate-page-forward' : 'animate-page-back'}
+          >
+            {children}
+          </div>
+        </main>
       </div>
 
       {/* The rows behind whatever figure was last pressed. Mounted here rather

@@ -394,6 +394,16 @@ the single place a level comes from.
   one whose `display-mode: standalone` support cannot be relied on, so
   `index.html` stamps `data-standalone` from `navigator.standalone` before first
   paint. A fix that only fires where the bug is absent is not a fix.
+- **`sticky` is not immune to the bounce either.** A sticky element never rises
+  above its own natural position, so the top bar — `sticky top-0` inside the
+  scroller — was carried down by a pull past the top of a page, the same
+  complaint as the tab bar at the other end. It is `absolute` over the frame
+  now, with the scroller padded by `--header-h` to match, so the rows still pass
+  BEHIND it and it keeps its frosted edge. In flow above the scroller would hold
+  just as still and would cut the content off at a hard line instead, which is a
+  different-looking app. `--header-h` is therefore load-bearing twice over:
+  Activity's month headings stick to it, and it is what stops the first card
+  starting underneath the bar.
 - **Nothing on a phone is `position: fixed` any more.** The tab bar and the FAB
   sit in flow at the bottom of `.app-frame`, because `fixed` resolves against a
   viewport the app cannot see or correct — which is how the same bar was moved
