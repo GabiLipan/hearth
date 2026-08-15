@@ -381,6 +381,28 @@ the single place a level comes from.
   of a page change; it lives on `main` instead, mobile only, where the element
   is exactly the width of the viewport. Nothing in the app sets it any more —
   the sheet scroll lock was the last one, and it locks `#app-scroll` now.
+- **`100dvh` is wrong on a cold start of an installed iOS PWA**, by about the
+  height of the browser chrome that is not there, and it stays wrong until the
+  viewport is "exercised" — a scroll is enough. There is no event for the
+  settle, so there is nothing to await and nothing to re-measure: every number
+  the app can read agrees with every other one and they are all short together.
+  The tell is a layout that is correct the instant you touch it and wrong every
+  time you open the app. `100vh` is the LARGE viewport, a fixed number needing
+  no settling, and in standalone there is no chrome for it to be wrong about —
+  so `.app-frame` takes `dvh` in a browser tab and `vh` in the installed app.
+  Two selectors, deliberately: iOS is both the platform with the bug and the
+  one whose `display-mode: standalone` support cannot be relied on, so
+  `index.html` stamps `data-standalone` from `navigator.standalone` before first
+  paint. A fix that only fires where the bug is absent is not a fix.
+- **Nothing on a phone is `position: fixed` any more.** The tab bar and the FAB
+  sit in flow at the bottom of `.app-frame`, because `fixed` resolves against a
+  viewport the app cannot see or correct — which is how the same bar was moved
+  by the rubber band and then, separately, placed 60-odd pixels too high on
+  every cold start. Anchoring it to a frame the app sizes itself removes both at
+  once. It costs nothing now: the frame stopped scrolling when the scroll moved
+  inside it, so "outside the scroller" and "fixed" stopped being the same
+  requirement. `Toaster` is the exception and is still fixed — it appears in
+  response to something you did, by which time the viewport has long settled.
 - **The document does not scroll. `#app-scroll` does.** This is the one
   structural thing to know about `Layout`: it is a frame exactly `h-dvh` tall
   that never scrolls, holding a single scrolling column, with the tab bar and

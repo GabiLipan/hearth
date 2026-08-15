@@ -221,6 +221,46 @@ select,
   border-radius: inherit;
 }
 
+/**
+ * The app frame's height, and why an installed app does not get `dvh`.
+ *
+ * `100dvh` is the right answer everywhere except the one place this app
+ * actually runs: on a COLD START of an installed iOS PWA it resolves short —
+ * by about the height of the browser chrome that is not there — and stays
+ * short until the viewport is "exercised" by a geometry change. A scroll is
+ * enough to settle it, which is why the app looked correct the moment you
+ * touched it and wrong every time you opened it. There is no event for the
+ * settle, so there is nothing to wait for and nothing to re-measure.
+ *
+ * `100vh` is the LARGE viewport — the height with any dynamic chrome retracted
+ * — which is a fixed number that needs no settling, and in standalone there is
+ * no chrome for it to be wrong about. So the media query is not a workaround
+ * bolted onto the good value; it picks the value that is meaningful in each
+ * mode. A browser tab keeps `dvh`, where the chrome is real and does move.
+ */
+.app-frame {
+  height: 100dvh;
+}
+@media (display-mode: standalone) {
+  .app-frame {
+    height: 100vh;
+  }
+}
+/**
+ * The same rule again, for the browser that needs it.
+ *
+ * iOS is the platform with the bug and the platform whose support for
+ * `display-mode: standalone` cannot be relied on — it has its own
+ * `navigator.standalone` and has never been consistent about the media query.
+ * A fix that only fires where the bug does not exist is no fix, so the flag is
+ * stamped onto <html> in `index.html`, before first paint, for the same reason
+ * the theme is: deciding this after React mounts means the first frames are
+ * laid out at the wrong height, which is the thing being fixed.
+ */
+:root[data-standalone] .app-frame {
+  height: 100vh;
+}
+
 /* Currency figures that must align vertically */
 .tabular {
   font-variant-numeric: tabular-nums;

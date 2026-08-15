@@ -1,6 +1,6 @@
 import {
   useEffect, useLayoutEffect, useRef, useState,
-  type CSSProperties, type ReactNode,
+  type ReactNode,
 } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -10,7 +10,7 @@ import {
 import { useSyncState } from '../hooks/useSync'
 import { installUpdate, useUpdateState } from '../lib/updates'
 import { DrillSheet } from './DrillSheet'
-import { cx, useViewportInset } from './ui'
+import { cx } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
@@ -130,9 +130,6 @@ export function Layout({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Zero unless iOS has anchored `bottom: 0` above the bottom of the screen.
-  const { below } = useViewportInset()
-  const toScreenBottom = below ? { transform: `translateY(${below}px)` } : undefined
 
   // Which way the page travels on arrival. Derived during render rather than in
   // an effect: the animation has to be on the very first frame of the new page,
@@ -169,7 +166,7 @@ export function Layout({ children }: { children: ReactNode }) {
      * leave nothing for the bounce to move. See `lib/scroll.ts` for the two
      * cheaper fixes that were tried first and why neither survived.
      */
-    <div className="flex h-dvh flex-col overflow-hidden md:flex-row">
+    <div className="app-frame flex flex-col overflow-hidden md:flex-row">
       {/* Desktop / iPad sidebar. An ordinary flex item in a frame that does not
           scroll, so it needs nothing to hold it in place — `main` simply fills
           whatever width it leaves, at any viewport. */}
@@ -304,28 +301,46 @@ export function Layout({ children }: { children: ReactNode }) {
           than where it renders. */}
       <DrillSheet />
 
-      {/* Mobile FAB. It withdraws while the sheet is open, so the sheet reads as
-          the button itself having opened up rather than as something covering it. */}
-      <button
-        type="button"
-        onClick={() => setAddOpen(true)}
-        aria-label="Add transaction"
-        aria-expanded={addOpen}
-        style={toScreenBottom}
-        className={cx(
-          'fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-4 z-40 grid size-14 place-items-center',
-          'rounded-2xl bg-accent text-accent-ink shadow-lg shadow-accent/30 md:hidden',
-          // Named properties rather than `transition`: the bottom-of-screen
-          // correction above is a `transform`, and it has to land at once
-          // rather than easing into place.
-          'transition-[scale,opacity] duration-200 ease-out active:scale-95 motion-reduce:transition-none',
-          addOpen && 'pointer-events-none scale-50 opacity-0',
-        )}
-      >
-        <Plus size={26} />
-      </button>
+      {/*
+        The phone's bottom furniture, anchored to the FRAME rather than to the
+        viewport.
 
-      <BottomTabs pathname={pathname} style={toScreenBottom} />
+        Both of these used to be `position: fixed`, which resolves against the
+        browser's viewport — and on a cold start of an installed iOS PWA that
+        viewport is short, so the bar sat well above the bottom of the screen
+        until the first scroll settled it. Nothing measurable was wrong: the
+        page was the right height, `visualViewport` agreed with `innerHeight`,
+        and `below` was correctly zero. The bar was being placed against a
+        number the app never sees.
+
+        In flow at the bottom of a frame the app controls, there is no such
+        number. It also costs nothing now: the frame stopped scrolling when the
+        scroll moved inside it, so "outside the scroller" and "fixed" are no
+        longer the same requirement — which is what made the bar immune to the
+        rubber band, and it still is.
+      */}
+      <div className="relative z-40 shrink-0 md:hidden">
+        {/* Withdraws while the sheet is open, so the sheet reads as the button
+            itself having opened up rather than as something covering it.
+            `bottom-full` puts it on the bar's top edge — the old
+            `4.75rem + safe-area` had to add up to the same place by hand. */}
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          aria-label="Add transaction"
+          aria-expanded={addOpen}
+          className={cx(
+            'absolute bottom-full right-4 mb-4 grid size-14 place-items-center',
+            'rounded-2xl bg-accent text-accent-ink shadow-lg shadow-accent/30',
+            'transition-[scale,opacity] duration-200 ease-out active:scale-95 motion-reduce:transition-none',
+            addOpen && 'pointer-events-none scale-50 opacity-0',
+          )}
+        >
+          <Plus size={26} />
+        </button>
+
+        <BottomTabs pathname={pathname} />
+      </div>
 
       <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
@@ -365,7 +380,7 @@ const PILL_BLEED = 9
  * — restarts on every frame of the label animation, so the pill never gets far
  * enough into its curve to overshoot and just drifts to a halt.
  */
-function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperties }) {
+function BottomTabs({ pathname }: { pathname: string }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const pillRef = useRef<HTMLSpanElement>(null)
   const placed = useRef(false)
@@ -470,16 +485,14 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
 
   return (
     <nav
-      style={style}
       className={cx(
-        'pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-hairline bg-surface/90 backdrop-blur-md md:hidden',
-        // iOS does not always hand a standalone app a viewport that reaches the
-        // bottom of the screen, and a bar anchored to a viewport that stops
-        // short leaves a bare strip of page below it. Continuing the bar's own
-        // surface past its bottom edge costs nothing when the viewport is right
-        // — it is off-screen — and turns that strip into more of the bar when
-        // it isn't.
-        "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-32 after:bg-surface/90 after:content-['']",
+        // `pb-safe` is the whole story now: the bar sits at the bottom of a
+        // frame the app sizes itself, so there is no strip left under it to
+        // paint over. It used to carry an 8rem filler below its own edge, for
+        // the times iOS handed a standalone app a viewport that stopped short
+        // of the display — dead weight once the bar stopped being positioned
+        // against that viewport, and clipped by the frame in any case.
+        'pb-safe border-t border-hairline bg-surface/90 backdrop-blur-md',
       )}
     >
       {/* The padding here has to cover the pill's bleed as well as the tab, or

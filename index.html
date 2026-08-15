@@ -10,6 +10,25 @@
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <title>Hearth — Family Finance</title>
     <script>
+      // Whether this is the installed app, stamped before first paint.
+      //
+      // It decides the frame's height — `100dvh` resolves SHORT on a cold start
+      // of an installed iOS PWA and does not correct until the viewport is
+      // exercised by a scroll, which left the tab bar sitting well above the
+      // bottom of the screen every time the app was opened. `100vh` needs no
+      // settling and means the same thing in standalone, where there is no
+      // dynamic browser chrome for it to be wrong about. See `.app-frame`.
+      //
+      // `navigator.standalone` first: iOS is the platform with the bug, and the
+      // one whose support for the media query cannot be relied on.
+      (function () {
+        try {
+          if (navigator.standalone === true || matchMedia('(display-mode: standalone)').matches) {
+            document.documentElement.dataset.standalone = '';
+          }
+        } catch (e) { /* a browser tab, then */ }
+      })();
+
       // Stamp the resolved theme before first paint to avoid a flash.
       (function () {
         try {
