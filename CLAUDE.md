@@ -379,20 +379,29 @@ the single place a level comes from.
   once you scrolled. `overflow-x: clip` was there to contain the sideways travel
   of a page change; it lives on `main` instead, mobile only, where the element
   is exactly the width of the viewport.
-- **The rubber band moves what `position: fixed` is measured against.** Scroll
-  past the end of a page on iOS and the visual viewport slides off the layout
-  viewport; a fixed element is resolved against the LAYOUT one, so the tab bar
-  leaves the bottom of the screen and returns when the bounce settles. It is not
-  positioned wrongly — the thing it is positioned against moved — and no CSS
-  opts an element out of that. The two ways out are killing the bounce and
-  moving the bar back by however far the viewport slid, and **the bounce is
-  wanted**: it was killed once, with `overscroll-behavior-y: none` moved to
-  `<html>`, and no bounce is worse than a moving bar. `useViewportInset`'s
-  `bounce` is the other way, and its full-height test is the whole subtlety —
-  an open keyboard slides the visible area the same way and by the same sign, so
-  the naive `Math.min(0, drift)` makes the bar climb the keyboard. A keyboard
-  takes HEIGHT from the visual viewport; a bounce leaves the height alone and
-  changes the OFFSET. That is the only thing telling them apart.
+- **The tab bar travels with the rubber band, and that is the accepted state.**
+  Scroll past the end of a page on iOS and the visual viewport slides off the
+  layout viewport; `position: fixed` resolves against the LAYOUT one, so the bar
+  leaves the bottom of the screen and comes back when the band settles. It is
+  not positioned wrongly — the thing it is positioned against moved — and no CSS
+  opts an element out of it. **Both cheap fixes have been tried and reverted**,
+  so try neither again:
+  - *Kill the bounce* (`overscroll-behavior-y: none` moved to `<html>`). Works,
+    and the bounce is wanted — no bounce is worse than a moving bar.
+  - *Correct the bar in JS.* `useViewportInset` already measures the drift, and
+    the negative half of it is exactly how far the bar has gone. Applying it as
+    a transform reads as SHAKING: the band is compositor-driven and the
+    correction is a main-thread `setState` per `visualViewport` event, so it
+    chases the bar a frame or two behind the whole way. Nothing about the
+    arithmetic was wrong — measuring correctly on the wrong thread is the
+    problem, so no amount of tuning it helps.
+
+  The only fix left is taking the scroll off the document — an inner scroller
+  that bounces on its own while the bar sits outside it — which is a real
+  option and not a small one: it collides with the `document.body.style.overflow`
+  scroll lock in `ui.tsx`, with Activity's `window.scrollTo` and scroll spy, and
+  with the drag geometry in `CategoryTree`/`Arrange`, all of which are written
+  in document coordinates. Worth doing deliberately or not at all.
 - **`overscroll-behavior` propagates to the viewport from `<html>` only**, where
   `overflow` propagates from `<body>` too. So the declaration on `body` does
   nothing in Safari and stops Chrome's pull-to-refresh, which is exactly what is

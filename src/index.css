@@ -148,9 +148,9 @@ html {
  * — unlike `overflow`, which propagates from <body> too — so sitting here it
  * stops Chrome's pull-to-refresh (which would reload an installed app mid-tap)
  * and leaves Safari's rubber band alone. That asymmetry is load-bearing rather
- * than an oversight: the bounce is wanted. Moving this to <html> would take it
- * away, and the tab bar it was briefly moved there to rescue is held on screen
- * by `useViewportInset` instead — see the `bounce` half of it.
+ * than an oversight: the bounce is wanted, and moving this to <html> takes it
+ * away. It was moved there once, to stop the bottom tab bar travelling with the
+ * band, and the cure was worse. See the note in CLAUDE.md.
  */
 body {
   @apply bg-page text-ink font-sans antialiased;

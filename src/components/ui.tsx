@@ -17,7 +17,6 @@ import { X, ChevronLeft, ChevronRight, ChevronDown, Info, type LucideIcon } from
 import type { Account, Category } from '../lib/db'
 import { accountFace } from '../lib/accounts'
 import { slotVar } from '../lib/palette'
-import { viewportInset, type Inset } from '../lib/viewport'
 import { CategoryIcon } from './CategoryIcon'
 
 export function cx(...parts: (string | false | undefined | null)[]) {
@@ -681,28 +680,17 @@ export function Segmented<T extends string>({
  * then floats above the bottom of the screen. It is zero in every ordinary
  * case, including with the keyboard up — a keyboard never makes the visible
  * area larger than the viewport — so it is only ever a correction.
- *
- * ## `bounce`, and why it is not simply the negative half of `below`
- *
- * Rubber-banding past the end of a page slides the visual viewport off the
- * layout viewport, and `position: fixed` is resolved against the LAYOUT one —
- * so the tab bar travels off the bottom of the screen and comes back when the
- * bounce settles. It is not positioned wrongly; the thing it is positioned
- * against is what moved. Nothing in CSS can opt a fixed element out of that,
- * which leaves either killing the bounce (it is wanted) or moving the bar back
- * by however far the viewport has slid. This is that number.
- *
- * The catch is that an open keyboard slides the visible area the same way and
- * by the same sign, and the bar must NOT be dragged up over a keyboard. The
- * arithmetic that tells them apart is `viewportInset` in `lib/viewport.ts`,
- * where it can be asserted against numbers instead of against a browser.
  */
-export function useViewportInset(): Inset {
-  const measure = (): Inset => {
+export function useViewportInset() {
+  const measure = () => {
     const vv = typeof window === 'undefined' ? null : window.visualViewport
-    const h = typeof window === 'undefined' ? 0 : window.innerHeight
-    if (!vv) return { height: h, top: 0, keyboard: 0, below: 0, bounce: 0 }
-    return viewportInset(vv, window.innerHeight)
+    if (!vv) return { height: typeof window === 'undefined' ? 0 : window.innerHeight, top: 0, keyboard: 0, below: 0 }
+    return {
+      height: vv.height,
+      top: vv.offsetTop,
+      keyboard: Math.max(0, window.innerHeight - vv.height - vv.offsetTop),
+      below: Math.max(0, vv.height + vv.offsetTop - window.innerHeight),
+    }
   }
   const [inset, setInset] = useState(measure)
   useEffect(() => {
