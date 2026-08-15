@@ -32,6 +32,9 @@ import {
   useMembers,
   useMyLevels,
   useBooks,
+  useFlag,
+  setFlag,
+  OWED_FLAG,
   useRemoteBalances,
   useRules,
 } from '../lib/cache'
@@ -539,6 +542,52 @@ function CurrencySection() {
   )
 }
 
+/**
+ * Whether to keep score of what the household owes you.
+ *
+ * Ticking "I paid for this, but it was the household's" on a row already files
+ * the spending in the right books, and for a couple who share everything that
+ * is the whole of it. The running total of what has not come back is a second,
+ * sharper reading of the same rows — true, and not something everybody wants
+ * counted at them on their home page — so it is off until it is asked for.
+ *
+ * Here rather than in the home page's own Customise row, because it is not a
+ * question about the home page. It changes what the app is keeping track of,
+ * and the answer belongs beside the accounts the money is being paid from.
+ *
+ * A device setting, like the theme and the layout: it is a property of this
+ * screen and it is not somebody else's business what you are counting.
+ */
+function OwedSection() {
+  const on = useFlag(OWED_FLAG)
+  return (
+    <section>
+      <SectionTitle>Paying for the household yourself</SectionTitle>
+      <Card className="p-4 md:p-3">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={on}
+            onChange={(e) => void setFlag(OWED_FLAG, e.target.checked)}
+            className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+          />
+          <span className="min-w-0 text-sm">
+            <span className="font-medium">Keep track of what you are owed</span>
+            <span className="mt-0.5 block text-xs text-ink-3">
+              Adds an &ldquo;Owed to you&rdquo; card to the home page: what you have paid for the household out
+              of your own accounts, what has come back, and a way to move the rest across.
+            </span>
+          </span>
+        </label>
+        <p className="mt-2 text-xs text-ink-3">
+          Off, a payment you mark as the household&rsquo;s still counts exactly the same — household spending,
+          and money you put in. This only decides whether the app adds it up as a debt.
+        </p>
+      </Card>
+    </section>
+  )
+}
+
 function CategoriesSection() {
   const categories = useCategories()
   const [editing, setEditing] = useState<Category | 'new' | null>(null)
@@ -898,6 +947,7 @@ const GROUPS: Group[] = [
       <div className="space-y-6 md:space-y-5">
         <AccountsSection />
         <CurrencySection />
+        <OwedSection />
         <Recoverable />
       </div>
     ),

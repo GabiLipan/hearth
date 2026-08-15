@@ -85,6 +85,16 @@ export function useLayout(key: string, catalogue: SectionDef[]) {
   const [ready, setReady] = useState(false)
   const [editing, setEditing] = useState(false)
 
+  /**
+   * What the catalogue OFFERS, as something that can be compared.
+   *
+   * The catalogue itself is rebuilt on every render by the page that owns it,
+   * so its identity says nothing and using it as a dependency would re-read the
+   * stored layout forever. Its list of ids is the part that matters and is
+   * stable across renders that changed nothing.
+   */
+  const offered = catalogue.map((d) => d.id).join(',')
+
   useEffect(() => {
     let live = true
     void getSetting(key).then((raw) => {
@@ -101,10 +111,14 @@ export function useLayout(key: string, catalogue: SectionDef[]) {
     return () => {
       live = false
     }
-    // The catalogue is rebuilt every render by its page; its identity says
-    // nothing. The key is what decides which page's layout this is.
+    // `offered` and not `catalogue`: see above. It is in the deps rather than
+    // just `key` because a section can now come and go while the page is
+    // mounted — a preference read from `db.meta` resolves a frame after the
+    // first paint, and a layout normalised against the catalogue as it was
+    // then has no entry for a section that has only just been offered. Without
+    // this, turning one on in Settings did nothing until the next reload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+  }, [key, offered])
 
   const setLayout = useCallback(
     (next: LayoutItem[]) => {

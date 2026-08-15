@@ -69,6 +69,40 @@ export function useCacheReady(): boolean {
   }, []) ?? false
 }
 
+/**
+ * A device-local preference, kept in step across the app.
+ *
+ * `db.meta` never syncs — a preference is a property of this screen, like the
+ * theme and the dashboard layout — and reading it through `useLiveQuery` is
+ * what makes a switch in Settings reach a widget on another page without
+ * either of them knowing about the other.
+ *
+ * Off is the default, and it is the same answer as "not read yet": a missing
+ * row and a database that has not opened both come back `false`, so nothing
+ * has to handle a third state. That means a preference somebody has turned ON
+ * appears a frame after the page paints, which is the right way round — a
+ * default that flashed on and then vanished would be worse.
+ */
+export function useFlag(key: string): boolean {
+  return useLiveQuery(async () => (await db.meta.get(key))?.value === 'on', [key]) ?? false
+}
+
+export function setFlag(key: string, on: boolean): Promise<void> {
+  return setSetting(key, on ? 'on' : 'off')
+}
+
+/**
+ * Whether to show what the household owes you for things you bought it out of
+ * your own pocket.
+ *
+ * Off by default. `paid_for_household` puts the spending in the right books all
+ * by itself, and for a couple who simply share everything that is the end of
+ * it — the debt is real but it is not something they want counted at them on
+ * the home page. Turning it on is opting into a second, sharper reading of the
+ * same rows. See `lib/reimbursements.ts`, which is untouched by the switch.
+ */
+export const OWED_FLAG = 'showOwed'
+
 export function useCategories(): Category[] {
   return useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), [], []) ?? []
 }

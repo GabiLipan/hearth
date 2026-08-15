@@ -60,6 +60,34 @@ describe('normaliseLayout', () => {
     expect(out.some((i) => i.id === 'gone')).toBe(false)
   })
 
+  /**
+   * The contract a section that can be switched on and off relies on.
+   *
+   * "Owed to you" is absent from the home catalogue unless the preference in
+   * Settings is on, so the same page normalises against two different
+   * catalogues over its life — and `useLayout` re-runs when the offer changes,
+   * which is the only reason turning it on takes effect without a reload.
+   */
+  it('lets a section come and go with the catalogue that offers it', () => {
+    const withOwed: SectionDef[] = [...CATALOGUE, { id: 'owed', label: 'Owed' }]
+    const stored = [item('hero'), item('owed', { span: 2 })]
+
+    // Offered: kept, exactly as it was stored.
+    expect(normaliseLayout(stored, withOwed).find((i) => i.id === 'owed')).toEqual({
+      id: 'owed',
+      on: true,
+      span: 2,
+      variant: undefined,
+    })
+
+    // Not offered: gone, and gone from what is written back — so turning it on
+    // again puts it at the end with its defaults rather than where it was.
+    const without = normaliseLayout(stored, CATALOGUE)
+    expect(without.some((i) => i.id === 'owed')).toBe(false)
+    const backOn = normaliseLayout(without, withOwed)
+    expect(backOn[backOn.length - 1]).toEqual({ id: 'owed', on: true, span: 1, variant: undefined })
+  })
+
   it('refuses a span or a variant the section does not offer', () => {
     const stored = [{ id: 'donut', on: true, span: 7, variant: 'treemap' }]
     expect(normaliseLayout(stored, CATALOGUE)[0]).toEqual({ id: 'donut', on: true, span: 1, variant: undefined })

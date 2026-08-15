@@ -112,7 +112,8 @@ shape, and what else each one lets you decide — home and Reports share it),
 `sticky.ts` (a filter that outlives leaving the page and dies with the tab), `sankey.ts` (a period as one balanced flow,
 and where every band goes), `scale.ts` (a value axis with round numbers, shared
 by a scrolling chart and the axis pinned beside it),
-`reimbursements.ts` (what the household owes you), `shade.ts` (telling apart
+`reimbursements.ts` (what the household owes you — computed always, shown only
+behind the `showOwed` flag; see `useFlag`), `shade.ts` (telling apart
 two categories the palette gave one colour),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
@@ -489,6 +490,16 @@ the single place a level comes from.
   `--surface` — opaque, so it survives being scrolled under, and unlayered, so it
   beats the `bg-surface` utility whatever the source order — and it goes on the
   row *and* on the pinned cell.
+- **A section that can be switched off is ABSENT from its catalogue, not hidden
+  in it.** "Owed to you" is off unless the `showOwed` flag says otherwise, and
+  a merely-hidden section still sits in Customise mode's row of things you could
+  add — the same offer made more quietly. Two consequences. `normaliseLayout`
+  drops a stored item whose section is not in the catalogue, so the card's
+  position is forgotten while it is off and it comes back at the end; and
+  `useLayout` re-reads when the catalogue's ID LIST changes (not its identity,
+  which is rebuilt every render), because a preference read from `db.meta`
+  resolves a frame after the first paint — without that, turning one on did
+  nothing until the next reload.
 - **`bookTotals` selects rows by ACCOUNT, and `paid-for-household` is the one
   exception.** Selecting by account is what stops a contribution being counted
   into both books; that flow genuinely belongs to two at once, so it is admitted

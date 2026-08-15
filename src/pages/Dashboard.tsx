@@ -1,10 +1,11 @@
-import { useState, type ComponentType } from 'react'
+import { useMemo, useState, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Sparkles, Plus } from 'lucide-react'
 import {
   useAccounts,
   useAllTransactions,
   useBills,
+  useFlag,
   useBook,
   useBooks,
   useBudgetsForMonth,
@@ -12,6 +13,7 @@ import {
   useFlows,
   useRemoteBalances,
   useMyLevels,
+  OWED_FLAG,
 } from '../lib/cache'
 import { accountsInBook } from '../lib/books'
 import { BookSwitcher } from '../components/BookSwitcher'
@@ -81,7 +83,6 @@ const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
     options: [monthWindow('6')],
   },
   { id: 'accounts', label: 'Accounts', component: AccountsWidget },
-  { id: 'owed', label: 'Owed to you', component: ReimbursementWidget },
   { id: 'recent', label: 'Recent activity', component: RecentWidget, options: [rowCount('5', 'Rows')] },
   // Wide and detailed, so it waits to be asked for rather than turning up on
   // everyone's home page on the strength of being new.
@@ -94,6 +95,35 @@ const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
     options: [sliceCount('8')],
   },
 ]
+
+/**
+ * The one widget that is not in the catalogue above.
+ *
+ * Being owed for something you bought the household is a real fact and a
+ * SHARPER reading of the same rows than the books need — `paid_for_household`
+ * files the spending correctly whether or not anybody is keeping score, and for
+ * a couple who simply share everything, a running total of what the other owes
+ * on the home page is an answer to a question they were not asking.
+ *
+ * So it is off unless asked for, in Settings › Accounts, and off means ABSENT
+ * rather than hidden: a section that is merely switched off still sits in
+ * Customise mode's row of things you could add, which is the same offer made
+ * more quietly. Nothing about `lib/reimbursements.ts` changes — the arithmetic
+ * is still there, still tested, and the switch is the only thing between it and
+ * the screen.
+ *
+ * The cost of absence, stated because it is real: `normaliseLayout` drops a
+ * stored item whose section is not in the catalogue, so rearranging the page
+ * while this is off forgets where the card used to be. Turning it back on puts
+ * it at the end rather than where it was. That is the right way round — losing
+ * a position is recoverable in one drag, and the alternative is carrying a
+ * ghost entry nobody can see.
+ */
+const OWED_WIDGET: SectionDef & { component: ComponentType<WidgetProps> } = {
+  id: 'owed',
+  label: 'Owed to you',
+  component: ReimbursementWidget,
+}
 
 /** Two columns on a laptop, three on a wide monitor, four on a very wide one. */
 const COLUMN_STEPS: [number, number][] = [[768, 2], [1536, 3], [2200, 4]]
@@ -115,7 +145,9 @@ export default function Dashboard() {
   const flows = useFlows(txns, books)
   const [seeding, setSeeding] = useState(false)
   const columnCount = useColumnCount(COLUMN_STEPS)
-  const { layout, setLayout, editing, setEditing } = useLayout('homeLayout', WIDGETS)
+  const showOwed = useFlag(OWED_FLAG)
+  const catalogue = useMemo(() => (showOwed ? [...WIDGETS, OWED_WIDGET] : WIDGETS), [showOwed])
+  const { layout, setLayout, editing, setEditing } = useLayout('homeLayout', catalogue)
 
   if (txns && txns.length === 0) {
     // Nothing creates an account for you any more, so the first thing somebody
@@ -200,7 +232,7 @@ export default function Dashboard() {
           wider ones, which cannot join a masonry column without breaking it.
           `Arrange` decides which is which — see `lib/layout.ts`. */}
       <Arrange
-        catalogue={WIDGETS}
+        catalogue={catalogue}
         layout={layout}
         onLayout={setLayout}
         columns={columnCount}
