@@ -136,37 +136,25 @@
 }
 
 /* ---------- Base ---------- */
-/**
- * The rubber band at the end of the page, and why this declaration is on
- * <html> rather than on <body>.
- *
- * Scrolling past the bottom of a page on iOS drags the LAYOUT viewport up with
- * the content, and `position: fixed` is measured against that viewport — so the
- * bottom tab bar travels off the bottom of the screen and comes back when the
- * bounce settles. Nothing about the bar can opt out of this: it is not being
- * positioned wrongly, the thing it is positioned against is the thing that
- * moved. `useViewportInset` does not see it either — the visual viewport keeps
- * its height and its offset throughout, so `below` stays 0. The only fix is to
- * stop the overscroll happening.
- *
- * `overscroll-behavior` propagates to the viewport from the ROOT element only.
- * Unlike `overflow`, it does not propagate from <body> — so the same
- * declaration sitting there was a no-op in Safari, which is every installed
- * copy of this app, and the bounce it was meant to stop had never been stopped.
- *
- * Note this is `overscroll-behavior`, not `overflow`. Overflow on the root is
- * the thing that must never be set — see the note further down, and the one on
- * `main` in Layout.tsx. This property propagates without taking the fixed
- * positioning of the tab bar with it, which is the whole reason it can live
- * here at all.
- */
 html {
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-y: none;
 }
 
+/**
+ * `overscroll-behavior-y` stays on <body>, deliberately, and the bounce stays
+ * with it.
+ *
+ * Per spec this property propagates to the viewport from the ROOT element only
+ * — unlike `overflow`, which propagates from <body> too — so sitting here it
+ * stops Chrome's pull-to-refresh (which would reload an installed app mid-tap)
+ * and leaves Safari's rubber band alone. That asymmetry is load-bearing rather
+ * than an oversight: the bounce is wanted. Moving this to <html> would take it
+ * away, and the tab bar it was briefly moved there to rescue is held on screen
+ * by `useViewportInset` instead — see the `bounce` half of it.
+ */
 body {
   @apply bg-page text-ink font-sans antialiased;
+  overscroll-behavior-y: none;
 }
 
 /**

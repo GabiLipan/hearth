@@ -379,18 +379,25 @@ the single place a level comes from.
   once you scrolled. `overflow-x: clip` was there to contain the sideways travel
   of a page change; it lives on `main` instead, mobile only, where the element
   is exactly the width of the viewport.
-- **`overscroll-behavior` propagates from `<html>` only, and `overflow` also
-  propagates from `<body>`.** The asymmetry is the whole trap: the rule above
-  says never to put `overflow` on either, and the declaration that stops the
-  rubber band has to go on the root or it does nothing at all. It sat on `body`
-  for a long time, where Safari — every installed copy of this app — ignored it,
-  so scrolling past the bottom of a page dragged the layout viewport up and took
-  the `fixed` tab bar off the bottom of the screen with it. Nothing about the
-  bar can opt out: it is not positioned wrongly, the thing it is positioned
-  against moved. `useViewportInset` cannot see it either — the visual viewport
-  keeps its height and its offset throughout a bounce, so `below` stays 0. The
-  only fix is to stop the overscroll, which is `html { overscroll-behavior-y:
-  none }` and iOS 16+.
+- **The rubber band moves what `position: fixed` is measured against.** Scroll
+  past the end of a page on iOS and the visual viewport slides off the layout
+  viewport; a fixed element is resolved against the LAYOUT one, so the tab bar
+  leaves the bottom of the screen and returns when the bounce settles. It is not
+  positioned wrongly — the thing it is positioned against moved — and no CSS
+  opts an element out of that. The two ways out are killing the bounce and
+  moving the bar back by however far the viewport slid, and **the bounce is
+  wanted**: it was killed once, with `overscroll-behavior-y: none` moved to
+  `<html>`, and no bounce is worse than a moving bar. `useViewportInset`'s
+  `bounce` is the other way, and its full-height test is the whole subtlety —
+  an open keyboard slides the visible area the same way and by the same sign, so
+  the naive `Math.min(0, drift)` makes the bar climb the keyboard. A keyboard
+  takes HEIGHT from the visual viewport; a bounce leaves the height alone and
+  changes the OFFSET. That is the only thing telling them apart.
+- **`overscroll-behavior` propagates to the viewport from `<html>` only**, where
+  `overflow` propagates from `<body>` too. So the declaration on `body` does
+  nothing in Safari and stops Chrome's pull-to-refresh, which is exactly what is
+  wanted and is why it stays there. Moving it to the root takes iOS's bounce
+  away with it.
 - **iOS keeps painting the page behind the keyboard.** `visualViewport` shrinks
   but the layout viewport does not, so a sheet sized to the visual viewport ends
   at the keyboard's top edge with the dimmed page showing through beneath it —

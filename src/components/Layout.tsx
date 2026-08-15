@@ -129,9 +129,19 @@ export function Layout({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Zero unless iOS has anchored `bottom: 0` above the bottom of the screen.
-  const { below } = useViewportInset()
-  const toScreenBottom = below ? { transform: `translateY(${below}px)` } : undefined
+  /**
+   * Holds the fixed layer — the tab bar and the FAB — against the bottom of the
+   * SCREEN rather than the bottom of the layout viewport.
+   *
+   * Two corrections that are the same gesture in opposite directions, so they
+   * add rather than compete: `below` for iOS handing a standalone app a
+   * viewport that stops short of the display, `bounce` for the rubber band at
+   * the end of a page carrying the viewport away underneath a fixed element.
+   * One of them is zero at any given moment.
+   */
+  const { below, bounce } = useViewportInset()
+  const shift = below + bounce
+  const toScreenBottom = shift ? { transform: `translateY(${shift}px)` } : undefined
 
   // Which way the page travels on arrival. Derived during render rather than in
   // an effect: the animation has to be on the very first frame of the new page,
@@ -453,7 +463,9 @@ function BottomTabs({ pathname, style }: { pathname: string; style?: CSSProperti
         // short leaves a bare strip of page below it. Continuing the bar's own
         // surface past its bottom edge costs nothing when the viewport is right
         // — it is off-screen — and turns that strip into more of the bar when
-        // it isn't.
+        // it isn't. It earns its keep a second time on every bounce: `bounce`
+        // lifts the bar back onto the screen, and this is what fills the gap
+        // that opens under it while the page is rubber-banding.
         "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-32 after:bg-surface/90 after:content-['']",
       )}
     >
