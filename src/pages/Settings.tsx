@@ -369,7 +369,10 @@ function UnsavedChanges() {
           {deadLetters.map((d) => (
             <li key={d.id} className="rounded-xl bg-surface-2 px-3 py-2 text-sm">
               <p className="font-medium">{d.summary}</p>
-              <p className="text-xs text-ink-3">{d.message}</p>
+              {/* Selectable, unlike the rest of the app: this is the server's
+                  own words about a write that failed, and it is the one string
+                  here somebody has a reason to copy and send on. */}
+              <p className="selectable text-xs text-ink-3">{d.message}</p>
               <div className="mt-1.5 flex gap-2">
                 <Button size="sm" variant="subtle" onClick={() => void retryDeadLetter(d.id)}>
                   Try again

@@ -146,6 +146,44 @@ body {
 }
 
 /**
+ * Text is not selectable, except where selecting it is the point.
+ *
+ * This is an app rather than a document: nearly every string on screen is a
+ * label, a figure or a payee, and a press-and-hold on one produces a blue
+ * highlight and — on iOS — the Copy / Look Up callout, over a control somebody
+ * was trying to use. Dragging a card, scrolling a table sideways and pressing a
+ * band on a chart all begin with a finger held on text, so the selection was
+ * something the app had to be used *around*.
+ *
+ * The `-webkit-` prefixes are load-bearing rather than belt and braces: Safari,
+ * which is every installed copy of this app on iOS, still needs both.
+ *
+ * Two escapes, and they are the whole exception list:
+ *
+ *   - form controls, because typing into a field you cannot select text in is
+ *     not a trade anybody would make. This has to be stated rather than relied
+ *     on: `user-select: none` INHERITS, and in WebKit it reaches inside an
+ *     `<input>` and takes the selection with it.
+ *   - `.selectable`, for a string whose only purpose is to be copied out and
+ *     which has no Copy button of its own. The join code has a button, so the
+ *     one place it is spent today is a dead letter's error message — the text
+ *     somebody would want to send on when a write fails.
+ */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable],
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/**
  * Where the keyboard is.
  *
  * `focus-visible` styling existed in exactly two files, so tabbing through the
