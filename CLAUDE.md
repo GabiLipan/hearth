@@ -599,6 +599,23 @@ the single place a level comes from.
   badge grey, which is the state the feature exists to remove. The badge is a
   rounded SQUARE where a category is a circle: they share rows, and the shape
   says which axis you are reading before the colour says which one.
+- **Everything inside a `<label>` is part of the control's name.** Which is why
+  the ⓘ on a `Field` is positioned back onto the heading line from OUTSIDE the
+  label rather than nested into it: a descendant button contributes its
+  accessible name to the label's, so a nested one renames the field to "Role
+  What does this mean?", and an open paragraph appends itself to that. `Field`
+  keeps its `<label>` wrapping the control because it never sees the child's id
+  and implicit association is the only one available; `CheckRow` has the same
+  split for the same reason, and there the `<label>` holds the box and the title
+  only. The explanation and the ⓘ are always siblings of it, never children.
+- **A `Popover` cannot open from inside a `Sheet`.** The panel portals at `z-40`
+  and a sheet is `z-50`, so it opens *behind* the form it belongs to. Anything
+  that has to reveal something from inside a sheet is a disclosure that pushes
+  content in below — which costs nothing, because `useMorphHeight` is already
+  animating the sheet's body between the shapes its contents take. `InfoBody`
+  in `ui.tsx` is that, and `CheckRow`/`Field`'s `info` prop is the way to reach
+  it: a hint that needs a comma is an `info`, and `status` (a `CheckRow`'s one
+  short line) is for what is TRUE right now rather than what the setting means.
 - **Two categories of the same colour is the ORDINARY case.** Twelve slots, no
   limit on categories, and a subcategory inherits its parent's slot on purpose —
   so a donut routinely holds two identical arcs, and drilling in is where it

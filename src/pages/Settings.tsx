@@ -61,7 +61,7 @@ import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { alertAction, confirmAction } from '../components/confirm'
 import { toast } from '../components/toast'
-import { Card, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, useWide, cx } from '../components/ui'
+import { Card, CheckRow, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, useWide, cx } from '../components/ui'
 import {
   claimAccount,
   deletedAccounts,
@@ -564,25 +564,24 @@ function OwedSection() {
     <section>
       <SectionTitle>Paying for the household yourself</SectionTitle>
       <Card className="p-4 md:p-3">
-        <label className="flex cursor-pointer items-start gap-3">
-          <input
-            type="checkbox"
-            checked={on}
-            onChange={(e) => void setFlag(OWED_FLAG, e.target.checked)}
-            className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
-          />
-          <span className="min-w-0 text-sm">
-            <span className="font-medium">Keep track of what you are owed</span>
-            <span className="mt-0.5 block text-xs text-ink-3">
-              Adds an &ldquo;Owed to you&rdquo; card to the home page: what you have paid for the household out
-              of your own accounts, what has come back, and a way to move the rest across.
-            </span>
-          </span>
-        </label>
-        <p className="mt-2 text-xs text-ink-3">
-          Off, a payment you mark as the household&rsquo;s still counts exactly the same — household spending,
-          and money you put in. This only decides whether the app adds it up as a debt.
-        </p>
+        <CheckRow
+          tone="bare"
+          checked={on}
+          onChange={(next) => void setFlag(OWED_FLAG, next)}
+          label="Keep track of what you are owed"
+          info={
+            <>
+              <p>
+                Adds an &ldquo;Owed to you&rdquo; card to the home page: what you have paid for the household
+                out of your own accounts, what has come back, and a way to move the rest across.
+              </p>
+              <p>
+                Off, a payment you mark as the household&rsquo;s still counts exactly the same — household
+                spending, and money you put in. This only decides whether the app adds it up as a debt.
+              </p>
+            </>
+          }
+        />
       </Card>
     </section>
   )
@@ -1446,7 +1445,12 @@ function MemberSheet({
         {isAdmin && !isMe && (
           <Field
             label="Role"
-            hint="Admins can invite and remove people, and reset the invite code. It gives them no access to any account."
+            info={
+              <p>
+                Admins can invite and remove people, and reset the invite code. It gives them no access to any
+                account.
+              </p>
+            }
           >
             <Segmented
               value={member.role}
@@ -2191,7 +2195,12 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         {account && (
           <Field
             label="Which book"
-            hint="Normally worked out from who is on the account. Change it where that is wrong — an account only you can see that is really the household's float, say."
+            info={
+              <p>
+                Normally worked out from who is on the account. Change it where that is wrong — an account only
+                you can see that is really the household&rsquo;s float, say.
+              </p>
+            }
           >
             <Select value={book} onChange={(e) => setBook(e.target.value as '' | 'household' | 'mine')}>
               <option value="">Work it out from who is on it</option>
@@ -2205,28 +2214,26 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
             handful of rows and nothing else, and folding the two together would
             make one look like a quieter version of the other. */}
         {offerPublishing && (
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-surface-2 px-4 py-3">
-            <input
-              type="checkbox"
-              checked={publishes}
-              onChange={(e) => setPublishes(e.target.checked)}
-              className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
-            />
-            <span className="min-w-0 text-sm">
-              <span className="font-medium">Publish household expenses paid from here</span>
-              <span className="mt-0.5 block text-xs text-ink-3">
-                When you mark a payment as the household&rsquo;s, everyone in the household can read that
-                row — payee, amount, category and note. The balance, the name of this account and every
-                row you have not marked stay yours alone.
-              </span>
-              {publishes && (
-                <span className="mt-1.5 block text-xs text-ink-3">
-                  Turning it off hides them again everywhere, but nobody can un-read what they have
-                  already seen.
-                </span>
-              )}
-            </span>
-          </label>
+          <CheckRow
+            checked={publishes}
+            onChange={setPublishes}
+            label="Publish household expenses paid from here"
+            info={
+              <>
+                <p>
+                  When you mark a payment as the household&rsquo;s, everyone in the household can read that
+                  row — payee, amount, category and note. The balance, the name of this account and every row
+                  you have not marked stay yours alone.
+                </p>
+                {publishes && (
+                  <p>
+                    Turning it off hides them again everywhere, but nobody can un-read what they have already
+                    seen.
+                  </p>
+                )}
+              </>
+            }
+          />
         )}
         {account && (
           <button
@@ -2382,20 +2389,12 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
         )}
 
         {userId && (
-          <label className="flex items-start gap-3 rounded-xl bg-surface-2 px-4 py-3">
-            <input
-              type="checkbox"
-              checked={personal}
-              onChange={(e) => setPersonal(e.target.checked)}
-              className="mt-0.5 size-4 accent-[var(--accent)]"
-            />
-            <span>
-              <span className="block text-sm font-medium">Keep this to myself</span>
-              <span className="block text-xs text-ink-3">
-                Nobody else sees it, and it can only be used on an account nobody else shares.
-              </span>
-            </span>
-          </label>
+          <CheckRow
+            checked={personal}
+            onChange={setPersonal}
+            label="Keep this to myself"
+            info={<p>Nobody else sees it, and it can only be used on an account nobody else shares.</p>}
+          />
         )}
 
         <SlotPicker

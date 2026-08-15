@@ -1,6 +1,7 @@
 import {
   Children,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -12,7 +13,7 @@ import {
   type SelectHTMLAttributes,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, ChevronDown, type LucideIcon } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, ChevronDown, Info, type LucideIcon } from 'lucide-react'
 import type { Account, Category } from '../lib/db'
 import { accountFace } from '../lib/accounts'
 import { slotVar } from '../lib/palette'
@@ -303,14 +304,177 @@ export function Button({ variant = 'primary', size = 'md', type = 'button', clas
   )
 }
 
-/* ---------- Inputs ---------- */
-export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+/* ---------- Explaining a control without shouting ---------- */
+/**
+ * The ⓘ that puts a paragraph away until it is asked for.
+ *
+ * Every long explanation in this app is worth having and almost none of it is
+ * worth having *every* time. The consent on a household payment ran to three
+ * paragraphs standing permanently above the note field — read once, understood,
+ * and then in the way for ever, on a form that is opened several times a day.
+ *
+ * Deliberately a disclosure that pushes the content in below, rather than a
+ * `Popover`: these live inside sheets, and `Popover` portals its panel at `z-40`
+ * where `Sheet` is `z-50`, so the panel would open *behind* the form it belongs
+ * to. Growing the sheet instead is free — `useMorphHeight` is already animating
+ * its body between the shapes its contents take, so the paragraph slides in.
+ *
+ * `aria-expanded` plus `aria-controls` is the whole accessibility story: the
+ * text is in the document, in reading order, right after the thing it explains.
+ * Nothing here is hidden from a screen reader that a sighted reader can see.
+ */
+function InfoToggle({ open, controls, onClick, label }: { open: boolean; controls: string; onClick: () => void; label: string }) {
   return (
+    <button
+      // Inside a `<form>` a button with no type submits it, and every one of
+      // these sits inside one.
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      aria-controls={controls}
+      aria-label={open ? `Hide what this means: ${label}` : `What does this mean? ${label}`}
+      className={cx(
+        'grid size-7 shrink-0 place-items-center rounded-full transition-colors',
+        open ? 'bg-ink/10 text-ink-2' : 'text-ink-3 hover:bg-ink/5 hover:text-ink-2',
+      )}
+    >
+      <Info size={16} />
+    </button>
+  )
+}
+
+/** The revealed paragraphs. A `<div>` of `<p>`s, spaced, in the quiet size. */
+function InfoBody({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
+  return (
+    <div id={id} className={cx('animate-fade space-y-2 text-xs leading-relaxed text-ink-3 [&_p]:m-0', className)}>
+      {children}
+    </div>
+  )
+}
+
+/** The state behind one ⓘ. Its own hook so the id and the flag cannot drift apart. */
+function useInfo(has: boolean) {
+  const id = useId()
+  const [open, setOpen] = useState(false)
+  return { id, open: has && open, toggle: () => setOpen((o) => !o) }
+}
+
+/* ---------- Inputs ---------- */
+/**
+ * A labelled control, with two grades of explanation under it.
+ *
+ * `hint` is the short one and is always visible — a unit, a format, a default.
+ * `info` is the paragraph, and it hides behind a ⓘ beside the label. A hint
+ * that needs a comma is probably an `info`.
+ */
+export function Field({
+  label,
+  children,
+  hint,
+  info,
+}: {
+  label: string
+  children: ReactNode
+  hint?: string
+  info?: ReactNode
+}) {
+  const i = useInfo(!!info)
+  const inner = (
+    // The `<label>` has to go on wrapping the control: `Field` never sees the
+    // child's id, so this implicit association is the only one available.
     <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">{label}</span>
+      <span className={cx('mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs', !!info && 'pr-8')}>
+        {label}
+      </span>
       {children}
       {hint && <span className="mt-1 block text-xs text-ink-3">{hint}</span>}
     </label>
+  )
+  if (!info) return inner
+  return (
+    // The ⓘ and its paragraph sit OUTSIDE the label, and the ⓘ is placed back
+    // onto the heading line rather than being nested into it. Anything inside a
+    // label is part of the control's accessible name — including a descendant
+    // button's — so a nested ⓘ would rename the field to "Role What does this
+    // mean?", and an open paragraph would append itself to that.
+    <div className="relative">
+      {inner}
+      <span className="absolute -top-1 right-0">
+        <InfoToggle open={i.open} controls={i.id} onClick={i.toggle} label={label} />
+      </span>
+      {i.open && (
+        <InfoBody id={i.id} className="mt-1.5">
+          {info}
+        </InfoBody>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A tick box whose consequences need a paragraph.
+ *
+ * The row itself is one line — box, name, ⓘ — because that is what you read
+ * when you already know what it does, which is nearly always. `status` is the
+ * exception: a single short line for what is *true right now* rather than what
+ * the setting means, because that genuinely changes and cannot be learned once.
+ * Everything else goes behind the ⓘ.
+ *
+ * `children` is for controls that belong to the tick box, not for more prose.
+ */
+export function CheckRow({
+  checked,
+  onChange,
+  label,
+  status,
+  info,
+  tone = 'plain',
+  disabled,
+  children,
+}: {
+  checked: boolean
+  onChange: (next: boolean) => void
+  label: ReactNode
+  /** One short line of current state. Not an explanation. */
+  status?: ReactNode
+  /** The explanation, behind the ⓘ. */
+  info?: ReactNode
+  /** `plain` is the filled panel; `bare` sits on whatever is behind it. */
+  tone?: 'plain' | 'accent' | 'bare'
+  disabled?: boolean
+  children?: ReactNode
+}) {
+  const i = useInfo(!!info)
+  return (
+    <div
+      className={cx(
+        tone === 'bare' ? '' : 'rounded-xl px-4 py-3',
+        tone === 'plain' ? 'bg-surface-2' : '',
+        tone === 'accent' ? 'bg-accent/8 ring-1 ring-accent/20' : '',
+      )}
+    >
+      <div className="flex items-center gap-3">
+        <label className={cx('flex min-w-0 flex-1 items-center gap-3', disabled ? '' : 'cursor-pointer')}>
+          <input
+            type="checkbox"
+            checked={checked}
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.checked)}
+            className="size-5 shrink-0 accent-[var(--accent)]"
+          />
+          <span className="min-w-0 text-sm font-medium">{label}</span>
+        </label>
+        {info && <InfoToggle open={i.open} controls={i.id} onClick={i.toggle} label={typeof label === 'string' ? label : ''} />}
+      </div>
+      {/* Indented to the label above: box (1.25rem) plus gap (0.75rem). */}
+      {status && <p className="mt-1 ml-8 text-xs text-ink-3">{status}</p>}
+      {info && i.open && (
+        <InfoBody id={i.id} className="mt-2 ml-8">
+          {info}
+        </InfoBody>
+      )}
+      {children && <div className="mt-2.5 ml-8">{children}</div>}
+    </div>
   )
 }
 

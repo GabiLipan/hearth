@@ -21,7 +21,7 @@ import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
 import { create, update, remove } from '../lib/data'
 import { useApp } from '../state/AppContext'
-import { Sheet, Field, TextInput, Select, Segmented, Button } from './ui'
+import { Sheet, Field, TextInput, Select, Segmented, Button, CheckRow } from './ui'
 import { confirmAction } from './confirm'
 import { toast } from './toast'
 import { CategoryPicker } from './CategoryPicker'
@@ -650,27 +650,22 @@ export function TransactionForm({
         </div>
 
         {similar.length > 0 && (
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-accent/8 px-4 py-3 ring-1 ring-accent/20">
-            <input
-              type="checkbox"
-              checked={applySimilar}
-              onChange={(e) => setApplySimilar(e.target.checked)}
-              className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
-            />
-            <span className="min-w-0 text-sm">
-              <span className="font-medium">
-                Move {similar.length} other {similar.length === 1 ? 'transaction' : 'transactions'} here too
-              </span>
-              <span className="mt-0.5 block text-xs text-ink-3">
+          <CheckRow
+            tone="accent"
+            checked={applySimilar}
+            onChange={setApplySimilar}
+            label={`Move ${similar.length} other ${similar.length === 1 ? 'transaction' : 'transactions'} here too`}
+            info={
+              <p>
                 {similar.length === 1 ? 'One is' : `${similar.length} are`} from “{prettyPayee(payee)}” and filed
                 somewhere else. There is more in{' '}
                 <Link to="/settings/rules" className="underline underline-offset-2">
                   Settings › Rules
                 </Link>
                 .
-              </span>
-            </span>
-          </label>
+              </p>
+            }
+          />
         )}
 
         <div className="grid grid-cols-2 gap-3">
@@ -692,48 +687,56 @@ export function TransactionForm({
             not already the household's. Money already in a joint account is the
             household's, so there is nothing to move. */}
         {offerHousehold && (
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-surface-2 px-4 py-3">
-            <input
-              type="checkbox"
-              checked={forHousehold}
-              onChange={(e) => void toggleForHousehold(e.target.checked)}
-              className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
-            />
-            <span className="min-w-0 text-sm">
-              <span className="font-medium">I paid for this, but it was the household&rsquo;s</span>
-              <span className="mt-0.5 block text-xs text-ink-3">
-                Counted as household spending, and as money you put in — the same as moving it to the joint
-                account and spending it from there.
-              </span>
-              {/* What the arithmetic above cannot say by itself: whether the
-                  other person can see any of it. Three states, and they are
-                  genuinely different — this used to be silently the middle one
-                  for everybody, which is the hole migration 19 closes. */}
-              {someoneToTell && (
-                <span className="mt-1.5 block text-xs text-ink-3">
-                  {publishes ? (
-                    <>
+          <CheckRow
+            checked={forHousehold}
+            onChange={(next) => void toggleForHousehold(next)}
+            label={<>I paid for this, but it was the household&rsquo;s</>}
+            /* What the arithmetic cannot say by itself: whether the other
+               person can see any of it. Three states, genuinely different —
+               this used to be silently the middle one for everybody, which is
+               the hole migration 19 closes. It stays on the face of the row
+               rather than going behind the ⓘ, because it is the one part that
+               is not the same answer every time. */
+            status={
+              someoneToTell &&
+              (publishes
+                ? 'Your household can read the rows you mark here'
+                : mayPublish
+                  ? 'Ticking this asks to share these rows with your household'
+                  : 'Counts on your screen only')
+            }
+            info={
+              <>
+                <p>
+                  Counted as household spending, and as money you put in — the same as moving it to the joint
+                  account and spending it from there.
+                </p>
+                {someoneToTell &&
+                  (publishes ? (
+                    <p>
                       Everyone in your household can read the rows you mark here — and nothing else on
-                      &ldquo;{account?.name}&rdquo;.
-                    </>
+                      &ldquo;{account?.name}&rdquo;. Nobody can un-read one afterwards.
+                    </p>
                   ) : mayPublish ? (
-                    <>Ticking this asks whether the household may read the rows you mark on this account.</>
+                    <p>
+                      Ticking this asks whether the household may read the rows you mark on this account. The
+                      balance, the account&rsquo;s name and every row you have not marked stay yours alone.
+                    </p>
                   ) : (
-                    <>
-                      It counts on your screen only: this account does not publish its household rows, and
-                      only someone who can manage it can change that.
-                    </>
-                  )}
-                </span>
-              )}
-              {forHousehold && (
-                <span className="mt-1.5 block text-xs text-ink-3">
-                  Your own private categories are not offered for a household row — nobody else could read
-                  one, so the spending would arrive on their screen uncategorised.
-                </span>
-              )}
-            </span>
-          </label>
+                    <p>
+                      It counts on your screen only: this account does not publish its household rows, and only
+                      someone who can manage it can change that.
+                    </p>
+                  ))}
+                {forHousehold && (
+                  <p>
+                    Your own private categories are not offered for a household row — nobody else could read
+                    one, so the spending would arrive on their screen uncategorised.
+                  </p>
+                )}
+              </>
+            }
+          />
         )}
 
         {/* The other half of the same idea: money arriving in a joint account
@@ -742,7 +745,18 @@ export function TransactionForm({
             far leg does not exist and never will. */}
         {offerContributor && (
           <div className="rounded-xl bg-surface-2 px-4 py-3">
-            <Field label="Paid in by">
+            <Field
+              label="Paid in by"
+              /* The guess is state — it is about THIS row and changes with the
+                 payee — so it stays visible. What the setting means does not. */
+              hint={contributorGuessed ? 'Suggested from this payee — change it if that is wrong' : undefined}
+              info={
+                <p>
+                  Counts as money put into the household rather than income from outside it. Anything paid in
+                  from the 25th counts towards the following month.
+                </p>
+              }
+            >
               <Select
                 value={contributorId ?? ''}
                 onChange={(e) => {
@@ -758,24 +772,15 @@ export function TransactionForm({
                 ))}
               </Select>
             </Field>
-            <p className="mt-1.5 text-xs text-ink-3">
-              {contributorGuessed
-                ? 'Suggested from what this payee has been before — change it if that is wrong.'
-                : 'Counts as money put into the household rather than income from outside it. Anything paid in from the 25th counts towards the following month.'}
-            </p>
             {contributorId && similarArrivalRows.length > 0 && (
-              <label className="mt-2.5 flex cursor-pointer items-start gap-3 text-sm">
-                <input
-                  type="checkbox"
+              <div className="mt-2.5">
+                <CheckRow
+                  tone="bare"
                   checked={tagSimilar}
-                  onChange={(e) => setTagSimilar(e.target.checked)}
-                  className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
+                  onChange={setTagSimilar}
+                  label={`Tag the other ${similarArrivalRows.length} ${similarArrivalRows.length === 1 ? 'payment' : 'payments'} from this payee too`}
                 />
-                <span className="min-w-0">
-                  Tag the other {similarArrivalRows.length}{' '}
-                  {similarArrivalRows.length === 1 ? 'payment' : 'payments'} from this payee too
-                </span>
-              </label>
+              </div>
             )}
           </div>
         )}
