@@ -25,6 +25,7 @@ import {
   type SectionDef,
 } from '../lib/layout'
 import { Columns, Popover, cx } from './ui'
+import { appScrollX, appScrollY, scrollAppBy } from '../lib/scroll'
 
 /**
  * A page you can rearrange with your hands.
@@ -60,7 +61,7 @@ import { Columns, Popover, cx } from './ui'
  *
  * The same reason `CategoryTree` freezes it: hit-testing against a layout that
  * is reflowing under the finger tests geometry the reflow has just invalidated.
- * Boxes are measured once at pick-up in DOCUMENT coordinates, so an auto-scroll
+ * Boxes are measured once at pick-up in the SCROLLER's coordinates, so an auto-scroll
  * moves the page under them without invalidating anything, and the caret is
  * drawn from `moveTo`'s own answer rather than from the pointer — a drop that
  * lands somewhere other than where the finger is says so before you let go.
@@ -188,7 +189,7 @@ export function Arrange({
   const hidden = useMemo(() => layout.filter((i) => !i.on && defs.has(i.id)), [layout, defs])
 
   const wrap = useRef<HTMLDivElement>(null)
-  /** Every visible section's box, in document coordinates, frozen at pick-up. */
+  /** Every visible section's box, in the scroller's coordinates, frozen at pick-up. */
   const boxes = useRef<Box[]>([])
   /** The wrapper's own document origin, frozen with them, so the caret can be drawn inside it. */
   const anchor = useRef({ x: 0, y: 0 })
@@ -224,8 +225,8 @@ export function Arrange({
   const reread = useCallback(() => {
     const b = boxes.current
     if (b.length === 0) return
-    const x = pointer.current.x + window.scrollX
-    const y = pointer.current.y + window.scrollY
+    const x = pointer.current.x + appScrollX()
+    const y = pointer.current.y + appScrollY()
 
     let box = b.find((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)
     if (!box) {
@@ -253,7 +254,7 @@ export function Arrange({
       const el = wrap.current
       if (!el) return
       const rect = el.getBoundingClientRect()
-      anchor.current = { x: rect.left + window.scrollX, y: rect.top + window.scrollY }
+      anchor.current = { x: rect.left + appScrollX(), y: rect.top + appScrollY() }
       const at = new Map(visible.map((i, index) => [i.id, index]))
       boxes.current = []
       for (const node of el.querySelectorAll('[data-section]')) {
@@ -264,10 +265,10 @@ export function Arrange({
         if (index === undefined || r.width === 0 || r.height === 0) continue
         boxes.current.push({
           index,
-          left: r.left + window.scrollX,
-          top: r.top + window.scrollY,
-          right: r.right + window.scrollX,
-          bottom: r.bottom + window.scrollY,
+          left: r.left + appScrollX(),
+          top: r.top + appScrollY(),
+          right: r.right + appScrollX(),
+          bottom: r.bottom + appScrollY(),
         })
       }
       boxes.current.sort((a, b) => a.index - b.index)
@@ -349,7 +350,7 @@ export function Arrange({
       const under = window.innerHeight - y - EDGE
       const by = over < 0 ? Math.max(-16, over / 4) : under < 0 ? Math.min(16, -under / 4) : 0
       if (by !== 0) {
-        window.scrollBy(0, by)
+        scrollAppBy(0, by)
         reread()
       }
       frame = requestAnimationFrame(tick)

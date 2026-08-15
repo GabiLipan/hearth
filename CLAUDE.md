@@ -115,6 +115,7 @@ by a scrolling chart and the axis pinned beside it),
 `reimbursements.ts` (what the household owes you — computed always, shown only
 behind the `showOwed` flag; see `useFlag`), `shade.ts` (telling apart
 two categories the palette gave one colour),
+`scroll.ts` (the element the app scrolls, which is not the document, and why),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
 allow-lists), `session.ts` (auth, household, sync orchestration),
@@ -378,30 +379,38 @@ the single place a level comes from.
   wrong on a short page, was left behind by a taller one, and only snapped back
   once you scrolled. `overflow-x: clip` was there to contain the sideways travel
   of a page change; it lives on `main` instead, mobile only, where the element
-  is exactly the width of the viewport.
-- **The tab bar travels with the rubber band, and that is the accepted state.**
-  Scroll past the end of a page on iOS and the visual viewport slides off the
-  layout viewport; `position: fixed` resolves against the LAYOUT one, so the bar
-  leaves the bottom of the screen and comes back when the band settles. It is
-  not positioned wrongly — the thing it is positioned against moved — and no CSS
-  opts an element out of it. **Both cheap fixes have been tried and reverted**,
-  so try neither again:
+  is exactly the width of the viewport. Nothing in the app sets it any more —
+  the sheet scroll lock was the last one, and it locks `#app-scroll` now.
+- **The document does not scroll. `#app-scroll` does.** This is the one
+  structural thing to know about `Layout`: it is a frame exactly `h-dvh` tall
+  that never scrolls, holding a single scrolling column, with the tab bar and
+  the FAB OUTSIDE that column. It exists because of the rubber band — scroll
+  past the end of a page on iOS and the visual viewport slides off the layout
+  viewport, and `position: fixed` resolves against the layout one, so the bar
+  left the bottom of the screen on every bounce. It was not positioned wrongly;
+  the thing it was positioned against moved, and no CSS opts an element out of
+  that. Moving the scroll inside leaves the bounce entirely intact — the column
+  rubber-bands natively, on flicks as well as drags, because it is iOS doing it
+  — while the bar sits on a viewport nothing can move.
+
+  **Both cheaper fixes were tried and reverted**, so try neither again:
   - *Kill the bounce* (`overscroll-behavior-y: none` moved to `<html>`). Works,
     and the bounce is wanted — no bounce is worse than a moving bar.
-  - *Correct the bar in JS.* `useViewportInset` already measures the drift, and
-    the negative half of it is exactly how far the bar has gone. Applying it as
-    a transform reads as SHAKING: the band is compositor-driven and the
-    correction is a main-thread `setState` per `visualViewport` event, so it
-    chases the bar a frame or two behind the whole way. Nothing about the
-    arithmetic was wrong — measuring correctly on the wrong thread is the
-    problem, so no amount of tuning it helps.
+  - *Correct the bar in JS* from `visualViewport`. Reads as SHAKING: the band is
+    compositor-driven and the correction is a main-thread `setState` per event,
+    so the bar chases it a frame or two behind the whole way. The arithmetic was
+    right — measuring correctly on the wrong thread is the problem, so there is
+    no tuning that saves it.
 
-  The only fix left is taking the scroll off the document — an inner scroller
-  that bounces on its own while the bar sits outside it — which is a real
-  option and not a small one: it collides with the `document.body.style.overflow`
-  scroll lock in `ui.tsx`, with Activity's `window.scrollTo` and scroll spy, and
-  with the drag geometry in `CategoryTree`/`Arrange`, all of which are written
-  in document coordinates. Worth doing deliberately or not at all.
+  What this costs is that `window.scrollY` is permanently 0 and
+  `window.scrollTo` is a silent no-op. Everything goes through `lib/scroll.ts`
+  instead, and the trap is that a call left behind still compiles and still
+  runs. Two things it is worth knowing are already handled: `Popover` listens
+  for scroll on `window` in the CAPTURE phase, which still reaches a scroll on a
+  descendant (the non-capture spelling would silently never fire again), and the
+  drag geometry in `CategoryTree`/`Arrange` freezes boxes in the scroller's
+  coordinates — pointer and boxes convert the same way, so the scroller's own
+  offset on screen cancels and never appears in the arithmetic.
 - **`overscroll-behavior` propagates to the viewport from `<html>` only**, where
   `overflow` propagates from `<body>` too. So the declaration on `body` does
   nothing in Safari and stops Chrome's pull-to-refresh, which is exactly what is
@@ -444,7 +453,7 @@ the single place a level comes from.
   income, and a parent with children cannot become one — all three are
   `categories_hierarchy_guard`, restated in `move()` so a drop the database
   would refuse is never offered. The drag's geometry is frozen at pick-up in
-  DOCUMENT coordinates, so auto-scrolling does not invalidate it, and the
+  the SCROLLER's coordinates, so auto-scrolling does not invalidate it, and the
   insertion line is drawn from `move`'s own answer rather than from the pointer:
   when a drop is clamped, the line goes where the row will actually land.
   `pointercancel` must NOT commit — it is the system taking the gesture away,

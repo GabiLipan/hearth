@@ -4,6 +4,7 @@ import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet
 import type { Category, Transaction } from '../lib/db'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
 import { canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { onAppScroll, scrollAppTo, scrollAppToElement } from '../lib/scroll'
 
 import { update } from '../lib/data'
 import {
@@ -333,7 +334,7 @@ export default function Activity() {
   ].join('|')
   useEffect(() => {
     setLimit(PAGE)
-    window.scrollTo({ top: 0 })
+    scrollAppTo({ top: 0 })
   }, [filterKey])
 
   const visible = filtered.slice(0, limit)
@@ -370,7 +371,7 @@ export default function Activity() {
     const el = headingFor(pendingJump)
     setPendingJump(null)
     if (!el) return
-    window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - SCROLL_OFFSET, behavior: 'smooth' })
+    scrollAppToElement(el, SCROLL_OFFSET)
   }, [pendingJump, limit])
 
   /**
@@ -396,9 +397,9 @@ export default function Activity() {
       if (!frame) frame = requestAnimationFrame(read)
     }
     read()
-    window.addEventListener('scroll', onScroll, { passive: true })
+    const off = onAppScroll(onScroll)
     return () => {
-      window.removeEventListener('scroll', onScroll)
+      off()
       if (frame) cancelAnimationFrame(frame)
     }
   }, [visible.length])

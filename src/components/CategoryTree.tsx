@@ -6,6 +6,7 @@ import { blockLength, flatten, keyboardTarget, move, writesFor, type Depth, type
 import { useBudgets } from '../lib/cache'
 import { update } from '../lib/data'
 import { Card, CategoryDot, cx } from './ui'
+import { appScrollY, scrollAppBy } from '../lib/scroll'
 
 /**
  * Categories, rearranged by hand.
@@ -29,8 +30,8 @@ import { Card, CategoryDot, cx } from './ui'
  *
  * A list that reflows under the finger has to hit-test against geometry that
  * the reflow has just invalidated, and rows here are not a uniform height. The
- * line is measured once at the start of the drag, in DOCUMENT coordinates so
- * that auto-scrolling does not invalidate it either, and it shows the real
+ * line is measured once at the start of the drag, in the SCROLLER's coordinates
+ * so that auto-scrolling does not invalidate it either, and it shows the real
  * landing spot: the position is taken from `move`'s own answer, so when a drop
  * is clamped — dragged into the middle of somebody else's children, or out of
  * its own half of the list — the line goes where the row will actually end up
@@ -61,7 +62,7 @@ export function CategoryTree({
   const rows = useMemo(() => flatten(categories), [categories])
 
   const list = useRef<HTMLDivElement>(null)
-  /** Every row's box, in document coordinates, frozen when the drag begins. */
+  /** Every row's box, in the scroller's coordinates, frozen when the drag begins. */
   const boxes = useRef<{ top: number; bottom: number }[]>([])
   /** The live pointer, in client coordinates, so an auto-scroll can re-ask. */
   const pointer = useRef({ x: 0, y: 0 })
@@ -98,7 +99,7 @@ export function CategoryTree({
   const reread = useCallback(() => {
     const d = boxes.current
     if (d.length === 0) return
-    const y = pointer.current.y + window.scrollY
+    const y = pointer.current.y + appScrollY()
     let index = d.length
     for (let i = 0; i < d.length; i++) {
       if (y < (d[i].top + d[i].bottom) / 2) {
@@ -138,7 +139,7 @@ export function CategoryTree({
     }
     boxes.current = [...el.querySelectorAll('[data-row]')].map((node) => {
       const r = node.getBoundingClientRect()
-      return { top: r.top + window.scrollY, bottom: r.bottom + window.scrollY }
+      return { top: r.top + appScrollY(), bottom: r.bottom + appScrollY() }
     })
     const from = rows.findIndex((r) => r.id === id)
     startX.current = e.clientX
@@ -210,9 +211,10 @@ export function CategoryTree({
     return () => document.removeEventListener('keydown', onKey)
   })
 
-  // Follow the finger past the edge of the screen. The boxes are in document
-  // coordinates, so scrolling moves the target under them without any of this
-  // having to be re-measured.
+  // Follow the finger past the edge of the screen. The boxes are in the
+  // SCROLLER's coordinates, so scrolling moves the target under them without any
+  // of this having to be re-measured. Pointer and boxes are converted the same
+  // way, so the scroller's own offset on screen cancels and never appears here.
   useEffect(() => {
     if (!drag) return
     let frame = requestAnimationFrame(function tick() {
@@ -221,7 +223,7 @@ export function CategoryTree({
       const under = window.innerHeight - y - EDGE
       const by = over < 0 ? Math.max(-16, over / 4) : under < 0 ? Math.min(16, -under / 4) : 0
       if (by !== 0) {
-        window.scrollBy(0, by)
+        scrollAppBy(0, by)
         reread()
       }
       frame = requestAnimationFrame(tick)

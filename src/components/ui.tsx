@@ -17,6 +17,7 @@ import { X, ChevronLeft, ChevronRight, ChevronDown, Info, type LucideIcon } from
 import type { Account, Category } from '../lib/db'
 import { accountFace } from '../lib/accounts'
 import { slotVar } from '../lib/palette'
+import { appScroller } from '../lib/scroll'
 import { CategoryIcon } from './CategoryIcon'
 
 export function cx(...parts: (string | false | undefined | null)[]) {
@@ -801,7 +802,14 @@ function syncLayers() {
   // The scroll lock belongs to the STACK, not to any one sheet. Held per sheet,
   // closing a confirmation over a form released it while the form was still
   // open, and the page behind started scrolling again mid-edit.
-  document.body.style.overflow = layerStack.length > 0 ? 'hidden' : ''
+  //
+  // It locks the app's scroller rather than `<body>`, because the document has
+  // not been the thing that scrolls since `lib/scroll.ts` — a lock left on the
+  // body would compile, run, and hold nothing still. Which is also the one good
+  // thing about the move: overflow on the body propagates to the viewport, and
+  // this was the last place in the app setting it.
+  const scroller = appScroller()
+  if (scroller) scroller.style.overflow = layerStack.length > 0 ? 'hidden' : ''
 }
 
 /**

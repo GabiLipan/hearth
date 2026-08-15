@@ -14,6 +14,7 @@ import { cx, useViewportInset } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
+import { APP_SCROLLER_ID } from '../lib/scroll'
 import { BookLens } from './BookSwitcher'
 
 const NAV = [
@@ -159,12 +160,22 @@ export function Layout({ children }: { children: ReactNode }) {
     )
 
   return (
-    <div className="min-h-dvh md:flex">
-      {/* Desktop / iPad sidebar. Sticky (not fixed) so it takes part in the flex
-          row — main then simply fills whatever width is left, at any viewport. */}
+    /**
+     * The frame, which is exactly one viewport tall and never scrolls.
+     *
+     * The document does not scroll either — the column below does. That is what
+     * holds the tab bar still through a rubber band: a bounce moves the thing a
+     * `fixed` element is positioned against, and the only way to stop that is to
+     * leave nothing for the bounce to move. See `lib/scroll.ts` for the two
+     * cheaper fixes that were tried first and why neither survived.
+     */
+    <div className="flex h-dvh flex-col overflow-hidden md:flex-row">
+      {/* Desktop / iPad sidebar. An ordinary flex item in a frame that does not
+          scroll, so it needs nothing to hold it in place — `main` simply fills
+          whatever width it leaves, at any viewport. */}
       <aside
         className={cx(
-          'sticky top-0 z-40 hidden h-dvh shrink-0 flex-col gap-0.5 self-start border-r border-hairline bg-surface p-2.5 md:flex',
+          'z-40 hidden h-full shrink-0 flex-col gap-0.5 border-r border-hairline bg-surface p-2.5 md:flex',
           // The status bar sits over the app on an installed iPad, where the
           // phone header that normally absorbs it is hidden (`md:hidden`) and
           // there is nothing else between the clock and the first nav item.
@@ -227,7 +238,17 @@ export function Layout({ children }: { children: ReactNode }) {
         </NavLink>
       </aside>
 
-      {/* Mobile top bar */}
+      {/* The one thing that scrolls.
+          `overscroll-behavior` is deliberately left alone: this is the element
+          that rubber-bands now, and the bounce is the point.
+          `min-w-0` because this is the flex item beside the sidebar now, and a
+          flex item's automatic minimum is its CONTENT's width — without it one
+          wide table pushes the whole row instead of scrolling inside itself.
+          Deliberately NOT `relative`: that would make this the containing block
+          for every absolutely positioned descendant in the app. */}
+      <div id={APP_SCROLLER_ID} className="min-w-0 flex-1 overflow-y-auto">
+      {/* Mobile top bar. Sticks to the top of the scroller rather than the
+          document, which is the same place it used to stick to. */}
       <header ref={headerRef} className="pt-safe sticky top-0 z-30 border-b border-hairline bg-page/80 backdrop-blur-md md:hidden">
         <div className="flex h-13 items-center gap-2 px-4 py-2.5">
           <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight">{title}</h1>
@@ -249,11 +270,6 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <SyncBanner />
       <UpdateBanner />
-
-      {/* The rows behind whatever figure was last pressed. Mounted here rather
-          than per page: it is a modal over the whole app, and the charts that
-          raise it sit three components deep inside a widget catalogue. */}
-      <DrillSheet />
 
       {/* Content — fills every pixel the sidebar leaves, at any viewport width.
           Pages decide their own column counts from there. */}
@@ -278,6 +294,15 @@ export function Layout({ children }: { children: ReactNode }) {
           {children}
         </div>
       </main>
+      </div>
+
+      {/* The rows behind whatever figure was last pressed. Mounted here rather
+          than per page: it is a modal over the whole app, and the charts that
+          raise it sit three components deep inside a widget catalogue. Outside
+          the scroller with everything else that must not move with it — it
+          portals to `<body>` anyway, so this is where it reads correctly rather
+          than where it renders. */}
+      <DrillSheet />
 
       {/* Mobile FAB. It withdraws while the sheet is open, so the sheet reads as
           the button itself having opened up rather than as something covering it. */}
