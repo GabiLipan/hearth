@@ -38,17 +38,23 @@ import { Columns, Popover, cx } from './ui'
  * grip would want to sit, and eight grips are eight pieces of chrome on a page
  * whose whole job is to be read.
  *
- * So the card IS the handle, in the two situations where a press can only mean
- * "move this":
+ * So the card IS the handle — but only in Customise mode, where nothing inside a
+ * card is interactive anyway and a press can mean nothing else.
  *
- *   - in Customise mode, where nothing inside a card is interactive anyway;
- *   - on a long press anywhere on a card that is not itself a control, which is
- *     the platform idiom for "pick this up" on both phones, and which enters
- *     Customise mode as it lifts so the gesture explains itself.
+ * ## Why a long press does not enter Customise mode
  *
- * The long press is refused over a button, a link or a field. Holding a finger
- * on "Pay it back" while deciding must not turn into a drag, and cancelling
- * that press would be worse than not offering the gesture there.
+ * It used to: holding a finger anywhere on a card that was not itself a control
+ * turned the mode on and picked the card up, which is the platform idiom for
+ * "pick this up" and reads well written down. In practice it fired by accident
+ * far more often than on purpose. A page of figures is a page people rest a
+ * thumb on while reading, and the cost of a false positive is not a wasted
+ * gesture — it is the whole page changing mode and starting to move under them.
+ *
+ * The `SLOP` and control-target guards made the gesture careful rather than
+ * rare, and no amount of care fixes a gesture whose idle state is "a finger on
+ * the screen". Rearranging a page is a deliberate, occasional act, so it is
+ * reached deliberately: the Customise button at the bottom of the page, which
+ * was always there and is now the only way in.
  *
  * ## Why the geometry is frozen
  *
@@ -62,10 +68,6 @@ import { Columns, Popover, cx } from './ui'
  * `pointercancel` must not commit. It is the system taking the gesture away.
  */
 
-/** How long a press has to last, outside Customise mode, to become a lift. */
-const HOLD_MS = 420
-/** How far the finger may stray during that press before it is a scroll instead. */
-const SLOP = 8
 /** How close to the edge of the screen starts an auto-scroll. */
 const EDGE = 84
 
@@ -184,7 +186,6 @@ export function Arrange({
    * card would refuse to follow the finger for a frame or two.
    */
   const dragging = useRef(false)
-  const hold = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const [drag, setDrag] = useState<{ id: string; from: number; dx: number; dy: number } | null>(null)
   const [gapAt, setGapAt] = useState<number | null>(null)
@@ -269,7 +270,6 @@ export function Arrange({
 
   /** Put it back without committing. */
   const stop = useCallback(() => {
-    clearTimeout(hold.current)
     if (!dragging.current) return false
     dragging.current = false
     setDrag(null)
@@ -279,50 +279,31 @@ export function Arrange({
   }, [])
 
   function down(e: React.PointerEvent, id: string) {
+    // Nothing at all outside Customise mode: a press on a card there is
+    // somebody reading the page. See the note at the top of this file for why
+    // the long press that used to live here is gone.
+    if (!editing) return
     // Only the primary button, and never a press that started on a control.
     if (e.button !== 0) return
-    const onControl = (e.target as Element | null)?.closest(
-      'button, a, input, select, textarea, [role="button"], [data-no-drag]',
-    )
-    if (editing) {
-      if (onControl) return
-      e.preventDefault()
-      try {
-        e.currentTarget.setPointerCapture(e.pointerId)
-      } catch {
-        /* carry on uncaptured — the listeners are on the card either way */
-      }
-      begin(id, e.clientX, e.clientY)
+    if (
+      (e.target as Element | null)?.closest(
+        'button, a, input, select, textarea, [role="button"], [data-no-drag]',
+      )
+    ) {
       return
     }
-    if (onControl) return
-    // Not in Customise mode: a long press picks it up, and turns Customise on
-    // as it lifts so the mode change is something you watch happen.
-    const { clientX, clientY, pointerId, currentTarget } = e
-    start.current = { x: clientX, y: clientY }
-    pointer.current = { x: clientX, y: clientY }
-    clearTimeout(hold.current)
-    hold.current = setTimeout(() => {
-      if (Math.abs(pointer.current.x - clientX) > SLOP || Math.abs(pointer.current.y - clientY) > SLOP) return
-      try {
-        currentTarget.setPointerCapture(pointerId)
-      } catch {
-        /* as above */
-      }
-      onEditing(true)
-      begin(id, clientX, clientY)
-    }, HOLD_MS)
+    e.preventDefault()
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      /* carry on uncaptured — the listeners are on the card either way */
+    }
+    begin(id, e.clientX, e.clientY)
   }
 
   function track(e: React.PointerEvent) {
     pointer.current = { x: e.clientX, y: e.clientY }
-    if (!dragging.current) {
-      // A press that has started travelling is a scroll, not a lift.
-      if (Math.abs(e.clientX - start.current.x) > SLOP || Math.abs(e.clientY - start.current.y) > SLOP) {
-        clearTimeout(hold.current)
-      }
-      return
-    }
+    if (!dragging.current) return
     reread()
   }
 
@@ -362,10 +343,6 @@ export function Arrange({
     return () => cancelAnimationFrame(frame)
   }, [drag, reread])
 
-  // A press that is never released — the tab is closed, the component unmounts
-  // — must not leave a timer holding a stale callback.
-  useEffect(() => () => clearTimeout(hold.current), [])
-
   function keys(e: React.KeyboardEvent, id: string) {
     const from = visible.findIndex((i) => i.id === id)
     if (from < 0) return
@@ -394,8 +371,8 @@ export function Arrange({
         data-section={item.id}
         // `touch-action: none` only while arranging: a vertical drag on a card
         // must not scroll the page then, and must do nothing else the rest of
-        // the time. Outside Customise mode the long press is cancelled by any
-        // travel, so the browser keeps the scroll.
+        // the time. Outside Customise mode nothing here claims the gesture at
+        // all, so the browser keeps the scroll.
         // A widget with nothing to say renders nothing — no accounts, no bills
         // due — and its wrapper must disappear with it rather than leaving a
         // gap, or in Customise mode a dashed outline around a void. `:empty`
