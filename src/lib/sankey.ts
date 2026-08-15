@@ -34,6 +34,24 @@ export interface FlowNode {
   slot?: number
   /** Drawn in ink rather than colour: a total, a residual, something unassigned. */
   muted?: boolean
+  /**
+   * What the band is made of, where it is made of more than one kind of thing.
+   *
+   * A band is one ribbon because it is one claim — "this is what you put in" —
+   * and splitting it in two on the diagram would answer a question nobody asked
+   * with a permanent extra row. The parts belong in the tooltip, which is where
+   * somebody has asked. They must sum to `valueMinor`, and `spendFlow` is
+   * responsible for that: a breakdown that does not add up to the band above it
+   * is the same lie as a donut that does not add up to its heading.
+   */
+  parts?: FlowPart[]
+}
+
+export interface FlowPart {
+  label: string
+  valueMinor: number
+  /** How many transactions, where the caller knows. */
+  count?: number
 }
 
 export interface FlowLink {
@@ -61,6 +79,34 @@ export interface FlowInput {
   partner?: string
 }
 
+/**
+ * A contribution band's two halves: moved into a joint account, and bought for
+ * the household straight off a personal card.
+ *
+ * Returns nothing unless both halves are real. One part that IS the band says
+ * nothing the band did not already say, and a breakdown of one line reads as a
+ * rendering fault rather than as detail.
+ *
+ * `paid` is clamped to the band because the band itself is clamped: `named` and
+ * `theirs` are capped against `totals.contributions`, so in the rare month where
+ * the split and the totals disagree the parts must give way rather than sum to
+ * more than the ribbon they describe.
+ */
+function partsOf(
+  valueMinor: number,
+  paidMinor: number,
+  count: number,
+  paidCount: number,
+): FlowPart[] | undefined {
+  const paid = Math.min(Math.max(0, paidMinor), valueMinor)
+  const moved = valueMinor - paid
+  if (paid <= 0 || moved <= 0) return undefined
+  return [
+    { label: 'Moved across', valueMinor: moved, count: Math.max(0, count - paidCount) },
+    { label: 'Paid from a personal account', valueMinor: paid, count: paidCount },
+  ]
+}
+
 export function spendFlow({ book, totals, slices, split, partner }: FlowInput): FlowGraph {
   const nodes: FlowNode[] = []
   const links: FlowLink[] = []
@@ -85,17 +131,26 @@ export function spendFlow({ book, totals, slices, split, partner }: FlowInput): 
     // an arrival nobody has linked cannot be assigned to a person by guessing.
     const named = Math.min(totals.contributions, Math.max(0, split?.mineMinor ?? 0))
     const theirs = Math.min(Math.max(0, totals.contributions - named), Math.max(0, split?.theirsMinor ?? 0))
-    inflow('in:mine', 'You put in', named, { slot: 2 })
-    inflow('in:theirs', `${partner ?? 'They'} put in`, theirs, { slot: 5 })
-    // Whatever is left of the contributions once both names are accounted for:
-    // household spending paid out of a personal account, which is a
-    // contribution the household never saw arrive.
-    // Deliberately NOT the green Activity tints these rows with under this same
-    // book, tempting as matching them is: that green is `in:mine` here, and
-    // "you put in" and "paid from a personal account" are the two bands a
-    // reader most needs to tell apart — they are both money you put in, and
-    // only one of them ever arrived in the joint account.
-    inflow('in:paid', 'Paid from a personal account', totals.contributions - named - theirs, { slot: 7 })
+    inflow('in:mine', 'You put in', named, {
+      slot: 2,
+      parts: partsOf(named, split?.minePaidMinor ?? 0, split?.mineCount ?? 0, split?.minePaidCount ?? 0),
+    })
+    inflow('in:theirs', `${partner ?? 'They'} put in`, theirs, {
+      slot: 5,
+      parts: partsOf(theirs, split?.theirsPaidMinor ?? 0, split?.theirsCount ?? 0, split?.theirsPaidCount ?? 0),
+    })
+    // Whatever is left once both names are accounted for.
+    //
+    // This used to be the band for household spending paid out of a personal
+    // account, which put a KIND of contribution beside two PEOPLE — three bands
+    // answering two different questions, and the odd one out was the one nobody
+    // could place. Those rows are now attributed to whoever paid them and join
+    // that person's band, broken out in its tooltip. What is left here is money
+    // that genuinely has no name on it: a transfer whose far leg is in an
+    // account this device can see and that belongs to neither book, which is
+    // rare and is not a person. Muted, because an unattributed figure should not
+    // wear somebody's colour.
+    inflow('in:unnamed', 'Put in — not sure by whom', totals.contributions - named - theirs, { muted: true })
     inflow('in:external', 'Other income', totals.externalIncome, { slot: 1 })
   } else if (book === 'mine') {
     inflow('in:external', 'Earned', totals.externalIncome, { slot: 2 })

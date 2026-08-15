@@ -25,8 +25,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  *     always did; the linger is for pointers that cannot leave.
  */
 
-/** How long the panel stays after the finger lifts. Long enough to read a name and an amount. */
-export const TIP_LINGER_MS = 3600
+/**
+ * How long the panel stays after the finger lifts.
+ *
+ * Long enough to read a name and an amount, and no longer. It started at 3.6s,
+ * which is a comfortable reading time and turns out to be the wrong thing to
+ * optimise: the panel sits OVER the chart, so every extra second is a second
+ * you cannot see the thing you just pressed, and the gesture is cheap to
+ * repeat. Two seconds is short enough that the chart comes back before you have
+ * decided you want it.
+ */
+export const TIP_LINGER_MS = 2000
 /** And how long it takes to go. */
 export const TIP_FADE_MS = 400
 

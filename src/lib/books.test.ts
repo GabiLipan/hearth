@@ -405,6 +405,68 @@ describe('who put what into the household', () => {
     expect(split.theirsMinor).toBe(0)
     expect(split.otherMinor).toBe(180000)
   })
+
+  it('counts what somebody bought for the household on their own card', () => {
+    // The second way money gets in, and it never passes through a joint
+    // account: I buy the shop on my card. It used to be left out of this
+    // split entirely, which is why the Sankey needed a band of its own for it.
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-02', transferId: 'mine' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'mine' }),
+      txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true, createdBy: ME }),
+    ]
+    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-03', books, ME)
+
+    expect(split.mineMinor).toBe(209000)
+    expect(split.minePaidMinor).toBe(9000)
+    expect(split.mineCount).toBe(2)
+    expect(split.minePaidCount).toBe(1)
+  })
+
+  it('attributes a published one to whoever paid it, not to me', () => {
+    // My partner's shopping, on her own card, reaching this device only because
+    // her account publishes its household rows. `createdBy` is the right
+    // question HERE and the wrong one for an arrival in a joint account — see
+    // the note on `contributionSplit`.
+    const rows = [
+      txn({ accountId: 'herCard', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true, createdBy: HER }),
+    ]
+    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-03', books, ME)
+
+    expect(split.theirsMinor).toBe(9000)
+    expect(split.theirsPaidMinor).toBe(9000)
+    expect(split.mineMinor).toBe(0)
+  })
+
+  it('will not guess when nothing says who paid', () => {
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true }),
+    ]
+    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-03', books, ME)
+
+    expect(split.mineMinor).toBe(0)
+    expect(split.theirsMinor).toBe(0)
+    expect(split.otherMinor).toBe(9000)
+  })
+
+  it('adds up to what the household book says came in', () => {
+    // The property the Sankey rests on: the bands are the split, the ribbon
+    // widths are the totals, and a diagram whose left side does not add up
+    // invents a "from what was already there" band to cover the difference.
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-02', transferId: 'mine' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'mine' }),
+      txn({ accountId: 'joint', amountMinor: 180000, date: '2026-03-02', transferId: 'hers' }),
+      txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true, createdBy: ME }),
+      txn({ accountId: 'herCard', amountMinor: -4400, date: '2026-03-11', paidForHousehold: true, createdBy: HER }),
+    ]
+    const f = classifyFlows(rows, books)
+    const split = contributionSplit(rows, f, '2026-03', books, ME)
+
+    expect(split.mineMinor + split.theirsMinor + split.otherMinor).toBe(
+      bookTotals(rows, f, 'household', '2026-03', books).contributions,
+    )
+  })
 })
 
 describe('what the book held, at the start of a month and now', () => {

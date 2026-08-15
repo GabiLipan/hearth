@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { layoutFlow, spendFlow, type FlowGraph, type FlowInput } from './sankey'
-import type { BookTotals } from './books'
+import type { BookTotals, ContributionSplit } from './books'
 import type { CategorySlice } from './stats'
 
 const totals = (over: Partial<BookTotals> = {}): BookTotals => ({
@@ -12,6 +12,20 @@ const totals = (over: Partial<BookTotals> = {}): BookTotals => ({
   contributed: 0,
   withdrawn: 0,
   net: 0,
+  ...over,
+})
+
+/** Only ever the two or three fields a case is actually about. */
+const split = (over: Partial<ContributionSplit> = {}): ContributionSplit => ({
+  mineMinor: 0,
+  theirsMinor: 0,
+  minePaidMinor: 0,
+  theirsPaidMinor: 0,
+  mineCount: 0,
+  theirsCount: 0,
+  minePaidCount: 0,
+  theirsPaidCount: 0,
+  otherMinor: 0,
   ...over,
 })
 
@@ -44,7 +58,7 @@ describe('spendFlow', () => {
       household({
         totals: totals({ contributions: 2000_00, income: 2000_00, spend: 1500_00, net: 500_00 }),
         slices: [slice('food', 900_00), slice('bills', 600_00)],
-        split: { mineMinor: 1200_00, theirsMinor: 800_00, otherMinor: 0 },
+        split: split({ mineMinor: 1200_00, theirsMinor: 800_00, otherMinor: 0 }),
         partner: 'Sam',
       }),
     )
@@ -60,7 +74,7 @@ describe('spendFlow', () => {
       household({
         totals: totals({ contributions: 1000_00, income: 1000_00, spend: 1400_00, net: -400_00 }),
         slices: [slice('food', 1400_00)],
-        split: { mineMinor: 1000_00, theirsMinor: 0, otherMinor: 0 },
+        split: split({ mineMinor: 1000_00, theirsMinor: 0, otherMinor: 0 }),
       }),
     )
     expect(g.nodes.find((n) => n.id === 'in:reserves')?.valueMinor).toBe(400_00)
@@ -75,7 +89,7 @@ describe('spendFlow', () => {
       household({
         totals: totals({ contributions: 500_00, income: 500_00, spend: 500_00, net: 0 }),
         slices: [slice('food', 320_00)],
-        split: { mineMinor: 500_00, theirsMinor: 0, otherMinor: 0 },
+        split: split({ mineMinor: 500_00, theirsMinor: 0, otherMinor: 0 }),
       }),
     )
     expect(g.nodes.find((n) => n.id === 'out:uncategorised')?.valueMinor).toBe(180_00)
@@ -90,7 +104,7 @@ describe('spendFlow', () => {
       household({
         totals: totals({ contributions: 300_00, income: 300_00, spend: 300_00, net: 0 }),
         slices: [slice('food', 300_00)],
-        split: { mineMinor: 900_00, theirsMinor: 900_00, otherMinor: 0 },
+        split: split({ mineMinor: 900_00, theirsMinor: 900_00, otherMinor: 0 }),
       }),
     )
     expect(sides(g).into).toBe(300_00)
@@ -98,15 +112,83 @@ describe('spendFlow', () => {
     expect(g.nodes.some((n) => n.id === 'in:theirs')).toBe(false)
   })
 
-  it('calls the leftover contributions what they are: paid from a personal account', () => {
+  it('does not put a name on contributions it cannot attribute', () => {
+    // The residual band. It is not a person, so it does not wear a person's
+    // colour — and it must still exist, or the two sides stop balancing.
     const g = spendFlow(
       household({
         totals: totals({ contributions: 500_00, income: 500_00, spend: 500_00, net: 0 }),
         slices: [slice('food', 500_00)],
-        split: { mineMinor: 400_00, theirsMinor: 0, otherMinor: 0 },
+        split: split({ mineMinor: 400_00, theirsMinor: 0, otherMinor: 0 }),
       }),
     )
-    expect(g.nodes.find((n) => n.id === 'in:paid')?.valueMinor).toBe(100_00)
+    const left = g.nodes.find((n) => n.id === 'in:unnamed')
+    expect(left?.valueMinor).toBe(100_00)
+    expect(left?.muted).toBe(true)
+    expect(sides(g).into).toBe(sides(g).outOf)
+  })
+
+  it('keeps what somebody paid on their own card in their own band', () => {
+    // It used to be a band of its own, which put a KIND of contribution beside
+    // two PEOPLE. Same claim, one ribbon: this is what you put in.
+    const g = spendFlow(
+      household({
+        totals: totals({ contributions: 500_00, income: 500_00, spend: 500_00, net: 0 }),
+        slices: [slice('food', 500_00)],
+        split: split({
+          mineMinor: 500_00,
+          minePaidMinor: 100_00,
+          mineCount: 3,
+          minePaidCount: 2,
+        }),
+      }),
+    )
+    expect(g.nodes.find((n) => n.id === 'in:mine')?.valueMinor).toBe(500_00)
+    expect(g.nodes.some((n) => n.id === 'in:unnamed')).toBe(false)
+  })
+
+  it('breaks that band into its two halves for the tooltip, and they add up', () => {
+    const g = spendFlow(
+      household({
+        totals: totals({ contributions: 500_00, income: 500_00, spend: 500_00, net: 0 }),
+        slices: [slice('food', 500_00)],
+        split: split({
+          mineMinor: 500_00,
+          minePaidMinor: 100_00,
+          mineCount: 3,
+          minePaidCount: 2,
+        }),
+      }),
+    )
+    const band = g.nodes.find((n) => n.id === 'in:mine')!
+    expect(band.parts).toEqual([
+      { label: 'Moved across', valueMinor: 400_00, count: 1 },
+      { label: 'Paid from a personal account', valueMinor: 100_00, count: 2 },
+    ])
+    // The rule the parts exist under: a breakdown that does not add up to the
+    // band above it is the same lie as a donut short of its own heading.
+    expect(band.parts!.reduce((s, p) => s + p.valueMinor, 0)).toBe(band.valueMinor)
+  })
+
+  it('says nothing where the band is only one of those things', () => {
+    // A breakdown of one line repeats the band and reads as a rendering fault.
+    const all = spendFlow(
+      household({
+        totals: totals({ contributions: 100_00, income: 100_00, spend: 100_00, net: 0 }),
+        slices: [slice('food', 100_00)],
+        split: split({ mineMinor: 100_00, minePaidMinor: 100_00, mineCount: 1, minePaidCount: 1 }),
+      }),
+    )
+    expect(all.nodes.find((n) => n.id === 'in:mine')?.parts).toBeUndefined()
+
+    const none = spendFlow(
+      household({
+        totals: totals({ contributions: 100_00, income: 100_00, spend: 100_00, net: 0 }),
+        slices: [slice('food', 100_00)],
+        split: split({ mineMinor: 100_00, mineCount: 1 }),
+      }),
+    )
+    expect(none.nodes.find((n) => n.id === 'in:mine')?.parts).toBeUndefined()
   })
 
   it('draws the personal book from earnings to the household and back', () => {
@@ -132,7 +214,7 @@ describe('layoutFlow', () => {
     household({
       totals: totals({ contributions: 2000_00, income: 2000_00, spend: 1500_00, net: 500_00 }),
       slices: [slice('food', 900_00), slice('bills', 590_00), slice('crumb', 10_00)],
-      split: { mineMinor: 1200_00, theirsMinor: 800_00, otherMinor: 0 },
+      split: split({ mineMinor: 1200_00, theirsMinor: 800_00, otherMinor: 0 }),
     }),
   )
   const out = layoutFlow(graph, { width: 600, height: 400 })

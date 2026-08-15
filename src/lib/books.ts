@@ -773,13 +773,29 @@ export function showsInBook(
  * are readable by both — so this is one figure that is complete and identical on
  * both screens.
  *
- * Attribution does not use `created_by`. That is whoever entered the row, which
- * for an imported statement is whoever did the importing, not whose money it
- * was. It asks three questions, in this order:
+ * Two ways money gets into the household, and both are counted here: it is
+ * MOVED into a joint account, or something is bought for the household straight
+ * off somebody's own card and never passes through one. The second used to be
+ * left out, which put it in a band of its own on the Sankey called "paid from a
+ * personal account" — a category of contribution rather than a person, sitting
+ * beside two people. It is the same act: you put money in.
+ *
+ * The parts are kept separately (`minePaidMinor` and friends) so a tooltip can
+ * say which was which, and are added for every figure that asks who put in
+ * what.
+ *
+ * Attribution of a MOVED contribution does not use `created_by`. That is
+ * whoever entered the row, which for an imported statement is whoever did the
+ * importing, not whose money it was. It asks three questions, in this order:
  *
  *   1. has somebody SAID whose this is (`contributorId`)? → that person
  *   2. far leg in one of MY accounts                      → mine
  *   3. far leg not visible at all                         → somebody else's
+ *
+ * A row paid straight from a personal account is the one case where
+ * `created_by` IS the right answer, and the reasoning above is why: there is no
+ * far leg to read, and a personal card is imported by the person whose card it
+ * is. The two questions are not the same question.
  *
  * The third is an inference, and worth knowing about because it is confidently
  * wrong in one case: a leg whose partner row has gone — the far account deleted,
@@ -800,6 +816,18 @@ export function showsInBook(
 export interface ContributionSplit {
   mineMinor: number
   theirsMinor: number
+  /**
+   * Of the two above, the part bought for the household straight from a
+   * personal account rather than moved into a joint one. Already included in
+   * them — this says how much of the total got there that way, not extra money.
+   */
+  minePaidMinor: number
+  theirsPaidMinor: number
+  /** How many rows are behind each figure, so a band can say how many payments. */
+  mineCount: number
+  theirsCount: number
+  minePaidCount: number
+  theirsPaidCount: number
   /** Outside income, plus any arrival nobody has linked yet. See above. */
   otherMinor: number
 }
@@ -820,11 +848,54 @@ export function contributionSplit(
     else legs.set(t.transferId, [t])
   }
 
-  const out: ContributionSplit = { mineMinor: 0, theirsMinor: 0, otherMinor: 0 }
+  const out: ContributionSplit = {
+    mineMinor: 0,
+    theirsMinor: 0,
+    minePaidMinor: 0,
+    theirsPaidMinor: 0,
+    mineCount: 0,
+    theirsCount: 0,
+    minePaidCount: 0,
+    theirsPaidCount: 0,
+    otherMinor: 0,
+  }
 
   for (const t of txns) {
-    if (!books.household.has(t.accountId) || t.amountMinor <= 0) continue
     const flow = flows.get(t.id)
+
+    /**
+     * Bought for the household straight off somebody's own card.
+     *
+     * Attributed by `created_by`, which is the one place in this function that
+     * is the right question — see the note above. It lives outside every
+     * household account, so it is handled before the by-account filter, exactly
+     * as `bookTotals` handles it.
+     *
+     * `effectiveMonth` returns the row's own month for this flow: the 25th
+     * cut-off moves a contribution into the month it is FOR, and money spent on
+     * the 29th was spent on the 29th. `bookTotals` counts it in the same month,
+     * which is what keeps this split adding up to the figure above it.
+     */
+    if (flow === 'paid-for-household') {
+      if (effectiveMonth(t, flow) !== month) continue
+      const amount = -t.amountMinor
+      if (!t.createdBy) {
+        out.otherMinor += amount
+      } else if (t.createdBy === userId) {
+        out.mineMinor += amount
+        out.minePaidMinor += amount
+        out.mineCount += 1
+        out.minePaidCount += 1
+      } else {
+        out.theirsMinor += amount
+        out.theirsPaidMinor += amount
+        out.theirsCount += 1
+        out.theirsPaidCount += 1
+      }
+      continue
+    }
+
+    if (!books.household.has(t.accountId) || t.amountMinor <= 0) continue
     if (effectiveMonth(t, flow) !== month) continue
 
     if (flow === 'external-income') {
@@ -839,18 +910,30 @@ export function contributionSplit(
     // reachable on a LINKED contribution too, where it is a correction rather
     // than a substitute.
     if (t.contributorId) {
-      if (t.contributorId === userId) out.mineMinor += t.amountMinor
-      else out.theirsMinor += t.amountMinor
+      if (t.contributorId === userId) {
+        out.mineMinor += t.amountMinor
+        out.mineCount += 1
+      } else {
+        out.theirsMinor += t.amountMinor
+        out.theirsCount += 1
+      }
       continue
     }
 
     const partner = t.transferId ? legs.get(t.transferId)?.find((l) => l.id !== t.id) : undefined
     // No partner row means an account this device is not on, which in a
     // household is somebody else's private account.
-    if (!t.transferId) out.otherMinor += t.amountMinor
-    else if (!partner) out.theirsMinor += t.amountMinor
-    else if (books.mine.has(partner.accountId)) out.mineMinor += t.amountMinor
-    else out.otherMinor += t.amountMinor
+    if (!t.transferId) {
+      out.otherMinor += t.amountMinor
+    } else if (!partner) {
+      out.theirsMinor += t.amountMinor
+      out.theirsCount += 1
+    } else if (books.mine.has(partner.accountId)) {
+      out.mineMinor += t.amountMinor
+      out.mineCount += 1
+    } else {
+      out.otherMinor += t.amountMinor
+    }
   }
   return out
 }

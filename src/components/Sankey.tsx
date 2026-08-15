@@ -363,6 +363,34 @@ export function Sankey({
               {Math.round((hoveredNode.valueMinor / graph.totalMinor) * 100)}% of everything that moved
             </p>
           )}
+          {/* What the band is made of, where it is made of two things.
+              "You put in" is one claim and belongs in one ribbon, but it is
+              reached two ways — money moved into the joint account, and things
+              bought for the household straight off a personal card — and the
+              second is the one somebody will not have expected to be in there.
+              The parts sum to the figure above them; `spendFlow` guarantees it. */}
+          {hoveredNode.parts && (
+            <ul className="mt-1.5 space-y-0.5 border-t border-hairline pt-1.5 text-xs">
+              {hoveredNode.parts.map((p) => (
+                <li key={p.label} className="flex items-baseline gap-3">
+                  <span className="min-w-0 flex-1 break-words text-ink-3">{p.label}</span>
+                  {/* The count stacks UNDER the amount rather than running on
+                      after the label. Inline, "Paid from a personal account · 4
+                      payments" wrapped and stranded the "payments" on a line of
+                      its own, which reads as a layout fault; here both columns
+                      take two lines and the figures stay in a column. */}
+                  <span className="shrink-0 text-right">
+                    <span className="block text-ink-2 tabular">{money(p.valueMinor)}</span>
+                    {p.count ? (
+                      <span className="block text-[0.6875rem] leading-tight text-ink-3">
+                        {p.count} {p.count === 1 ? 'payment' : 'payments'}
+                      </span>
+                    ) : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           {/* The way through on a finger, where the tap that opened this panel
               could not also have been a click. The panel is otherwise inert, so
               this button re-enables pointers for itself alone. */}

@@ -513,6 +513,16 @@ the single place a level comes from.
   and conjure a "from what was already there" band to cover the difference. Note
   the `switch` in `bookTotals` has **no exhaustiveness check** — a new `Flow`
   falls through it silently, and `tsc` will not say so.
+- **"Who put in what" counts two different acts, and only one of them moves.**
+  Money reaches the household by being MOVED into a joint account or by
+  something being bought for it straight off a personal card, and
+  `contributionSplit` counts both — the second attributed by `created_by`, which
+  is the right question there and the wrong one for an arrival in a joint
+  account (see the trap below). It used to count only the first, which is why
+  the Sankey needed a third band, "Paid from a personal account", sitting beside
+  two PEOPLE and answering a different question. Those rows now join their
+  payer's band and are broken out in its tooltip via `FlowNode.parts`, which
+  `spendFlow` guarantees sum to the band above them.
 - **Attribution by far leg is confidently wrong about an orphaned transfer.**
   `contributionSplit` reads "no partner row" as "the other person's", which is
   right for a leg they linked themselves and is also what you get when the
