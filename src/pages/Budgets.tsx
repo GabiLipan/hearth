@@ -14,7 +14,7 @@ import { thisMonthKey, monthLabel, monthKey, shiftMonth } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
-import { Card, CategoryDot, Progress, Button, Empty, Toolbar, MonthStepper, ScrollTable, table, cx } from '../components/ui'
+import { Card, CategoryDot, Progress, Button, Empty, Toolbar, FilterBar, FilterChip, MonthStepper, ScrollTable, table, cx } from '../components/ui'
 import { BudgetBullet } from '../components/BudgetBullet'
 import { BudgetBars } from '../components/BudgetBars'
 
@@ -175,11 +175,12 @@ export default function Budgets() {
 
   return (
     <div>
-      <Toolbar className="justify-center md:justify-start">
+      {/* Wide screens keep every control visible at once. */}
+      <Toolbar className="hidden md:flex">
         <MonthStepper month={month} onChange={setMonth} label={monthLabel} canGoForward={!isCurrent} />
-        {userId && <BookSwitcher book={book} onChange={setBook} className="hidden md:flex md:w-auto" />}
+        {userId && <BookSwitcher book={book} onChange={setBook} className="md:w-auto" />}
         {budgeted.length > 0 && (
-          <div className="hidden min-w-64 flex-1 items-center gap-2.5 md:flex">
+          <div className="flex min-w-64 flex-1 items-center gap-2.5">
             <span className="text-sm text-ink-2 tabular">
               <span className="font-semibold text-ink">{money(totalSpent)}</span> of{' '}
               {money(totalBudget, { hideDecimals: true })}
@@ -198,8 +199,33 @@ export default function Budgets() {
         )}
       </Toolbar>
 
+      {/* A phone gets the same row every other page has: 36px pills, scrolling
+          sideways. This page used to put the toolbar's own control here, which
+          left the month as the one picker in the app that was a different
+          height and a different shape from the one on Activity beside it. */}
+      <FilterBar>
+        <MonthStepper
+          variant="chip"
+          month={month}
+          onChange={setMonth}
+          label={monthLabel}
+          canGoForward={!isCurrent}
+        />
+        {budgeted.length === 0 && rows.length > 0 && (
+          <FilterChip
+            chevron={false}
+            disabled={copying}
+            onClick={copyLastMonth}
+            icon={<Copy size={15} />}
+            label={`Copy ${monthLabel(shiftMonth(month, -1), 'short')}`}
+          />
+        )}
+      </FilterBar>
+
+      {/* Left, like the row above it. It was centred to match a centred toolbar
+          that is no longer there. */}
       {mine && (
-        <p className="mb-3 text-center text-xs text-ink-3 md:mb-2 md:text-left">
+        <p className="mb-3 text-xs text-ink-3 md:mb-2">
           Personal budgets count spending on your own accounts. Moving money to the household is not spending.
         </p>
       )}

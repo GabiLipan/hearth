@@ -379,6 +379,18 @@ the single place a level comes from.
   once you scrolled. `overflow-x: clip` was there to contain the sideways travel
   of a page change; it lives on `main` instead, mobile only, where the element
   is exactly the width of the viewport.
+- **`overscroll-behavior` propagates from `<html>` only, and `overflow` also
+  propagates from `<body>`.** The asymmetry is the whole trap: the rule above
+  says never to put `overflow` on either, and the declaration that stops the
+  rubber band has to go on the root or it does nothing at all. It sat on `body`
+  for a long time, where Safari — every installed copy of this app — ignored it,
+  so scrolling past the bottom of a page dragged the layout viewport up and took
+  the `fixed` tab bar off the bottom of the screen with it. Nothing about the
+  bar can opt out: it is not positioned wrongly, the thing it is positioned
+  against moved. `useViewportInset` cannot see it either — the visual viewport
+  keeps its height and its offset throughout a bounce, so `below` stays 0. The
+  only fix is to stop the overscroll, which is `html { overscroll-behavior-y:
+  none }` and iOS 16+.
 - **iOS keeps painting the page behind the keyboard.** `visualViewport` shrinks
   but the layout viewport does not, so a sheet sized to the visual viewport ends
   at the keyboard's top edge with the dimmed page showing through beneath it —
