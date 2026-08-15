@@ -10,7 +10,7 @@ import {
   classifyAccounts,
   classifyFlows,
   contributionSplit,
-  isForeignHouseholdRow,
+  showsInBook,
   isHouseholdPaid,
   type BookMap,
 } from './books'
@@ -736,16 +736,38 @@ describe('a household expense published from an account this device is not on', 
   })
 
   it('is admitted to the household row list and to no other', () => {
-    // The lists are built from "the accounts I may read", which this row is
-    // not on — so without an explicit admission the household list would come
-    // up short of the total printed over it.
-    const held = new Set(accounts.map((a) => a.id))
-    expect(isForeignHouseholdRow(theirs, 'household', books, held)).toBe(true)
-    expect(isForeignHouseholdRow(theirs, 'mine', books, held)).toBe(false)
-    expect(isForeignHouseholdRow(theirs, 'all', books, held)).toBe(false)
-    // A row on an account this device DOES hold is not foreign, whoever paid.
-    const mine = txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true })
-    expect(isForeignHouseholdRow(mine, 'household', books, held)).toBe(false)
+    // The lists are built from "the accounts in this book that I may read",
+    // which this row is not on — so without an explicit admission the household
+    // list would come up short of the total printed over it.
+    const inHousehold = new Set(books.household)
+    expect(showsInBook(theirs, 'household', books, inHousehold)).toBe(true)
+    // Under Mine and Everything the account is not one this device holds at
+    // all, which is exactly what those books mean — and `bookTotals` agrees.
+    expect(showsInBook(theirs, 'mine', books, new Set(books.mine))).toBe(false)
+    expect(showsInBook(theirs, 'all', books, new Set([...books.household, ...books.mine]))).toBe(false)
+  })
+
+  it('and so is my OWN household shopping, which is the case that shipped broken', () => {
+    // My card is an account I hold perfectly well, and still not one in the
+    // household book — so selecting the list by account left my own row out of
+    // Our household while the figure above it counted the money.
+    const mine = txn({
+      accountId: 'myPrivate',
+      amountMinor: -9000,
+      date: '2026-03-10',
+      categoryId: 'groceries',
+      paidForHousehold: true,
+    })
+    expect(showsInBook(mine, 'household', books, new Set(books.household))).toBe(true)
+    // And it is in Mine and Everything the ordinary way, because the account is.
+    expect(showsInBook(mine, 'mine', books, new Set(books.mine))).toBe(true)
+
+    // The list and the heading over it have to agree, which is the whole point.
+    const rows = [mine]
+    const f = classifyFlows(rows, books)
+    const shown = rows.filter((t) => showsInBook(t, 'household', books, new Set(books.household)))
+    const heading = bookTotals(rows, f, 'household', '2026-03', books).spend
+    expect(shown.reduce((s, t) => s - t.amountMinor, 0)).toBe(heading)
   })
 
   it('marks the rows the arithmetic counts, and only those', () => {

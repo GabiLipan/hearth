@@ -17,7 +17,7 @@ import {
   useDesktop,
   type CellRef,
 } from '../components/InlineCell'
-import { accountsInBook, isForeignHouseholdRow, isHouseholdPaid, BOOK_LABEL, type BookMap } from '../lib/books'
+import { accountsInBook, showsInBook, isHouseholdPaid, BOOK_LABEL, type BookId, type BookMap } from '../lib/books'
 import { applyContributor, learnContributors, suggestContributor, taggable } from '../lib/contributors'
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
@@ -202,26 +202,17 @@ export default function Activity() {
     [monthFilter, rangeFilter, payeeFilter],
   )
 
-  /**
-   * Every account in this device's cache, which is not the same set as the
-   * accounts whose rows this page lists.
-   *
-   * `isForeignHouseholdRow` needs it to tell "a row on an account I hold and
-   * have filtered out" from "a row on an account I do not hold at all" — the
-   * second being a household expense somebody published from their own card,
-   * which the household total above the list has already counted.
-   */
-  const held = useMemo(() => new Set(allAccounts.map((a) => a.id)), [allAccounts])
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     const visible = new Set(accounts.map((a) => a.id))
     const list = (txns ?? []).filter((t) => {
-      const foreign = isForeignHouseholdRow(t, book, books, held)
-      if (!visible.has(t.accountId) && !foreign) return false
-      // The account filter offers the accounts on this device, so a published
-      // row is never one of the answers — narrowing to an account is asking
-      // about that account, and this row is not on it.
+      // Not `visible.has(...)`: a household expense paid from a personal
+      // account is counted in the household's heading while living outside
+      // every account in that book. See `showsInBook`.
+      if (!showsInBook(t, book, books, visible)) return false
+      // The account chips offer the accounts in the book, so such a row is
+      // never one of the answers — narrowing to an account is a question about
+      // that account, and this row is not on it.
       if (accountFilter && !accountFilter.has(t.accountId)) return false
       if (!matchesDrill(t, asDrill, catMap)) return false
       if (catFilter !== null) {
@@ -234,7 +225,7 @@ export default function Activity() {
       return true
     })
     return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-  }, [txns, catFilter, catMap, accountFilter, asDrill, accounts, query, book, books, held])
+  }, [txns, catFilter, catMap, accountFilter, asDrill, accounts, query, book, books])
 
   /**
    * The other leg of each transfer, so a row can say where the money went.
@@ -291,6 +282,30 @@ export default function Activity() {
     setQuery('')
     setOrigin(null)
   }
+
+  /**
+   * How a household-paid row is painted, which depends on the lens.
+   *
+   * Green under Our household, where the row is money that arrived and was
+   * spent in the same breath; pink under Mine and Everything, where it is a
+   * contribution leaving my account. See `.tint-household` in index.css — the
+   * hue is the one claim the tint makes, and it is not the same claim in both
+   * books.
+   */
+  const householdTint = book === 'household' ? 'tint-household' : 'tint-contribution'
+
+  /**
+   * Who paid a household expense out of their own pocket, or undefined for you.
+   *
+   * `createdBy` rather than an account owner, because on a published row the
+   * account is not something this device holds — and it is the right answer
+   * anyway: a personal card is imported by the person whose card it is.
+   * `contributionSplit` deliberately does NOT use `created_by` for the mirror
+   * question, but that one is about an arrival in a JOINT account, where
+   * whoever imported the statement is not whose money it was.
+   */
+  const payerOf = (t: Transaction) =>
+    t.createdBy && t.createdBy !== userId ? nameOf(memberMap.get(t.createdBy)) : undefined
 
   /** Where each month starts in `filtered`, and what it came to. */
   const months = useMemo(() => {
@@ -578,7 +593,13 @@ export default function Activity() {
                   {byDay(items).map(([date, list]) => (
                     <div key={date}>
                       <p className="mb-1.5 px-1 text-sm font-semibold text-ink-3">{fmtDay(date)}</p>
-                      <Card>
+                      {/* `overflow-hidden` because a tinted row paints an
+                          OPAQUE fill edge to edge — it has to, so the tint
+                          survives being scrolled under the pinned column on
+                          desktop — and an opaque fill does not know about the
+                          card's rounded corners. Without this the first and
+                          last rows square off the card. */}
+                      <Card className="overflow-hidden">
                         <ul className="divide-y divide-hairline">
                           {list.map((t) => {
                             const cat = t.categoryId ? catMap.get(t.categoryId) : undefined
@@ -594,7 +615,7 @@ export default function Activity() {
                                     transfer
                                       ? 'tint-transfer'
                                       : forHousehold
-                                        ? 'tint-household'
+                                        ? householdTint
                                         : 'hover:bg-surface-2/50 active:bg-surface-2',
                                   )}
                                 >
@@ -618,6 +639,9 @@ export default function Activity() {
                                         useful of the two facts anyway. */}
                                     {forHousehold && !accMap.has(t.accountId) ? (
                                       <HouseholdMark
+                                        icon
+                                        book={book}
+                                        payer={payerOf(t)}
                                         size={16}
                                         className="absolute -bottom-0.5 -right-0.5 ring-2 ring-surface"
                                       />
@@ -633,7 +657,7 @@ export default function Activity() {
                                     <p className="truncate font-medium">{t.payee}</p>
                                     <p className="flex items-center gap-1 truncate text-sm text-ink-3">
                                       {!transfer && (looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
-                                      {forHousehold && <HouseholdMark inline />}
+                                      {forHousehold && <HouseholdMark book={book} payer={payerOf(t)} />}
                                       <span className="truncate">
                                         {/* A tagged arrival takes the place of
                                             "Uncategorised" and not of a real
@@ -650,12 +674,6 @@ export default function Activity() {
                                               ? `Paid in by ${nameOf(memberMap.get(t.contributorId))}`
                                               : 'Uncategorised'}
                                         {t.note ? ` · ${t.note}` : ''}
-                                        {/* Who, not which card. A published row
-                                            brings no account with it and is not
-                                            meant to — see migration 19. */}
-                                        {forHousehold && !accMap.has(t.accountId)
-                                          ? ` · paid by ${nameOf(memberMap.get(t.createdBy ?? ''))}`
-                                          : ''}
                                       </span>
                                     </p>
                                   </div>
@@ -728,7 +746,7 @@ export default function Activity() {
                           className={cx(
                             table.row,
                             'cursor-pointer transition-colors',
-                            transfer ? 'tint-transfer' : forHousehold && 'tint-household',
+                            transfer ? 'tint-transfer' : forHousehold && householdTint,
                           )}
                         >
                           {/* The list spans every month, so the year has to be
@@ -742,7 +760,7 @@ export default function Activity() {
                               // The pinned column paints its own opaque fill, so
                               // the row's tint cannot reach it — it has to be
                               // repeated here or the date cell stays plain.
-                              transfer ? 'tint-transfer' : forHousehold && 'tint-household',
+                              transfer ? 'tint-transfer' : forHousehold && householdTint,
                             )}
                             editing={open?.field === 'date'}
                             editable={editable}
@@ -779,7 +797,9 @@ export default function Activity() {
                             ) : (
                               (looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />
                             )}
-                            {forHousehold && <HouseholdMark inline className="mr-1.5 align-middle" />}
+                            {forHousehold && (
+                              <HouseholdMark book={book} payer={payerOf(t)} className="mr-1.5 align-middle" />
+                            )}
                             <span className="font-medium">{t.payee}</span>
                             {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
                           </EditableCell>
@@ -863,9 +883,9 @@ export default function Activity() {
                                 </>
                               ) : forHousehold ? (
                                 <>
-                                  <HouseholdMark />
+                                  <HouseholdMark icon book={book} payer={payerOf(t)} />
                                   <span className="truncate text-ink-3">
-                                    {nameOf(memberMap.get(t.createdBy ?? ''))}’s account
+                                    {payerOf(t) ? `${payerOf(t)}’s account` : 'A personal account'}
                                   </span>
                                 </>
                               ) : (
@@ -986,33 +1006,62 @@ function TransferDot({ size = 34 }: { size?: number }) {
  * does not hold.
  */
 function HouseholdMark({
-  inline,
+  book,
+  payer,
+  icon,
   size = 22,
   className,
 }: {
-  inline?: boolean
+  book: BookId
+  /** Who paid it, already resolved to a name, or undefined when it was you. */
+  payer?: string
+  /** The glyph alone, for standing in where an account badge would go. */
+  icon?: boolean
   size?: number
   className?: string
 }) {
+  const here = book === 'household'
+  const label = here ? (payer ? `${payer} paid` : 'You paid') : 'For the household'
+  /**
+   * Words only where they are the answer to a question somebody is asking.
+   *
+   * Under Our household the row is the odd one out — it is not on any account
+   * in this book, and "why is my partner's card in here" needs answering on the
+   * row rather than in a tooltip nobody on a phone can open. Under Mine the row
+   * is exactly where you would expect it and the tag is a footnote, so it stays
+   * a glyph: three words there push the category off the end of the line, and
+   * the category is what the line is for.
+   */
+  const words = here && !icon
   return (
     <span
-      title="Paid from a personal account, and counted as household spending — the same as moving the money to the joint account and spending it from there."
-      aria-label="Paid for the household"
+      title={
+        here
+          ? `Bought for the household out of a personal account. It counts twice, and has to: as money ${payer ?? 'you'} put in, and as household spending — the same as moving it to the joint account and spending it from there.`
+          : 'Counted as household spending, and as money you put in — not as personal spending.'
+      }
+      aria-label={label}
       className={cx(
-        'inline-flex shrink-0 items-center justify-center',
-        // A rounded SQUARE when it stands in for an account, because that is
-        // the shape an account badge wears — the axis the reader is on has to
-        // stay the same when the badge changes what it is saying.
-        inline ? 'rounded-full px-1 py-0.5' : 'rounded-md size-[var(--mark)]',
+        'inline-flex shrink-0 items-center justify-center gap-1',
+        // A rounded SQUARE where it stands in for an account badge, because
+        // that is the shape an account wears: the reader should not have to
+        // work out which axis they are on when the badge changes what it says.
+        icon
+          ? 'rounded-md size-[var(--mark)]'
+          : words
+            ? 'rounded-full px-1.5 py-0.5 text-xs font-medium'
+            : 'rounded-full px-1 py-0.5',
         className,
       )}
       style={{
         ['--mark' as string]: `${size}px`,
-        background: 'color-mix(in oklab, var(--series-7) 18%, var(--surface-2))',
-        color: 'var(--series-7)',
+        ['--hue' as string]: here ? 'var(--series-4)' : 'var(--series-7)',
+        background: 'color-mix(in oklab, var(--hue) 16%, var(--surface-2))',
+        color: 'var(--hue)',
       }}
     >
-      <HandCoins size={inline ? 11 : Math.round(size * 0.6)} />
+      <HandCoins size={icon ? Math.round(size * 0.6) : 11} />
+      {words && label}
     </span>
   )
 }

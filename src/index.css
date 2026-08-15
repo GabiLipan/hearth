@@ -226,26 +226,48 @@ body {
 }
 
 /* A household expense paid out of somebody's own account — the one row in the
- * app that is counted in two books at once, and since migration 19 the one that
- * can be read outside the account it lives in.
+ * app counted in two books at once, and since migration 19 the one that can be
+ * read outside the account it lives in.
  *
  * Built exactly like `.tint-transfer` above, and for the identical reason: the
  * pinned first column paints an opaque fill, so a translucent Tailwind tint on
- * the row stops dead at the first cell. Only the hue differs — `--series-7`
- * rather than `--accent` — because these two tints appear in the same list and
- * a row that is "one leg of a transfer" and a row that is "spending in two
- * books" are different claims. Slightly stronger than the transfer tint at
- * every step, since `--series-7` is the quieter colour of the two and matching
- * the percentages would have made it read as an accident of rendering. */
-.tint-household {
+ * the row stops dead at the first cell.
+ *
+ * TWO tints, because the row is genuinely two events and which one you are
+ * looking at depends on the book. In my own book it is money leaving my account
+ * that is not my spending — a contribution — and it is pink, which is the
+ * colour the Sankey gives that same money on its way in. In the household's it
+ * is money that arrived and was spent in the same breath, and it is green,
+ * because there the row is on the INCOME side of a book it also spends from.
+ * One row, one meaning per book, and the tag beside the tint says which.
+ *
+ * `--series-2` and not `--series-4`, which is the greener green: 4 is the one
+ * entry in the palette with no dark step of its own, so a tint built on it goes
+ * muddy on a dark screen and the label sitting in it loses its contrast.
+ *
+ * Both are slightly stronger than the transfer tint at every step: these hues
+ * are quieter than `--accent`, and matching its percentages made them read as
+ * an accident of rendering rather than a mark. */
+.tint-contribution {
   background: color-mix(in srgb, var(--series-7) 7%, var(--surface));
+}
+.tint-contribution:hover,
+.group:hover > .tint-contribution {
+  background: color-mix(in srgb, var(--series-7) 12%, var(--surface));
+}
+.tint-contribution:active {
+  background: color-mix(in srgb, var(--series-7) 17%, var(--surface));
+}
+
+.tint-household {
+  background: color-mix(in srgb, var(--series-2) 8%, var(--surface));
 }
 .tint-household:hover,
 .group:hover > .tint-household {
-  background: color-mix(in srgb, var(--series-7) 12%, var(--surface));
+  background: color-mix(in srgb, var(--series-2) 13%, var(--surface));
 }
 .tint-household:active {
-  background: color-mix(in srgb, var(--series-7) 17%, var(--surface));
+  background: color-mix(in srgb, var(--series-2) 18%, var(--surface));
 }
 
 /* ---------- Motion ----------

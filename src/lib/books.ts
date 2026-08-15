@@ -734,31 +734,35 @@ export function isHouseholdPaid(
 }
 
 /**
- * A household expense somebody paid from an account this device is not on.
+ * Whether a book's ROW LIST should show this transaction.
  *
- * The row reached us because its account publishes its household spending
- * (migration 19) and for no other reason: there is no grant behind it, so every
- * list built from "the accounts I may read" excludes it, and every one of those
- * lists sits under a total that has already counted it. That gap is the exact
- * failure `spendsIn` exists to prevent, one level up — a "£412 spent" heading
- * over a list of £322 — so the row lists have to admit it explicitly.
+ * `visible` — the accounts in the book whose rows this device may read — is the
+ * whole answer for every row but one, and the exception is the same one
+ * `spendsIn` exists for: a `paid-for-household` row is spending in the
+ * household's book while living in an account outside it. Selecting the list by
+ * account alone leaves it out of a list whose heading has already counted it,
+ * which is the "£412 spent" over a list of £322 that `spendsIn` was written to
+ * prevent, one level up.
  *
- * Only under the HOUSEHOLD book. Under `mine` it is not mine, and under
- * Everything the account is not one this device holds, which is what Everything
- * means; `bookTotals` leaves it out of both, and a list showing what a total
- * does not count is the same bug facing the other way.
+ * It applies whoever paid, and that is worth saying because the first version
+ * of this only admitted rows from accounts this device does NOT hold. On my own
+ * device my card is an account I hold perfectly well — and still not one in the
+ * household book, so my own household shopping was missing from Our household
+ * while being counted in the figure above it.
  *
- * `held` is the accounts in this device's cache, not the accounts in the book:
- * an account I hold at `view` and that is in no book of mine is still an
- * account whose rows the ordinary filter is deciding about.
+ * Only the household book has an exception. Under `mine` the row is in my
+ * account and arrives through `visible` like anything else; under Everything the
+ * same is true for the payer, and for anybody else the account is not one this
+ * device holds, which is exactly what Everything means. `bookTotals` agrees in
+ * both directions.
  */
-export function isForeignHouseholdRow(
+export function showsInBook(
   t: Pick<Transaction, 'accountId' | 'amountMinor' | 'paidForHousehold' | 'transferId'>,
   book: BookId,
   books: BookMap,
-  held: Set<string>,
+  visible: Set<string>,
 ): boolean {
-  return book === 'household' && isHouseholdPaid(t, books) && !held.has(t.accountId)
+  return visible.has(t.accountId) || (book === 'household' && isHouseholdPaid(t, books))
 }
 
 /**

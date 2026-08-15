@@ -197,11 +197,14 @@ Four things follow, and the first is the one to remember:
 - **Nothing can be un-seen**, and the consent sheet says so in words. So does
   the note: the whole row travels, because RLS has no column-level half.
 
-The client side is `isHouseholdPaid` / `isForeignHouseholdRow` in `books.ts` —
-a published row is on an account in no book, so `classifyFlows` classifies it
-from the FLAG rather than from `bookOf`, and every list built from "the accounts
-I may read" has to admit it explicitly or come up short of the total printed
-over it.
+The client side is `isHouseholdPaid` / `showsInBook` in `books.ts`. A row like
+this is on an account in NO book — including on the payer's own device, where
+they hold the account perfectly well and it is still not one the household book
+is made of — so `classifyFlows` classifies it from the FLAG rather than from
+`bookOf`, and every row list built by selecting accounts has to admit it
+explicitly or come up short of the total printed over it. Getting that wrong is
+how it first shipped: the household list was missing the payer's own shopping
+while the heading above it counted the money.
 
 **A household admin manages people and nothing else.** They can invite, remove
 and promote; they gain no access to any account they were not granted, and

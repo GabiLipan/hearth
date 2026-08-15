@@ -90,6 +90,11 @@ export function spendFlow({ book, totals, slices, split, partner }: FlowInput): 
     // Whatever is left of the contributions once both names are accounted for:
     // household spending paid out of a personal account, which is a
     // contribution the household never saw arrive.
+    // Deliberately NOT the green Activity tints these rows with under this same
+    // book, tempting as matching them is: that green is `in:mine` here, and
+    // "you put in" and "paid from a personal account" are the two bands a
+    // reader most needs to tell apart — they are both money you put in, and
+    // only one of them ever arrived in the joint account.
     inflow('in:paid', 'Paid from a personal account', totals.contributions - named - theirs, { slot: 7 })
     inflow('in:external', 'Other income', totals.externalIncome, { slot: 1 })
   } else if (book === 'mine') {
