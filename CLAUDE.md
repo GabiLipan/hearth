@@ -116,6 +116,7 @@ by a scrolling chart and the axis pinned beside it),
 behind the `showOwed` flag; see `useFlag`), `shade.ts` (telling apart
 two categories the palette gave one colour),
 `scroll.ts` (the element the app scrolls, which is not the document, and why),
+`splash.ts` (taking the boot splash off, once there is an app behind it),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
 allow-lists), `session.ts` (auth, household, sync orchestration),
@@ -443,6 +444,34 @@ the single place a level comes from.
   drag geometry in `CategoryTree`/`Arrange` freezes boxes in the scroller's
   coordinates — pointer and boxes convert the same way, so the scroller's own
   offset on screen cancels and never appears in the arithmetic.
+- **A sticky inset is measured from the scroller's CONTENT box**, so the
+  scroller's own padding is added to it rather than absorbed by it. `#app-scroll`
+  carries `pt-[var(--header-h)]` to hold the first card clear of the absolutely
+  positioned top bar, and Activity's month headings *also* said
+  `top: var(--header-h)` — left over from when the bar was `sticky top-0` inside
+  the scroller and there was no padding under it. Both were true at once for
+  exactly one commit, and the headings parked at TWICE the bar's height,
+  floating in the middle of the rows they belonged to. They are `top-0` now: the
+  clearance is stated once, in the padding. Anything else that wants to stick
+  under the bar wants `top-0` too, and anything that wants to SCROLL something
+  to that line wants `appScrollerTopInset()` — the same number, read from the
+  scroller, rather than a second constant to drift from the first.
+- **The boot splash is in `index.html`, and only its dismissal is in the app.**
+  The OS splash cannot be animated — Android composites the launcher icon on
+  `background_color`, iOS shows a still image — so the animated opening is the
+  first thing the page paints, and anything shipped inside the bundle paints
+  after the blank page it exists to cover. Two rules keep it honest. It comes
+  off when React has painted, never when `SyncState.ready` resolves: a returning
+  user's `ready` comes from the cache, but a device that has never completed a
+  sign-in waits on the network, and tying the splash to that hangs the app on a
+  fireplace on exactly the offline launches the cache exists for. And it has a
+  floor as well as a ceiling — a warm start paints in under 100ms, and an
+  entrance cut off three frames in reads as a glitch rather than as motion. The
+  ceiling is an inline `setTimeout` in `index.html` rather than in `splash.ts`,
+  because the case it covers is the bundle never arriving to call anything.
+  `manifest.background_color` is the splash's own dark for the same reason it
+  used to be the light page: it is the frame immediately before, and its only
+  job is to match whatever comes next.
 - **`overscroll-behavior` propagates to the viewport from `<html>` only**, where
   `overflow` propagates from `<body>` too. So the declaration on `body` does
   nothing in Safari and stops Chrome's pull-to-refresh, which is exactly what is

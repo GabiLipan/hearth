@@ -4,7 +4,7 @@ import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet
 import type { Category, Transaction } from '../lib/db'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
 import { canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn } from '../lib/accounts'
-import { onAppScroll, scrollAppTo, scrollAppToElement } from '../lib/scroll'
+import { appScrollerTopInset, onAppScroll, scrollAppTo, scrollAppToElement } from '../lib/scroll'
 
 import { update } from '../lib/data'
 import {
@@ -55,8 +55,6 @@ import { useSyncState } from '../hooks/useSync'
 
 /** Rows added each time the end of the list comes into view. */
 const PAGE = 80
-/** Roughly the mobile header's height: what a jumped-to heading must clear. */
-const SCROLL_OFFSET = 76
 
 export default function Activity() {
   const { money } = useApp()
@@ -371,7 +369,10 @@ export default function Activity() {
     const el = headingFor(pendingJump)
     setPendingJump(null)
     if (!el) return
-    scrollAppToElement(el, SCROLL_OFFSET)
+    // The scroller's own top padding, which is where a `sticky top-0` heading
+    // comes to rest — so a jumped-to month lands on exactly the line it would
+    // have stuck to, rather than near it. See `appScrollerTopInset`.
+    scrollAppToElement(el, appScrollerTopInset())
   }, [pendingJump, limit])
 
   /**
@@ -386,9 +387,13 @@ export default function Activity() {
     const read = () => {
       frame = 0
       const heads = headings()
+      // The stuck line, plus a little: a heading resting under the bar counts
+      // as the month you are in. Same inset as the jump, so "where am I" and
+      // "take me there" cannot disagree about where the top of the list is.
+      const line = appScrollerTopInset() + 24
       let current: string | null = null
       for (const head of heads) {
-        if (head.getBoundingClientRect().top <= SCROLL_OFFSET + 24) current = head.dataset.month ?? null
+        if (head.getBoundingClientRect().top <= line) current = head.dataset.month ?? null
         else break
       }
       setAtMonth(current ?? heads[0]?.dataset.month ?? null)
@@ -1311,16 +1316,26 @@ function MonthHeading({
   /**
    * Follow the scroll, under the mobile top bar.
    *
-   * `--header-h` is measured by Layout rather than guessed: the bar is a fixed
-   * row plus the safe-area inset, which is a different number on a notched
-   * phone, a flat one, and a browser tab. Sticking to a hard-coded offset
-   * leaves the heading either overlapping the bar or floating below it.
+   * `top-0`, and it must NOT be `--header-h`. A sticky inset is measured from
+   * the scroll container's CONTENT box, not its padding box — so the scroller's
+   * own `pt-[var(--header-h)]`, which is what holds the first card clear of the
+   * absolutely positioned bar, is already the whole of the clearance this needs.
+   * Naming the header height here as well parks the heading at TWICE the bar's
+   * height, floating in the middle of the rows it belongs to. That is what it
+   * did when the bar was lifted out of the scroller: as `sticky top-0` inside
+   * the scroller the bar had no padding under it and the offset was the only
+   * thing holding the heading down, and both halves were true at once for
+   * exactly one commit.
+   *
+   * So the clearance is stated in one place. If the bar's height ever stops
+   * being the scroller's padding, this becomes wrong again — and visibly, which
+   * is the right way round.
    *
    * Sticky works here despite `main` carrying `overflow-x: clip` on mobile:
    * `clip` is the one overflow value that does NOT force the other axis to
    * become a scroll container, so the vertical axis stays `visible` and the
-   * nearest scroller is still the viewport. Any other value there — `hidden`,
-   * `auto` — and this silently stops moving.
+   * nearest scroller is `#app-scroll` rather than something between. Any other
+   * value there — `hidden`, `auto` — and this silently stops moving.
    *
    * Phone only. On desktop every row already carries its full date, so there
    * is nothing to lose track of, and the table's own sticky first column would
@@ -1331,7 +1346,6 @@ function MonthHeading({
   return (
     <div
       data-month={month}
-      style={sticky ? { top: 'var(--header-h, 0px)' } : undefined}
       className={cx(
         'flex items-baseline justify-between gap-3',
         dense ? '' : 'mb-2 px-1',
@@ -1339,7 +1353,7 @@ function MonthHeading({
         // the rows scrolling underneath are otherwise plainly readable through
         // it. The negative margin plus padding lets that background reach the
         // full width of the list rather than stopping at the text.
-        sticky && 'sticky z-20 -mx-1 bg-page/95 px-2 py-1.5 backdrop-blur-sm',
+        sticky && 'sticky top-0 z-20 -mx-1 bg-page/95 px-2 py-1.5 backdrop-blur-sm',
       )}
     >
       <h2 className={cx('font-semibold', dense ? 'text-xs uppercase tracking-wide text-ink-2' : 'text-base')}>

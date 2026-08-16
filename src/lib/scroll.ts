@@ -69,6 +69,24 @@ export function scrollAppToElement(el: Element, offset = 0, behavior: ScrollBeha
   scroller.scrollTo({ top, behavior })
 }
 
+/**
+ * The scroller's own top padding — the gap the absolutely positioned top bar
+ * sits in, and therefore the resting place of anything `sticky top-0` inside.
+ *
+ * Worth having because it is the ONE number that keeps a jump and a sticky
+ * heading in the same place. A sticky inset is measured from the scroll
+ * container's CONTENT box, so `top-0` parks a heading exactly this far down;
+ * `scrollAppToElement(el, appScrollerTopInset())` puts a jumped-to heading on
+ * the very same line, with no second guess at the bar's height to drift from
+ * the first. The bar is a fixed row plus `env(safe-area-inset-top)`, which is
+ * a different number on a notched phone, a flat one and a browser tab, so a
+ * constant here was wrong on all three and only visibly on some.
+ */
+export function appScrollerTopInset(): number {
+  const el = appScroller()
+  return el ? parseFloat(getComputedStyle(el).paddingTop) || 0 : 0
+}
+
 /** Used by the drag auto-scroll, which nudges by a delta every frame. */
 export function scrollAppBy(x: number, y: number) {
   appScroller()?.scrollBy(x, y)
