@@ -289,8 +289,16 @@ export function Layout({ children }: { children: ReactNode }) {
           for every absolutely positioned descendant in the app.
           The padding is the top bar's own height, since the bar sits OVER this
           element rather than inside it. Zero on desktop, where the bar is
-          `md:hidden` and therefore measures nothing. */}
-      <div id={APP_SCROLLER_ID} className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)]">
+          `md:hidden` and therefore measures nothing.
+          Above `md` the inset is the status bar instead, and it belongs to the
+          COLUMN rather than to `main`: the banners are the first thing in here
+          now, so an inset on `main` alone left "A new version of Hearth is
+          ready" sitting under the clock on an installed iPad. `env()` resolves
+          to 0 in a browser tab, so this costs a desktop nothing. */}
+      <div
+        id={APP_SCROLLER_ID}
+        className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] md:pt-[env(safe-area-inset-top)]"
+      >
         <SyncBanner />
         <UpdateBanner />
 
@@ -300,15 +308,14 @@ export function Layout({ children }: { children: ReactNode }) {
             On a phone this element is exactly the width of the viewport, so it
             clips where the viewport would have — and unlike the same rule on
             <html>, it does not propagate to the viewport. */}
-        {/* Same inset on the content column: the sidebar is only half the top
-            edge, and the page title would otherwise sit under the clock. Left
-            off below `md`, where the top bar carries `pt-safe` and this
-            element's scroller is already padded past it. */}
+        {/* The status-bar inset used to be stated here. It is on the scroller
+            above instead, so that whatever is first in the column — a banner,
+            or this — clears the clock. Stating it twice would double it. */}
         {/* `pb-20` clears the FAB and nothing else. It was `pb-32`, for a tab
             bar that used to be `fixed` and therefore lay OVER the end of the
             page; the bar is in flow below this scroller now, so most of that
             was simply a dead band under the last card. */}
-        <main className="w-full min-w-0 flex-1 px-4 pb-20 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-[calc(1rem_+_env(safe-area-inset-top))] xl:px-6">
+        <main className="w-full min-w-0 flex-1 px-4 pb-20 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 xl:px-6">
           {/* Desktop page title. Mobile gets the same title in its top bar. */}
           <h1 className="mb-3 hidden text-xl font-bold tracking-tight md:block">{title}</h1>
           {/* Keyed on the path so the animation restarts on every page change:
