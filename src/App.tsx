@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { Routes, Route } from 'react-router-dom'
+import { dismissSplash } from './lib/splash'
 import { AppProvider } from './state/AppContext'
 import { AuthGate } from './components/AuthGate'
 import { Layout } from './components/Layout'
@@ -14,6 +16,15 @@ import SettingsPage, { SettingsGroupPage } from './pages/Settings'
 import RulesPage from './pages/Rules'
 
 export default function App() {
+  /**
+   * The boot splash comes off here, and here is the whole of the condition:
+   * something has painted. A passive effect runs after the first commit has
+   * reached the screen, so by the time this fires there is an app behind the
+   * fireplace — whichever branch of `AuthGate` it turned out to be. Anything
+   * further down would be waiting on the network. See `lib/splash.ts`.
+   */
+  useEffect(dismissSplash, [])
+
   return (
     <AppProvider>
       {/* Outside `AuthGate`, so the sign-in screens can raise one too — and

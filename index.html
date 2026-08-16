@@ -47,9 +47,194 @@
         } catch (e) { /* default light */ }
       })();
     </script>
+
+    <!--
+      The boot splash: the fire catching.
+
+      ## Why it is here and not in a component
+
+      The operating system's own splash cannot be animated — Android composites
+      the launcher icon on `background_color`, iOS shows a still image — so the
+      only animated opening available is the first thing the page itself paints.
+      That has to be markup and CSS sitting in this file: anything shipped
+      inside the bundle appears AFTER the blank page it exists to cover, which
+      is a flash of empty app and then a splash, i.e. worse than none.
+
+      So the manifest's `background_color` is the tile's own dark, this opens on
+      exactly that colour, and the join between the two is invisible. Between
+      the icon being tapped and the fire being lit there is no frame that
+      belongs to neither.
+
+      ## What it must not do
+
+      Wait for anything. It comes off when React has painted (`dismissSplash`,
+      from `lib/splash.ts`), never when the session resolves or the first pull
+      lands — a returning user's `ready` is set from the local cache before the
+      network is consulted at all, and tying the splash to sync would hang the
+      app on a fireplace on exactly the offline launches the cache exists for.
+      The timeout below is the backstop for the case the bundle never arrives
+      to call it: a splash nothing can remove is a brick.
+
+      ## Sizing
+
+      `position: fixed; inset: 0` rather than a height in `dvh`. The dynamic
+      viewport units resolve SHORT on a cold start of the installed iOS app and
+      do not correct until a scroll (see `.app-frame`), and a cold start is the
+      only time this is ever on screen — it would be wrong every single time.
+      A fixed box is the layout viewport itself, which needs no settling.
+    -->
+    <style>
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 26px;
+        background: linear-gradient(160deg, #2a2320 0%, #14100e 100%);
+      }
+      #boot .mark {
+        position: relative;
+        width: 112px;
+        height: 112px;
+      }
+      #boot .mark > svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        /* The fire grows out of the hearthstone rather than out of its own
+           middle, so the origin is the stone's line — y127 of 180. */
+        transform-origin: 50% 71%;
+      }
+      #boot .word {
+        margin: 0;
+        font: 600 0.82rem/1 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: #f6e3cb;
+        opacity: 0;
+      }
+
+      /*
+        The arch's scale stops are SAMPLED from the same damped spring every
+        sheet in the app is animated on — mass 1, w 20, z 0.82, read at fifteen
+        points. They are the same numbers as `origin-in` in `index.css`, and
+        they run `linear` for the same reason: the samples ARE the easing, and a
+        curve on top would bend an already-curved motion twice. Two thirds of
+        the travel is over in the first quarter and the rest is a settle, which
+        is what makes it read as catching rather than as growing.
+      */
+      @keyframes boot-arch {
+        0%   { opacity: 0; transform: scaleY(0.300); }
+        5%   { opacity: 0.3; transform: scaleY(0.429); }
+        10%  { opacity: 0.7; transform: scaleY(0.495); }
+        15%  { opacity: 1; transform: scaleY(0.578); }
+        20%  { transform: scaleY(0.662); }
+        26%  { transform: scaleY(0.754); }
+        32%  { transform: scaleY(0.831); }
+        38%  { transform: scaleY(0.891); }
+        45%  { transform: scaleY(0.940); }
+        52%  { transform: scaleY(0.972); }
+        60%  { transform: scaleY(0.993); }
+        68%  { transform: scaleY(1.003); }
+        76%  { transform: scaleY(1.006); }
+        85%  { transform: scaleY(1.006); }
+        100% { opacity: 1; transform: scaleY(1); }
+      }
+      /* The light spilling past the opening, which is what makes the glow read
+         as light rather than as paint. It overshoots and settles back, so the
+         fire flares as it takes and then steadies. */
+      @keyframes boot-glow {
+        0%   { opacity: 0; transform: scale(0.5) translateY(14%); }
+        35%  { opacity: 0.85; }
+        60%  { opacity: 0.5; transform: scale(1.06) translateY(0); }
+        100% { opacity: 0.55; transform: scale(1); }
+      }
+      @keyframes boot-stone {
+        0%   { opacity: 0.06; transform: scaleX(0.86); }
+        100% { opacity: 1; transform: scaleX(1); }
+      }
+      @keyframes boot-word {
+        0%   { opacity: 0; transform: translateY(5px); }
+        100% { opacity: 0.8; transform: none; }
+      }
+      @keyframes boot-out {
+        0%   { opacity: 1; }
+        100% { opacity: 0; }
+      }
+
+      #boot .glow  { animation: boot-glow 780ms linear both; }
+      #boot .arch  { animation: boot-arch 620ms linear both; }
+      #boot .stone { animation: boot-stone 420ms cubic-bezier(0.22, 0.7, 0.3, 1) 340ms both; transform-origin: 50% 50%; }
+      #boot .word  { animation: boot-word 420ms cubic-bezier(0.22, 0.7, 0.3, 1) 520ms both; }
+
+      /* `pointer-events: none` the instant it starts leaving, so the 220ms it
+         spends fading cannot swallow a tap on the app already behind it. */
+      #boot.leaving {
+        animation: boot-out 220ms cubic-bezier(0.22, 0.7, 0.3, 1) both;
+        pointer-events: none;
+      }
+
+      /* The state change stays legible — the mark is there and then the app is
+         — but nothing travels, scales or blooms. */
+      @media (prefers-reduced-motion: reduce) {
+        #boot .glow, #boot .arch, #boot .stone, #boot .word {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+        #boot .glow { opacity: 0.55; }
+        #boot .word { opacity: 0.8; }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot" aria-hidden="true">
+      <div class="mark">
+        <!-- Geometry from `BrandMark.tsx`: the arch runs y41–y127 and the
+             hearthstone to y136, both centred on x90 of a 180 tile. Kept in
+             step with it by hand, like `public/logo.svg` already is. -->
+        <svg class="glow" viewBox="0 0 180 180">
+          <defs>
+            <filter id="bootBlur" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur stdDeviation="13" />
+            </filter>
+          </defs>
+          <path d="M52 127 V79 a38 38 0 0 1 76 0 v48 z" fill="#F4813A" filter="url(#bootBlur)" />
+        </svg>
+        <svg class="arch" viewBox="0 0 180 180">
+          <defs>
+            <radialGradient id="bootGlow" cx="50%" cy="58%" r="62%">
+              <stop offset="0" stop-color="#FFD08A" />
+              <stop offset="0.42" stop-color="#F4813A" />
+              <stop offset="1" stop-color="#C0361A" />
+            </radialGradient>
+          </defs>
+          <path d="M52 127 V79 a38 38 0 0 1 76 0 v48 z" fill="url(#bootGlow)" />
+        </svg>
+        <svg class="stone" viewBox="0 0 180 180">
+          <rect x="34" y="127" width="112" height="9" rx="4.5" fill="#F6E3CB" opacity="0.22" />
+        </svg>
+      </div>
+      <p class="word">Hearth</p>
+    </div>
     <div id="root"></div>
+    <script>
+      // The backstop, and the only part of the splash that does not depend on
+      // the bundle. If `main.tsx` never arrives — a failed deploy, a chunk lost
+      // to a flaky connection — nothing else would ever take this off, and an
+      // app that opens on a fireplace and stays there looks broken in a way
+      // that hides the actual fault. Deliberately long: it must never fire on
+      // an ordinary slow start and pull the splash out from under a boot that
+      // was going to succeed.
+      setTimeout(function () {
+        var el = document.getElementById('boot');
+        if (el) el.remove();
+      }, 8000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

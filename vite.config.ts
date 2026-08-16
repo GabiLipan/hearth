@@ -115,18 +115,29 @@ export default defineConfig({
         short_name: 'Hearth',
         description: 'Budgeting, bills and spending for the two of us',
         /**
-         * Both light, and they have to agree.
+         * Both the tile's own dark, and they still have to agree.
          *
-         * `theme_color` was the DARK surface while `background_color` was the
-         * light page, so the install splash painted a light background under
-         * dark chrome — two halves of two different themes in the one screen
-         * nobody can theme at runtime. The app defaults to light, and
-         * `index.html` overrides the chrome colour before first paint for
-         * anybody whose device says otherwise, so light is the honest value
-         * for the static one.
+         * These two paint the screen the OS shows before a single line of the
+         * app has run, and it cannot be themed at runtime — so the only thing
+         * they can be right about is the frame that comes NEXT. That used to be
+         * the light page, and both were `#f9f9f7` for exactly that reason. It
+         * is now the boot splash in `index.html`, which opens on the mark's own
+         * ground, so these follow it: the OS paints the dark tile, the page
+         * paints the same dark tile, and the fire is lit on top of it. There is
+         * no frame in the sequence belonging to neither.
+         *
+         * They must not disagree with each other either, which is the original
+         * bug: `theme_color` was the dark surface while `background_color` was
+         * the light page, and the install splash showed a light ground under
+         * dark chrome. Same value, whichever value it is.
+         *
+         * This says nothing about the running app's chrome — `index.html`
+         * appends a `theme-color` meta before first paint from the resolved
+         * theme, and a meta tag on the live page is what the browser reads from
+         * then on. The manifest's copy only ever governs the launch.
          */
-        theme_color: '#f9f9f7',
-        background_color: '#f9f9f7',
+        theme_color: '#14100E',
+        background_color: '#14100E',
         display: 'standalone',
         start_url: './',
         /**
