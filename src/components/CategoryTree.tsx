@@ -324,7 +324,7 @@ export function CategoryTree({
                     // `touch-action: none` only here: the browser must not treat
                     // a drag off the handle as a scroll, but the rest of the
                     // list has to keep scrolling normally.
-                    className="grid size-9 shrink-0 cursor-grab touch-none place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-ink-2 active:cursor-grabbing"
+                    className="grid size-9 shrink-0 cursor-grab touch-none place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink-2 active:cursor-grabbing"
                     onPointerDown={(e) => begin(e, row.id)}
                     onPointerMove={track}
                     onPointerUp={finish}

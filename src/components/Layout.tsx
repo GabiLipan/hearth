@@ -257,7 +257,7 @@ export function Layout({ children }: { children: ReactNode }) {
   // from somewhere — `title` also gives a native tooltip on hover.
   const navItem = (isActive: boolean) =>
     cx(
-      'flex items-center rounded-lg py-1.5 text-sm font-medium transition-colors',
+      'flex items-center rounded-full py-1.5 text-sm font-medium transition-colors',
       collapsed ? 'justify-center px-0' : 'gap-2.5 px-2.5',
       isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
     )
@@ -305,7 +305,7 @@ export function Layout({ children }: { children: ReactNode }) {
             aria-expanded={!collapsed}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="grid size-7 shrink-0 place-items-center rounded-md text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+            className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
           >
             {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
@@ -317,7 +317,7 @@ export function Layout({ children }: { children: ReactNode }) {
           title={collapsed ? 'Add transaction' : undefined}
           aria-label="Add transaction"
           className={cx(
-            'mb-2.5 inline-flex h-9 items-center justify-center rounded-lg bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110',
+            'mb-2.5 inline-flex h-9 items-center justify-center rounded-full bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110',
             !collapsed && 'gap-2',
           )}
         >

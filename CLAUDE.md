@@ -538,6 +538,20 @@ the single place a level comes from.
   controls are NOT toggles and should stay as they are — the icon and colour
   pickers are grids, and Reports' phone view switch is a `FilterChip` matching
   the chips beside it.
+- **Every button in the app is a capsule, and every icon-only button is a
+  circle.** One `rounded-full` on `Button` covers ninety-odd call sites; the
+  handful of raw `<button>`s that never went through it were changed to match —
+  the sidebar's nav rows and its Add button, the month stepper's two arrows, the
+  drag handle on a category, Budgets' ± pair, Activity's row actions and payee
+  filter, the drill sheet's action and the button inside a chart's tooltip. The
+  point is that the shape means "press me" and nothing else does: the phone's
+  tab pill, the FAB, `Segmented`, the chips and the toast's Undo were already
+  capsules, and a `rounded-lg` button beside them read as a different kind of
+  thing. What deliberately did NOT change is anything that is not a button: text
+  inputs and selects keep `rounded-xl`, because a field and an action wanting to
+  look different is the one distinction the shape is carrying. Nor did the
+  surfaces — cards, sheets, popover panels, menu rows inside them, and the icon
+  and colour grids are tiles, not buttons.
 - **Settings is a modal route on a phone, and the background is held for the
   whole subtree.** It renders over the page rather than instead of it, so
   closing it gives back the scroll position rather than the top of a rebuilt
@@ -1161,6 +1175,15 @@ the single place a level comes from.
   panel that then sits over the chart until something unrelated closes it.
   `useTouchTooltip` gives the gesture the ending it lacks — the panel stays
   while the finger is down, and a few seconds after it lifts it fades — and
+  **every chart has to be wired to it, or it has the old fault and nobody will
+  read it as a missing hook.** The five in `insights.tsx` were not, for a while:
+  a panel opened by a tap on the waterfall, the salary stack, committed-vs-chosen,
+  share-kept or the pace line simply stayed. It was reported as an iPad bug and
+  was nothing of the sort — every touch device had it, the iPad is just where
+  those charts are big enough to press by accident. Wiring one up is three
+  lines: `useTouchTooltip()`, spread `handlers` on the box the chart is drawn
+  in, and pass `active={tip.active}` to `<Tooltip>` (plus `fading` to the panel,
+  so it leaves the way the others do) — and
   every chart shares it, so the same press means the same thing everywhere.
   Two halves are easy to get wrong. Hiding it means `<Tooltip active={false}>`
   rather than a `content` that returns null: the CURSOR (the band highlight
@@ -1201,12 +1224,22 @@ the single place a level comes from.
   picture.** Two sections sharing a row, or a masonry column shorter than the one
   next to it, used to leave a hole in the page down to the next full-width card —
   visibly so on Reports, where two charts of unequal height sit under a full-width
-  breakdown. Rows are `items-stretch`, `Columns` takes `fill` (every column as
-  tall as the tallest, the slack shared out among the cards in it), and `Arrange`
-  passes `h-full` all the way down so the card itself is a flex column — a height
-  nobody hands on is a card floating at the top of a hole rather than one that
-  filled it. `Fill` in `ui.tsx` is what a chart uses to spend the space.
-  Three things about it that are load-bearing. The stretch cannot disturb the
+  breakdown. `Columns` takes `fill` (every column as tall as the tallest, the
+  slack shared out among the cards in it), rows stretch the same way, and
+  `Arrange` passes `h-full` all the way down so the card itself is a flex column
+  — a height nobody hands on is a card floating at the top of a hole rather than
+  one that filled it. `Fill` in `ui.tsx` is what a chart uses to spend the space.
+
+  **Only a card that can spend the space is given any**, which is the half that
+  had to be learned twice: stretching a card with nothing in it that grows does
+  not remove the gap, it moves the gap INSIDE the card, where three inches of
+  nothing under a list of payees reads as a fault rather than as spacing. `Fill`
+  marks its box `data-fill` and both layouts ask for it (`has-[[data-fill]]:grow`
+  in a column, `has-[[data-fill]]:self-stretch` in a row); everything else keeps
+  its own height and leaves the slack at the foot of the column, which is where
+  masonry has always left it. The Sankey earns its stretch by taking a `height`
+  and flooring it at `sankeyHeight(graph)` — bands get thicker, labels stay put.
+  Three more things are load-bearing. The stretch cannot disturb the
   balancing it is measured from: after it every column is exactly the tallest
   column's height, so re-running the distribution over the grown heights is a
   fixed point rather than a loop. `Fill` settles the same way rather than

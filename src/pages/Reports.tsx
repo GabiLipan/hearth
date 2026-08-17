@@ -39,7 +39,7 @@ import { BookSwitcher } from '../components/BookSwitcher'
 import { Arrange, useLayout } from '../components/Arrange'
 import { optionValue, type SectionDef } from '../lib/layout'
 import { openDrill, pathWithState, type Drill } from '../lib/drill'
-import { Sankey } from '../components/Sankey'
+import { Sankey, sankeyHeight } from '../components/Sankey'
 import { spendFlow } from '../lib/sankey'
 import { monthsOfHistory } from '../lib/stats'
 import {
@@ -881,11 +881,16 @@ export default function Reports() {
             {/* Only the category bands lead anywhere: the left-hand side is
                 income and contributions, which are not a category filter, and
                 "Not categorised" is the absence of one. */}
-            <Sankey
-              graph={flowGraph}
-              canPick={(n) => n.id.startsWith('cat:')}
-              onPick={(n) => seeTransactions({ category: n.id.slice(4) })}
-            />
+            <Fill min={sankeyHeight(flowGraph)}>
+              {(height) => (
+                <Sankey
+                  graph={flowGraph}
+                  height={height}
+                  canPick={(n) => n.id.startsWith('cat:')}
+                  onPick={(n) => seeTransactions({ category: n.id.slice(4) })}
+                />
+              )}
+            </Fill>
           </Card>
         )
 

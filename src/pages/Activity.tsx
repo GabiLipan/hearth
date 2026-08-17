@@ -947,7 +947,7 @@ export default function Activity() {
                                 setCell(null)
                                 setEditing(t)
                               }}
-                              className="rounded-md p-1 text-ink-3 opacity-0 transition hover:bg-surface-2 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                              className="rounded-full p-1 text-ink-3 opacity-0 transition hover:bg-surface-2 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
                             >
                               <ChevronRight size={15} />
                             </button>
@@ -1293,7 +1293,7 @@ function SuggestedContributions({ txns, books }: { txns: Transaction[]; books: B
                 aria-label="Not that"
                 title="Leave this one alone"
                 onClick={() => setDismissed((s) => new Set(s).add(t.id))}
-                className="shrink-0 rounded-lg p-1.5 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+                className="shrink-0 rounded-full p-1.5 text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
               >
                 <X size={16} />
               </button>
@@ -1408,8 +1408,8 @@ function ControlTrigger({
       aria-expanded={open}
       className={cx(
         CONTROL_H,
-        'flex max-w-52 items-center gap-1.5 rounded-xl bg-surface-2 px-3 text-sm font-medium text-ink-2',
-        'transition-colors hover:text-ink desktop:px-2.5 md:rounded-lg',
+        'flex max-w-52 items-center gap-1.5 rounded-full bg-surface-2 px-3 text-sm font-medium text-ink-2',
+        'transition-colors hover:text-ink desktop:px-2.5',
       )}
     >
       <span className="shrink-0 text-ink-3">{icon}</span>

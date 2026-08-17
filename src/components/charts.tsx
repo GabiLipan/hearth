@@ -132,7 +132,7 @@ function ChartTip({
         <button
           type="button"
           onClick={action.onPick}
-          className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg bg-surface-2 px-2 py-1.5 text-xs font-medium text-ink-2 transition hover:text-ink"
+          className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-full bg-surface-2 px-2 py-1.5 text-xs font-medium text-ink-2 transition hover:text-ink"
         >
           <Receipt size={12} /> {action.label}
         </button>

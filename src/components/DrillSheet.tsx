@@ -136,7 +136,7 @@ function Rows({ drill }: { drill: Drill }) {
         <Link
           to={drillTo({ ...drill, backTo: undefined, backLabel: undefined })}
           onClick={closeDrill}
-          className="flex items-center justify-center gap-1.5 rounded-xl bg-surface-2 px-3 py-2.5 text-sm font-medium text-ink-2 transition-colors hover:text-ink"
+          className="flex items-center justify-center gap-1.5 rounded-full bg-surface-2 px-3 py-2.5 text-sm font-medium text-ink-2 transition-colors hover:text-ink"
         >
           <Receipt size={15} /> Open in Activity
         </Link>

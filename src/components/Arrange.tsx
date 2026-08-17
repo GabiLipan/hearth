@@ -475,14 +475,15 @@ export function Arrange({
           ) : (
             <div key={`b${i}`} className={cx('flex flex-col', gap)}>
               {band.rows.map((row, j) => (
-                // `items-stretch`, so two sections sharing a row end at the
-                // same line rather than the shorter one leaving a notch in the
-                // page down to the next row.
-                <div key={j} className={cx('flex items-stretch', gap)}>
+                // Two sections sharing a row end at the same line — but only
+                // the ones with something in them that can grow into it, which
+                // is what `data-fill` marks. See `Columns`: stretching a card
+                // that cannot spend the height moves the gap inside it.
+                <div key={j} className={cx('flex items-start', gap)}>
                   {row.map(({ item, span }) => (
                     <div
                       key={item.id}
-                      className="min-w-0"
+                      className="min-w-0 has-[[data-fill]]:self-stretch"
                       // `flexGrow` from the span and a zero basis, so two
                       // sections sharing a row split it by their widths rather
                       // than by their contents.

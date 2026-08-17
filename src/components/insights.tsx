@@ -14,6 +14,7 @@ import {
 } from 'recharts'
 import { useChartColors } from '../hooks/useChartColors'
 import { useApp } from '../state/AppContext'
+import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
 import { monthLabel, thisMonthKey } from '../lib/dates'
 import type {
   FixedVariable,
@@ -81,9 +82,21 @@ function WrapTick({
 }
 
 /** Matches `ChartTip` in charts.tsx — the same panel, wherever a tooltip appears. */
-function Tip({ label, rows }: { label?: string; rows: { name: string; value: string; color?: string }[] }) {
+function Tip({
+  label,
+  rows,
+  fading,
+}: {
+  label?: string
+  rows: { name: string; value: string; color?: string }[]
+  /** On its way out after a touch — see `useTouchTooltip`. */
+  fading?: boolean
+}) {
   return (
-    <div className="rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline">
+    <div
+      className="rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline"
+      style={{ opacity: fading ? 0 : 1, transition: `opacity ${TIP_FADE_MS}ms linear` }}
+    >
       {label && <div className="mb-1 font-medium text-ink-2">{label}</div>}
       {rows.map((r) => (
         <div key={r.name} className="flex items-center gap-2">
@@ -109,6 +122,17 @@ function Tip({ label, rows }: { label?: string; rows: { name: string; value: str
 export function Waterfall({ steps, height = 260 }: { steps: WaterfallStep[]; height?: number }) {
   const c = useChartColors()
   const { money } = useApp()
+  /**
+   * The ending a tap does not have.
+   *
+   * These five were written against hover and never got the linger the
+   * scrolling charts and the ring have: on a touch screen the panel opened and
+   * then sat over the chart until something unrelated closed it. Reported on an
+   * iPad, but it was never about the size of the screen — every touch device
+   * had it. The same hook, so the same press means the same thing on every
+   * chart in the app.
+   */
+  const tip = useTouchTooltip()
 
   const data = useMemo(
     () =>
@@ -128,8 +152,9 @@ export function Waterfall({ steps, height = 260 }: { steps: WaterfallStep[]; hei
     s.total ? c.ink2 : s.deltaMinor >= 0 ? c.series[1] : c.series[0]
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }} barCategoryGap="28%">
+    <div {...tip.handlers}>
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }} barCategoryGap="28%">
         <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
         <XAxis
           dataKey="label"
@@ -147,12 +172,14 @@ export function Waterfall({ steps, height = 260 }: { steps: WaterfallStep[]; hei
           width={54}
         />
         <Tooltip
+          active={tip.active}
           cursor={{ fill: c.ink3, fillOpacity: 0.08 }}
           content={({ active, payload }) => {
             const s = active ? (payload?.[0]?.payload as (typeof data)[number] | undefined) : undefined
             if (!s) return null
             return (
               <Tip
+                fading={tip.fading}
                 label={s.label}
                 rows={[
                   {
@@ -174,8 +201,9 @@ export function Waterfall({ steps, height = 260 }: { steps: WaterfallStep[]; hei
             <Cell key={s.key} fill={colourOf(s)} />
           ))}
         </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   )
 }
 
@@ -184,6 +212,17 @@ export function Waterfall({ steps, height = 260 }: { steps: WaterfallStep[]; hei
 export function SalaryStack({ data, height = 240 }: { data: SalaryBar[]; height?: number }) {
   const c = useChartColors()
   const { money } = useApp()
+  /**
+   * The ending a tap does not have.
+   *
+   * These five were written against hover and never got the linger the
+   * scrolling charts and the ring have: on a touch screen the panel opened and
+   * then sat over the chart until something unrelated closed it. Reported on an
+   * iPad, but it was never about the size of the screen — every touch device
+   * had it. The same hook, so the same press means the same thing on every
+   * chart in the app.
+   */
+  const tip = useTouchTooltip()
   const parts = [
     { key: 'contributedMinor' as const, name: 'To the household', colour: c.series[1] },
     { key: 'spentMinor' as const, name: 'Spent on me', colour: c.series[0] },
@@ -191,7 +230,7 @@ export function SalaryStack({ data, height = 240 }: { data: SalaryBar[]; height?
   ]
 
   return (
-    <div>
+    <div {...tip.handlers}>
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }} barCategoryGap="35%">
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
@@ -204,12 +243,14 @@ export function SalaryStack({ data, height = 240 }: { data: SalaryBar[]; height?
             width={54}
           />
           <Tooltip
+            active={tip.active}
             cursor={{ fill: c.ink3, fillOpacity: 0.08 }}
             content={({ active, payload, label }) => {
               const row = active ? (payload?.[0]?.payload as SalaryBar | undefined) : undefined
               if (!row) return null
               return (
                 <Tip
+                  fading={tip.fading}
                   label={String(label ?? '')}
                   rows={[
                     ...parts.map((p) => ({ name: p.name, value: money(row[p.key]), color: p.colour })),
@@ -238,13 +279,24 @@ export function SalaryStack({ data, height = 240 }: { data: SalaryBar[]; height?
 export function FixedVariableBars({ data, height = 240 }: { data: FixedVariable[]; height?: number }) {
   const c = useChartColors()
   const { money } = useApp()
+  /**
+   * The ending a tap does not have.
+   *
+   * These five were written against hover and never got the linger the
+   * scrolling charts and the ring have: on a touch screen the panel opened and
+   * then sat over the chart until something unrelated closed it. Reported on an
+   * iPad, but it was never about the size of the screen — every touch device
+   * had it. The same hook, so the same press means the same thing on every
+   * chart in the app.
+   */
+  const tip = useTouchTooltip()
   const parts = [
     { key: 'fixedMinor' as const, name: 'Tracked bills', colour: c.series[3] },
     { key: 'variableMinor' as const, name: 'Everything else', colour: c.series[0] },
   ]
 
   return (
-    <div>
+    <div {...tip.handlers}>
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }} barCategoryGap="35%">
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
@@ -257,6 +309,7 @@ export function FixedVariableBars({ data, height = 240 }: { data: FixedVariable[
             width={54}
           />
           <Tooltip
+            active={tip.active}
             cursor={{ fill: c.ink3, fillOpacity: 0.08 }}
             content={({ active, payload, label }) => {
               const row = active ? (payload?.[0]?.payload as FixedVariable | undefined) : undefined
@@ -264,6 +317,7 @@ export function FixedVariableBars({ data, height = 240 }: { data: FixedVariable[
               const total = row.fixedMinor + row.variableMinor
               return (
                 <Tip
+                  fading={tip.fading}
                   label={String(label ?? '')}
                   rows={[
                     ...parts.map((p) => ({ name: p.name, value: money(row[p.key]), color: p.colour })),
@@ -301,9 +355,20 @@ export function SavingsRateLine({ data, height = 220 }: { data: SavingsRatePoint
   const c = useChartColors()
   const { money } = useApp()
   const partial = data.some((d) => d.partial)
+  /**
+   * The ending a tap does not have.
+   *
+   * These five were written against hover and never got the linger the
+   * scrolling charts and the ring have: on a touch screen the panel opened and
+   * then sat over the chart until something unrelated closed it. Reported on an
+   * iPad, but it was never about the size of the screen — every touch device
+   * had it. The same hook, so the same press means the same thing on every
+   * chart in the app.
+   */
+  const tip = useTouchTooltip()
 
   return (
-    <div>
+    <div {...tip.handlers}>
       <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
         <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
@@ -317,12 +382,14 @@ export function SavingsRateLine({ data, height = 220 }: { data: SavingsRatePoint
         />
         <ReferenceLine y={0} stroke={c.baseline} />
         <Tooltip
+          active={tip.active}
           cursor={{ stroke: c.ink3, strokeOpacity: 0.3 }}
           content={({ active, payload, label }) => {
             const row = active ? (payload?.[0]?.payload as SavingsRatePoint | undefined) : undefined
             if (!row) return null
             return (
               <Tip
+                fading={tip.fading}
                 label={String(label ?? '')}
                 rows={
                   row.rate === null
@@ -554,10 +621,22 @@ export function PaceLine({
   const c = useChartColors()
   const { money } = useApp()
   const previous = points.some((p) => p.lastMonthMinor)
+  /**
+   * The ending a tap does not have.
+   *
+   * These five were written against hover and never got the linger the
+   * scrolling charts and the ring have: on a touch screen the panel opened and
+   * then sat over the chart until something unrelated closed it. Reported on an
+   * iPad, but it was never about the size of the screen — every touch device
+   * had it. The same hook, so the same press means the same thing on every
+   * chart in the app.
+   */
+  const tip = useTouchTooltip()
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={points} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
+    <div {...tip.handlers}>
+      <ResponsiveContainer width="100%" height={height}>
+        <LineChart data={points} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
         <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
         <XAxis
           dataKey="day"
@@ -575,12 +654,14 @@ export function PaceLine({
           width={54}
         />
         <Tooltip
+          active={tip.active}
           cursor={{ stroke: c.ink3, strokeOpacity: 0.3 }}
           content={({ active, payload }) => {
             const row = active ? (payload?.[0]?.payload as PacePoint | undefined) : undefined
             if (!row) return null
             return (
               <Tip
+                fading={tip.fading}
                 label={`Day ${row.day}`}
                 rows={[
                   ...(row.thisMonthMinor !== null
@@ -614,8 +695,9 @@ export function PaceLine({
           dot={false}
           connectNulls={false}
         />
-      </LineChart>
-    </ResponsiveContainer>
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   )
 }
 

@@ -466,7 +466,7 @@ function BudgetCard({
             type="button"
             onClick={() => nudge(-step)}
             aria-label={`Reduce ${row.category.name} budget`}
-            className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-lg text-ink-2 active:scale-95"
+            className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-lg text-ink-2 active:scale-95"
           >
             −
           </button>
@@ -477,7 +477,7 @@ function BudgetCard({
             type="button"
             onClick={() => nudge(step)}
             aria-label={`Increase ${row.category.name} budget`}
-            className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-lg text-ink-2 active:scale-95"
+            className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-lg text-ink-2 active:scale-95"
           >
             +
           </button>

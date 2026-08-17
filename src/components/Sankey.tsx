@@ -58,14 +58,35 @@ function ribbonPath(x0: number, y0: number, x1: number, y1: number, t: number) {
   ].join(' ')
 }
 
+/**
+ * How tall this graph wants to be, before anybody offers it more.
+ *
+ * Tall enough that every band has room for its own label. Exported because the
+ * caller has to state it as the floor of a `Fill` — the diagram can use a
+ * taller box perfectly well (the bands get thicker, the labels stay put) and
+ * the one thing it must not do is get shorter than this.
+ */
+export function sankeyHeight(graph: FlowGraph): number {
+  const ins = graph.nodes.filter((n) => n.side === 'in').length
+  const outs = graph.nodes.filter((n) => n.side === 'out').length
+  return Math.max(280, Math.max(ins, outs) * 42)
+}
+
 export function Sankey({
   graph,
   caption,
+  height: offered,
   onPick,
   canPick = (n) => n.side !== 'hub',
 }: {
   graph: FlowGraph
   caption?: string
+  /**
+   * A taller box to draw in, where the grid has one to give. Never shorter
+   * than `sankeyHeight` — a band that cannot carry its own label is not the
+   * smaller of two evils.
+   */
+  height?: number
   /**
    * Out of a band and into the rows behind it. The node is handed over whole
    * because only the caller knows what its id means — `cat:…` is a category,
@@ -164,16 +185,7 @@ export function Sankey({
   }, [])
 
   const width = Math.max(MIN_WIDTH, available)
-  const counts = useMemo(
-    () => ({
-      ins: graph.nodes.filter((n) => n.side === 'in').length,
-      outs: graph.nodes.filter((n) => n.side === 'out').length,
-    }),
-    [graph],
-  )
-  // Tall enough that every band has room for its own label. A diagram that
-  // fits the screen and cannot be read is not the smaller of two evils.
-  const height = Math.max(280, Math.max(counts.ins, counts.outs) * 42)
+  const height = Math.max(sankeyHeight(graph), offered ?? 0)
 
   const layout = useMemo(
     () => layoutFlow(graph, { width: width - LABEL * 2, height, nodeWidth: NODE_W, padding: BAND_GAP }),
@@ -398,7 +410,7 @@ export function Sankey({
             <button
               type="button"
               onClick={() => onPick(hoveredNode)}
-              className="pointer-events-auto mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg bg-surface-2 px-2 py-1.5 text-xs font-medium text-ink-2 transition hover:text-ink"
+              className="pointer-events-auto mt-1.5 flex w-full items-center justify-center gap-1 rounded-full bg-surface-2 px-2 py-1.5 text-xs font-medium text-ink-2 transition hover:text-ink"
             >
               <Receipt size={12} /> See transactions
             </button>

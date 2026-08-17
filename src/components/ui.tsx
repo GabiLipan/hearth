@@ -167,10 +167,17 @@ export function Columns({
    * ragged by construction, and with two cards in two columns there is nothing
    * to balance at all: one simply ends higher than the other and the page has a
    * hole in it down to the next full-width card. With this on, every column is
-   * as tall as the tallest and the slack is handed to the cards in it to share,
-   * which is only useful where a card can spend it — see `Fill`. Off for a page
-   * of prose-shaped cards (Settings), where a stretched card is just a taller
-   * box with the same words at the top of it.
+   * as tall as the tallest and the slack is handed to the cards in it to share.
+   *
+   * Only to the cards that can SPEND it, though — the ones holding a `Fill`,
+   * which is what `data-fill` says. Stretching a card that cannot grow does not
+   * remove the gap, it moves the gap inside the card, where it reads as a
+   * mistake rather than as spacing: a list of payees with three inches of
+   * nothing under it. Those keep their own height, and the slack stays at the
+   * foot of the column, which is where a masonry layout has always left it.
+   *
+   * Off altogether for a page of prose-shaped cards (Settings), where nothing
+   * on the page has anything in it that grows.
    *
    * Growing every card in the column rather than only the last is deliberate:
    * one card absorbing a whole column's slack is one chart twice the height of
@@ -238,7 +245,7 @@ export function Columns({
               // A child that renders nothing must not still occupy a gap — and
               // must not be handed a share of the slack either, which is why
               // the grow is refused to an item that measured as nothing.
-              className={cx('empty:hidden', fill && (heights[i] ?? 1) > 0 && 'grow')}
+              className={cx('empty:hidden', fill && (heights[i] ?? 1) > 0 && 'has-[[data-fill]]:grow')}
             >
               {items[i]}
             </div>
@@ -309,7 +316,10 @@ export function Fill({
   }, [min, max])
 
   return (
-    <div ref={box} className="flex-1" style={{ minHeight: min }}>
+    // `data-fill` is how the grid asks "can this card spend a taller box?" —
+    // see `Columns`. A card with nothing in it that grows must not be stretched,
+    // or the gap between two cards simply moves inside one of them.
+    <div ref={box} data-fill className="flex-1" style={{ minHeight: min }}>
       <div ref={content}>{children(height)}</div>
     </div>
   )
@@ -439,7 +449,7 @@ export function Button({ variant = 'primary', size = 'md', type = 'button', clas
     <button
       type={type}
       className={cx(
-        'inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition-colors md:rounded-lg',
+        'inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-colors',
         'disabled:opacity-40 disabled:pointer-events-none',
         // Touch targets on mobile, tighter hit areas for a precise cursor.
         size === 'sm' && 'h-8 px-3 text-sm desktop:h-7 desktop:px-2.5 desktop:text-xs',
@@ -1900,13 +1910,13 @@ export function MonthStepper({
       'grid h-full place-items-center text-ink-2 transition-colors hover:text-ink disabled:opacity-30',
       chip
         ? cx('w-8', side === 'l' ? 'rounded-l-full pl-0.5' : 'rounded-r-full pr-0.5')
-        : cx('w-9 desktop:w-7', side === 'l' ? 'rounded-l-xl md:rounded-l-lg' : 'rounded-r-xl md:rounded-r-lg'),
+        : cx('w-9 desktop:w-7', side === 'l' ? 'rounded-l-full pl-0.5' : 'rounded-r-full pr-0.5'),
     )
   return (
     <div
       className={cx(
         'flex shrink-0 items-center bg-surface-2',
-        chip ? 'h-9 rounded-full' : cx(CONTROL_H, 'rounded-xl md:rounded-lg'),
+        chip ? 'h-9 rounded-full' : cx(CONTROL_H, 'rounded-full'),
       )}
     >
       <button
