@@ -338,46 +338,59 @@ select,
  * and widen layer 3's ramp — going to a single layer will bring the ghosting
  * straight back.
  */
-.dock-scrim > span {
+.edge-scrim > span {
   position: absolute;
   inset: 0;
 }
-.dock-scrim > span:nth-child(1) {
+.edge-scrim > span:nth-child(1) {
   -webkit-backdrop-filter: blur(1px);
   backdrop-filter: blur(1px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 34%);
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 34%);
+  -webkit-mask-image: linear-gradient(var(--scrim-dir), transparent 0%, #000 34%);
+  mask-image: linear-gradient(var(--scrim-dir), transparent 0%, #000 34%);
 }
-.dock-scrim > span:nth-child(2) {
+.edge-scrim > span:nth-child(2) {
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 24%, #000 54%);
-  mask-image: linear-gradient(to bottom, transparent 24%, #000 54%);
+  -webkit-mask-image: linear-gradient(var(--scrim-dir), transparent 24%, #000 54%);
+  mask-image: linear-gradient(var(--scrim-dir), transparent 24%, #000 54%);
 }
-.dock-scrim > span:nth-child(3) {
+.edge-scrim > span:nth-child(3) {
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 46%, #000 74%);
-  mask-image: linear-gradient(to bottom, transparent 46%, #000 74%);
+  -webkit-mask-image: linear-gradient(var(--scrim-dir), transparent 46%, #000 74%);
+  mask-image: linear-gradient(var(--scrim-dir), transparent 46%, #000 74%);
 }
-.dock-scrim > span:nth-child(4) {
+.edge-scrim > span:nth-child(4) {
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 68%, #000 96%);
-  mask-image: linear-gradient(to bottom, transparent 68%, #000 96%);
+  -webkit-mask-image: linear-gradient(var(--scrim-dir), transparent 68%, #000 96%);
+  mask-image: linear-gradient(var(--scrim-dir), transparent 68%, #000 96%);
 }
 /**
  * The wash, last so it sits OVER the blur rather than being blurred by it.
  * A smear of the page's own colour is still a smear; this is what turns it
  * into the page quietly running out.
  */
-.dock-scrim > span:nth-child(5) {
+.edge-scrim > span:nth-child(5) {
   background: linear-gradient(
-    to bottom,
+    var(--scrim-dir),
     transparent 0%,
     color-mix(in srgb, var(--page) 22%, transparent) 55%,
     color-mix(in srgb, var(--page) 68%, transparent) 100%
   );
+}
+
+/**
+ * Which way it fades. Every stop above is written from the CLEAR end, so the
+ * two edges share one set of numbers and cannot drift into looking like
+ * different effects: at the bottom of the screen the ramp runs downwards, at
+ * the top it runs upwards, and that is the whole difference between them.
+ */
+.scrim-down {
+  --scrim-dir: to bottom;
+}
+.scrim-up {
+  --scrim-dir: to top;
 }
 
 /* Recharts positions its tooltip inside the chart container and sets no

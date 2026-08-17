@@ -138,7 +138,14 @@ export function Layout({ children }: { children: ReactNode }) {
       }
     }
     const ro = new ResizeObserver(write)
-    for (const [el] of pairs) if (el) ro.observe(el)
+    // `border-box`, and it is load-bearing. A ResizeObserver watches the
+    // CONTENT box by default, and both of these are a fixed row inside padding
+    // that is entirely `env(safe-area-inset-*)` — so on the one event that
+    // changes them, a rotation taking the top inset from 59px to 0, the content
+    // box does not move and the callback never runs. `--header-h` would then
+    // keep the portrait number in landscape: a scroller padded for a header
+    // that is no longer that tall.
+    for (const [el] of pairs) if (el) ro.observe(el, { box: 'border-box' })
     write()
     return () => {
       ro.disconnect()
@@ -294,6 +301,37 @@ export function Layout({ children }: { children: ReactNode }) {
         ref={headerRef}
         className="pt-safe pointer-events-none absolute inset-x-0 top-0 z-30 md:hidden"
       >
+        {/* The same fade as the dock's, upside down: clear below the discs and
+            fully blurred by the top of the screen, so rows leave under the
+            status bar the way they leave under the tab bar.
+
+            `bottom-0` — the fade ends exactly where the content begins, since
+            `--header-h` is both this element's height and the scroller's top
+            padding. That is not tidiness, it is the fix for a real artefact:
+            reaching 40px further down put the large page title inside the ramp
+            at rest, and layer 1 cross-fading 1px of blur against sharp text is
+            invisible on a row and plainly visible on 28px bold — a doubled
+            ghost along the top of every letter, which is the exact fault this
+            whole stack exists to remove. Anything inside the ramp at rest wants
+            to be either fully blurred or fully sharp; here it is fully sharp.
+            (On a phone this is still a long ramp — `env(safe-area-inset-top)`
+            is most of it — and it comes out within a few pixels of the dock's.)
+
+            Absolutely positioned, so it does not enter `--header-h`: that
+            measurement is `offsetHeight` on this element and an absolute child
+            contributes nothing to it. If this ever becomes a flow child, the
+            scroller's top padding grows by 40px and every page gains a gap. */}
+        <span
+          aria-hidden
+          className="edge-scrim scrim-up pointer-events-none absolute inset-x-0 bottom-0 top-0"
+        >
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+        </span>
+
         <div className="relative flex items-center gap-2 px-3.5 pb-3 pt-2">
           {/* Whatever the page says it is showing, once it has been scrolled
               into — today that is Activity's month, and it is here because with
@@ -464,8 +502,8 @@ export function Layout({ children }: { children: ReactNode }) {
             between the blurred backdrop and the sharp one rather than ramping
             the radius: one layer under a gradient is half a blur laid over
             legible text. Four stacked blurs and a wash instead — see
-            `.dock-scrim` for why the bands overlap the way they do. */}
-        <span aria-hidden className="dock-scrim pointer-events-none absolute inset-x-0 -top-10 bottom-0">
+            `.edge-scrim` for why the bands overlap the way they do. */}
+        <span aria-hidden className="edge-scrim scrim-down pointer-events-none absolute inset-x-0 -top-10 bottom-0">
           <span />
           <span />
           <span />

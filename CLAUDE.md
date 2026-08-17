@@ -463,6 +463,25 @@ the single place a level comes from.
   layer, and no legible text anywhere in the tail. It costs four filters on an
   element that is on screen the whole time the app is; that is the price of the
   effect, and frame times did not move.
+
+  Both edges wear it — `.scrim-down` under the tab bar, `.scrim-up` behind the
+  header discs — and every stop is written from the CLEAR end so one set of
+  numbers serves both. **Each one stops exactly where the content starts**,
+  which is the scroller's own padding: `--header-h` at the top,
+  `--tabbar-h` at the bottom. That is not tidiness. Reaching 40px further into
+  the page put the large page title inside layer 1's ramp AT REST, and 1px of
+  blur cross-faded against sharp text is invisible on a row and plainly visible
+  on 28px bold — a doubled ghost along the top of every letter, which is the
+  exact fault the stack exists to remove. Anything sitting in the ramp when
+  nothing is moving wants to be fully sharp or fully blurred, never mixed.
+- **A `ResizeObserver` watches the CONTENT box unless told otherwise**, and both
+  `--header-h` and `--tabbar-h` are a fixed row inside padding that is entirely
+  `env(safe-area-inset-*)`. So on the one event that changes them — a rotation
+  taking the top inset from 59px to 0 — the content box does not move, the
+  callback never fires, and the scroller keeps padding itself for a header that
+  is no longer that tall. Both observations pass `{ box: 'border-box' }`. Any
+  future measurement of an element whose size lives in `env()` padding needs the
+  same, and the failure is silent in exactly the orientation nobody tests in.
 - **There are two pill springs, and the difference is deliberate.** The tab
   bar's (`PILL_SPRING`, ζ≈0.8, ~7% overshoot) is pressed constantly by a thumb
   and travels a short way; the lens's (`pillBounce()`, ζ 0.55, 12%) is pressed
