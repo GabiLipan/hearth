@@ -45,6 +45,7 @@ import { monthsOfHistory } from '../lib/stats'
 import {
   CategoryBars,
   CategoryDonut,
+  CategoryMosaic,
   SpendBars,
   IncomeSpendBars,
   NetLine,
@@ -699,6 +700,11 @@ export default function Reports() {
         <>
           {shape === 'bars' ? (
             <CategoryBars slices={slices} onPick={pickSlice} />
+          ) : shape === 'mosaic' ? (
+            /* Taller than the home widget's, because this is a full-width panel
+               on its own: the blocks squarify against the box, so a long thin
+               one would give every category a letterbox. */
+            <CategoryMosaic slices={slices} height={300} onPick={pickSlice} />
           ) : (
             <CategoryDonut
               slices={slices}
@@ -717,8 +723,10 @@ export default function Reports() {
           )}
           {/* The buttons stay even though the chart is now clickable: they are
               the keyboard path, and a hit target big enough for a thumb on the
-              categories too thin to press in the ring. */}
-          {!drill && (
+              categories too thin to press in the ring. The blocks need neither
+              — each is a real button, and the ones too small to label carry
+              their own chip. */}
+          {!drill && shape !== 'mosaic' && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {slices.filter((s) => canDrill(s.categoryId)).map((s) => (
                 <Button key={s.categoryId} size="sm" variant="subtle" onClick={() => setDrill(s.categoryId)}>

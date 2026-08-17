@@ -114,7 +114,9 @@ and where every band goes), `scale.ts` (a value axis with round numbers, shared
 by a scrolling chart and the axis pinned beside it),
 `reimbursements.ts` (what the household owes you — computed always, shown only
 behind the `showOwed` flag; see `useFlag`), `shade.ts` (telling apart
-two categories the palette gave one colour),
+two categories the palette gave one colour), `ink.ts` (which ink is legible
+written straight onto one of those colours), `treemap.ts` (a set of amounts as a
+set of rectangles, area meaning money),
 `scroll.ts` (the element the app scrolls, which is not the document, and why),
 `headline.ts` (what the phone's header says once a page has been scrolled into,
 published by the page and read by the header),
@@ -958,6 +960,72 @@ the single place a level comes from.
   it in exactly the same way — on a phone it ate a whole bar, which then read as
   a month that had barely started. `MonthScroller` therefore has no edge fade at
   all; the scrollbar and a caption carry the hint instead.
+
+  The blocks view found the same rule from the other end. Its first version put a
+  22% wash under each label to lift the text off the fill, and at eight blocks
+  the card read as eight categories each fading towards their own foot — a
+  partial-month gradient, eight times, meaning nothing. There is no wash now and
+  none is needed: `lib/ink.ts` picks the ink per fill by measured contrast, both
+  lines are that ink at full strength, and the hierarchy is weight. **Nothing may
+  ramp the opacity of a category's own colour.**
+- **Ink on a fill is measured, not looked up.** Writing a category's name onto
+  its own colour is the one place in the app where the ground under a label
+  differs per label, and the intuition — "white text on the colour" — is wrong
+  more often than right: white loses to black on eight of the twelve slots in the
+  light theme and on eleven in the dark one, and which slot flips is not the same
+  in both. A table beside the palette would therefore be two themes of
+  exceptions, and it could not cover `shade.ts` at all, which invents lightnesses
+  that were never in the palette. `useChartColors` has already resolved the
+  tokens to hex, so `inkOn` computes it. What that buys is pinned in
+  `ink.test.ts`: every palette colour and every shaded variant clears AA — worst
+  cases 4.76:1 and 4.68:1 — which is what makes a bare label on a bare fill
+  legitimate. Re-tune a slot and that test is what says so.
+- **The blocks view has to be measured before it can be laid out**, and the
+  effect that measures it must depend on the thing it measures. A treemap
+  squarifies against the box's ASPECT RATIO, so `CategoryMosaic` cannot work in
+  percentages — it reads `clientWidth` and lays out in pixels. The box does not
+  exist until there are slices, and on a cold start `bookSlices` is empty for the
+  first frames while the cache opens, so an effect keyed on `[]` fires once
+  against a null ref, is never scheduled again, and the card is silently blank
+  for ever: `squarify` keeps returning zero-size tiles and every block returns
+  null. It is keyed on `[drawn]` for that reason — the same shape as
+  `useMorphHeight` and `Sheet`'s focus effect, and verified by breaking it on
+  purpose, which renders nothing at all.
+- **`minBand`'s trade is refused here.** The Sankey floors a small band so it
+  stays hoverable and pays for it by no longer summing to the total above it.
+  `squarify` has no floor: every tile's area is its exact share. The tail is
+  handled where it belongs instead — `bookSlices` already folds everything past
+  the top N into "Other" — and a block too narrow to READ (52px, about five
+  characters) drops to a chip under the picture with its whole name and figure on
+  one line. So "label what can be read" rather than "label what fits", and no
+  arithmetic is bent to make a label fit.
+- **The month panel is the app's one painted surface, and it beats `Card` from
+  outside the layers.** `.panel-month` is plain unlayered CSS because it has to
+  win against `bg-surface` AND against `ring-1 ring-hairline` — Tailwind
+  implements a ring as a `box-shadow`, so a hairline would draw a pale rim across
+  a saturated panel and no tinted shadow could coexist with it. `ring-0` is not
+  the fix: both spellings compile to the same custom properties and which wins is
+  Tailwind's generated order, not the order they are written in. Same reason
+  `.tint-transfer` is written this way.
+
+  Three things about it that are load-bearing. Its stops are DEEPENED from
+  `--series-1/-5/-10` rather than being them, because the panel's quietest text
+  is white at 82% and that measures 3.4:1 on `--accent` — the deepened three
+  measure 4.9, 7.9 and 7.4. Every colour on it comes from a `--panel-*` token
+  defined per theme, so nothing on the panel may reach for `text-ink-3`,
+  `divide-hairline` or `--accent-ink`: those are ink for a surface, and this is
+  not one. And the over-budget state is the PANEL's colour, not the figure's —
+  green and red on a dark blue are the two figures that most need reading made
+  hardest to read, so `Stat` has no tone at all and the words "left" and "over"
+  carry it, which also survives being colour-blind.
+
+  It is not always at the top, either: every card on this page can be dragged,
+  narrowed to one column or switched off, so the panel has to read as itself in a
+  masonry column half way down.
+- **A `divide-*` utility sets only the width.** The colour falls back to the
+  child's `currentColor` — which on the month panel is full-strength white, about
+  four times too strong for a hairline. The desktop stat strip states its own
+  `border-l` and `borderColor` per figure instead.
 - **A drill is answered twice, and which one depends on what you'll do next.**
   Reading the rows behind a figure is usually a glance — is that £412 one thing
   or forty? — so the default is a SHEET over the chart, which leaves the page

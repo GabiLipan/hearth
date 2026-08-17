@@ -34,7 +34,7 @@ import { useApp } from '../state/AppContext'
 import { AccountDot, Button, Card, CardHeader, CategoryDot, Field, Progress, Select, Sheet, TextInput, cx } from './ui'
 import { BudgetBullet } from './BudgetBullet'
 import { CategoryIcon } from './CategoryIcon'
-import { CategoryBars, CategoryDonut, Sparkline, SpendBars, type TrendShape } from './charts'
+import { CategoryBars, CategoryDonut, CategoryMosaic, Sparkline, SpendBars, type TrendShape } from './charts'
 
 export interface HomeData {
   txns: Transaction[]
@@ -121,35 +121,58 @@ function useHomeDrill(book: BookId) {
  * most important card on the page the flattest thing on it — while the phone
  * layout, six lines above, leads with a `text-3xl` headline and subordinates
  * everything else. Same hierarchy, both widths.
+ *
+ * There is no `tone` any more, and its absence is the point. Green and red on
+ * `--panel-2` are a dark green and a dark red on a dark blue — the two figures
+ * that most need to be read, made the hardest to. The panel says which state
+ * the month is in with its own colour, and the words "left" and "over" say it
+ * in text; both survive being colour-blind, which the green/red pair never did.
  */
-function Stat({
-  label,
-  value,
-  tone,
-  lead,
-}: {
-  label: string
-  value: string
-  tone?: 'good' | 'bad'
-  lead?: boolean
-}) {
+function Stat({ label, value, lead }: { label: string; value: string; lead?: boolean }) {
   return (
-    <div className="min-w-0 px-4 first:pl-0 last:pr-0">
-      <p className="text-xs text-ink-3">{label}</p>
-      <p
-        className={cx(
-          'mt-0.5 truncate font-bold tracking-tight tabular',
-          lead ? 'text-2xl' : 'text-lg',
-          tone === 'good' && 'text-good-text',
-          tone === 'bad' && 'text-critical-text',
-        )}
-      >
+    /* The hairline is stated here rather than as `divide-x` on the row: a
+       `divide-*` utility sets only the width, so the colour falls back to the
+       child's `currentColor` — which on this panel is full-strength white, four
+       times too strong for a divider. */
+    <div
+      className="min-w-0 border-l px-4 first:border-l-0 first:pl-0 last:pr-0"
+      style={{ borderColor: 'var(--panel-line)' }}
+    >
+      <p className="text-xs" style={{ color: 'var(--panel-ink-2)' }}>{label}</p>
+      <p className={cx('mt-0.5 truncate font-bold tracking-tight tabular', lead ? 'text-2xl' : 'text-lg')}>
         {value}
       </p>
     </div>
   )
 }
 
+/**
+ * The month, as the page's one painted surface.
+ *
+ * Home is opened to learn one thing — how this month is going — and then either
+ * closed or used to go looking. So this card stops being the first of nine
+ * near-white rectangles and becomes the top of the page: a deep gradient, the
+ * figure at `text-4xl`, and everything else on the page left exactly as quiet as
+ * it was. The colour is spent once, here, deliberately; a second painted card
+ * would leave the page with two focal points, which is none.
+ *
+ * Three things this has to keep being true, because they were all easy to get
+ * wrong:
+ *
+ *   - **It is not always at the top.** Every card on this page can be dragged,
+ *     resized to one column or switched off, so the panel has to read as itself
+ *     in a masonry column halfway down. Nothing here assumes its position or its
+ *     width — the phone layout stacks, the wide one strips, and both are the
+ *     same panel.
+ *   - **Every colour comes from `--panel-*`.** The gradient, the quiet ink, the
+ *     divider and the bar's track are all tokens defined per theme, so a dark
+ *     screen gets deeper stops rather than the light ones glowing on black. No
+ *     `text-ink-3`, no `divide-hairline`, no `--accent-ink`: those are ink for a
+ *     surface, and this is not one.
+ *   - **The state is the panel's colour, not the figure's.** Over budget turns
+ *     the whole card oxblood via `data-over`, which is why `Stat` has no tone
+ *     and the phone layout's "over"/"left" is plain semibold white.
+ */
 export function HeroWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const words = BOOK_WORDS[data.book]
@@ -160,28 +183,32 @@ export function HeroWidget({ data }: WidgetProps) {
   const budgetTotal = data.budgets.reduce((s, b) => s + b.amountMinor, 0)
   const frac = budgetTotal > 0 ? totals.spend / budgetTotal : 0
   const over = frac > 1
-  const bar = budgetTotal > 0 && <Progress fraction={frac} tone={over ? 'over' : frac > 0.85 ? 'warn' : 'ok'} />
+  const bar = budgetTotal > 0 && (
+    <Progress fraction={frac} tone={over ? 'over' : frac > 0.85 ? 'warn' : 'ok'} on="panel" />
+  )
+  const quiet = { color: 'var(--panel-ink-2)' }
 
   return (
-    <Card className="p-4 md:p-3">
+    <Card className={cx('panel-month p-4 md:p-3.5', over && 'panel-over')}>
       {/* Phone: one headline figure with the detail stacked underneath. */}
       <div className="flex flex-wrap items-end justify-between gap-3 md:hidden">
         <div className="min-w-0">
-          <p className="text-sm text-ink-3">{monthLabel(month())} · {words.spend.toLowerCase()}</p>
-          <p className="mt-0.5 truncate text-3xl font-bold tracking-tight tabular">{money(totals.spend)}</p>
+          <p className="text-sm" style={quiet}>{monthLabel(month())} · {words.spend.toLowerCase()}</p>
+          <p className="mt-0.5 truncate text-4xl font-bold tracking-tight tabular">{money(totals.spend)}</p>
           {budgetTotal > 0 && (
-            <p className="mt-0.5 text-sm text-ink-2">
+            <p className="mt-1 text-sm" style={quiet}>
               of {money(budgetTotal, { hideDecimals: true })}
-              {over ? (
-                <span className="font-medium text-critical-text"> · {money(totals.spend - budgetTotal)} over</span>
-              ) : (
-                <span className="font-medium text-good-text"> · {money(budgetTotal - totals.spend)} left</span>
-              )}
+              <span className="font-semibold" style={{ color: 'var(--panel-ink)' }}>
+                {' · '}
+                {over
+                  ? `${money(totals.spend - budgetTotal)} over`
+                  : `${money(budgetTotal - totals.spend)} left`}
+              </span>
             </p>
           )}
         </div>
         <div className="min-w-36 flex-1">
-          <div className="mb-1.5 flex justify-between gap-2 text-xs text-ink-3">
+          <div className="mb-1.5 flex justify-between gap-2 text-xs" style={quiet}>
             <span className="truncate">{words.income} {money(totals.income, { compact: true })}</span>
             <span className="truncate">{words.net} {money(totals.net, { sign: true, compact: true })}</span>
           </div>
@@ -191,21 +218,17 @@ export function HeroWidget({ data }: WidgetProps) {
 
       {/* Desktop: a strip of figures across the full width. */}
       <div className="hidden md:block">
-        <p className="text-xs text-ink-3">{monthLabel(month())}</p>
-        <div className="mt-1 flex flex-nowrap items-start divide-x divide-hairline">
+        <p className="text-xs" style={quiet}>{monthLabel(month())}</p>
+        <div className="mt-1 flex flex-nowrap items-start">
           <Stat label={words.spend} value={money(totals.spend)} lead />
           <Stat label={words.income} value={money(totals.income)} />
           {data.book === 'mine' && totals.contributed > 0 && (
             <Stat label="To household" value={money(totals.contributed)} />
           )}
-          <Stat
-            label={words.net}
-            value={money(totals.net, { sign: true })}
-            tone={totals.net < 0 ? 'bad' : 'good'}
-          />
+          <Stat label={words.net} value={money(totals.net, { sign: true })} />
           {budgetTotal > 0 && <Stat label="Budgeted" value={money(budgetTotal, { hideDecimals: true })} />}
         </div>
-        {budgetTotal > 0 && <div className="mt-2">{bar}</div>}
+        {budgetTotal > 0 && <div className="mt-2.5">{bar}</div>}
       </div>
     </Card>
   )
@@ -401,13 +424,20 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
         </h3>
         {controls}
       </div>
-      {variant === 'bars' ? (
+      {variant === 'bars' || variant === 'mosaic' ? (
         <>
           <p className="mb-2 text-sm text-ink-2">
             <span className="font-semibold tabular">{money(spent)}</span>{' '}
             <span className="text-ink-3">{drill ? 'in here' : 'spent'}</span>
           </p>
-          <CategoryBars slices={slices} onPick={pickSlice} />
+          {variant === 'mosaic' ? (
+            /* A little taller than the ring's 180: the blocks are the full
+               width of the card, so height is what decides how many of them can
+               carry a legible name rather than falling back to a chip. */
+            <CategoryMosaic slices={slices} height={190} onPick={pickSlice} />
+          ) : (
+            <CategoryBars slices={slices} onPick={pickSlice} />
+          )}
         </>
       ) : (
         <CategoryDonut
@@ -420,8 +450,10 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
       )}
       {/* The donut itself is not clickable, so the way in is a row of buttons
           under it — the same arrangement Reports uses, and the same reasons:
-          a keyboard path, and a target big enough for a thumb. */}
-      {!drill && (
+          a keyboard path, and a target big enough for a thumb. The blocks need
+          neither: each one is a real button, in reading order, and the ones too
+          small to press carry their own chip. */}
+      {!drill && variant !== 'mosaic' && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {slices.filter((s) => canDrill(s.categoryId)).map((s) => (
             <button

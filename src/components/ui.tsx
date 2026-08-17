@@ -1405,12 +1405,29 @@ export function AccountDot({ account, size = 36, className }: { account?: Accoun
 export function Progress({
   fraction,
   tone,
+  on = 'surface',
   marker,
   markerLabel,
   className,
 }: {
   fraction: number
   tone: 'ok' | 'warn' | 'over'
+  /**
+   * What it is drawn on.
+   *
+   * `panel` is the home page's painted month card, where the three tones have
+   * nowhere legible to go — accent on a blue gradient is invisible, and a red
+   * fill on the oxblood the panel already turns is a red on a red. The panel
+   * says which state it is in with its own colour, so the bar goes back to
+   * saying only how far through the month's money you are: white on a white
+   * wash, the over-spill still split out because that is arithmetic rather than
+   * emphasis.
+   *
+   * The arithmetic is shared rather than copied for exactly that reason — a
+   * second bar in `HeroWidget` would be the same over-budget split written
+   * twice, and the two would drift.
+   */
+  on?: 'surface' | 'panel'
   /**
    * A faint tick at 0–1 of the track: where you would be if you were exactly on
    * schedule. Goals use it for the pace their deadline implies. Omitted where
@@ -1428,11 +1445,17 @@ export function Progress({
    * two-tone red as a budget blown by a fifth.
    */
   const over = fraction > 1 && tone === 'over'
-  const color = tone === 'ok' ? 'var(--accent)' : tone === 'warn' ? 'var(--warning)' : 'var(--critical)'
+  const panel = on === 'panel'
+  const color = panel
+    ? 'var(--panel-ink)'
+    : tone === 'ok' ? 'var(--accent)' : tone === 'warn' ? 'var(--warning)' : 'var(--critical)'
   // Past 100% the whole track is the spend, so the budget is a fraction of it.
   const budgetPct = over ? (1 / fraction) * 100 : Math.min(100, Math.max(2, fraction * 100))
   return (
-    <div className={cx('relative h-2 w-full overflow-hidden rounded-full bg-surface-2 md:h-1.5', className)}>
+    <div
+      className={cx('relative h-2 w-full overflow-hidden rounded-full md:h-1.5', !panel && 'bg-surface-2', className)}
+      style={panel ? { background: 'var(--panel-track)' } : undefined}
+    >
       <div
         // Rounded on the left always; on the right only when nothing follows
         // it, or the cap would butt into the excess block as a notch.
@@ -1442,13 +1465,21 @@ export function Progress({
         )}
         style={{
           width: `${budgetPct}%`,
-          background: over ? 'color-mix(in oklab, var(--critical) 45%, var(--surface-2))' : color,
+          background: over
+            ? panel
+              // Half-strength white rather than a mix towards the track: the
+              // track is translucent, so mixing into it would let the gradient
+              // through and make the budget's share a different colour at each
+              // end of the same bar.
+              ? 'rgba(255, 255, 255, 0.55)'
+              : 'color-mix(in oklab, var(--critical) 45%, var(--surface-2))'
+            : color,
         }}
       />
       {over && (
         <div
           className="absolute inset-y-0 right-0 transition-[width] duration-500"
-          style={{ width: `${100 - budgetPct}%`, background: 'var(--critical)' }}
+          style={{ width: `${100 - budgetPct}%`, background: panel ? 'var(--panel-ink)' : 'var(--critical)' }}
         />
       )}
       {marker != null && marker > 0 && marker < 1 && (

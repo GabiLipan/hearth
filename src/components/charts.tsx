@@ -21,6 +21,8 @@ import { useChartColors } from '../hooks/useChartColors'
 import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
 import { useApp } from '../state/AppContext'
 import { distinctShades } from '../lib/shade'
+import { inkOn } from '../lib/ink'
+import { squarify } from '../lib/treemap'
 import { niceScale, type Scale } from '../lib/scale'
 import type { OptionDef } from '../lib/layout'
 import { OTHER_SLICE_ID, type CategorySlice, type MonthPoint } from '../lib/stats'
@@ -906,11 +908,12 @@ export function NetLine({
 /* ---------- Category breakdowns ---------- */
 
 /** The shapes a category breakdown can take. */
-export type SliceShape = 'donut' | 'bars'
+export type SliceShape = 'donut' | 'bars' | 'mosaic'
 
 export const SLICE_SHAPES: { value: SliceShape; label: string }[] = [
   { value: 'donut', label: 'Ring' },
   { value: 'bars', label: 'Bars' },
+  { value: 'mosaic', label: 'Blocks' },
 ]
 
 /**
@@ -992,6 +995,208 @@ export function CategoryBars({
         </li>
       ))}
     </ul>
+  )
+}
+
+/* ---------- The same figures as blocks, sized by what they cost ---------- */
+
+/**
+ * The gap between one block and the next.
+ *
+ * Padding on the block's own box rather than a smaller rectangle: the tile from
+ * `squarify` is the area the category owns, and shrinking it here would make the
+ * areas stop being proportional to the amounts — which is the one claim this
+ * picture makes.
+ */
+const BLOCK_GAP = 3
+
+/**
+ * Below these, a block has no room for a line of text and does not get one.
+ *
+ * Both numbers are a compromise found by looking at it, and the width is the one
+ * that was got wrong twice. Too generous (66px) and a phone-width card labels
+ * two blocks out of seven, leaving a picture of anonymous colour over three rows
+ * of chips — which is the bars view with extra steps. Too mean (48px) and a name
+ * arrives as "Tra…", which looks like a rendering fault and still has to be
+ * pressed to find out what it says.
+ *
+ * 52px is about five characters plus an ellipsis, which is enough to recognise a
+ * category you already know while the amount underneath pins it down. Anything
+ * narrower goes to the chips below, where it gets its whole name and its figure
+ * on one line — so the tail is part of the design rather than an apology for it.
+ *
+ * Any threshold has a boundary, and this one's is visible: two blocks of nearly
+ * the same size can land either side of it. 52 is where that happens least often
+ * on the layouts a phone actually produces, which is the only defence available
+ * — the alternative is labelling by area, and an area rule puts a name in a
+ * 20px-wide column, which is worse.
+ */
+const NAME_W = 52
+const NAME_H = 26
+const AMOUNT_W = 52
+const AMOUNT_H = 40
+
+/**
+ * A breakdown as a block of colour per category, area meaning money.
+ *
+ * The third answer to "where did it go", and the one that uses the colour rather
+ * than trimming with it: a ring is 12px of arc per category and a row of bars is
+ * a strip, where this is the whole card, so every category is big enough to
+ * carry its own name and amount in place. Rent being nearly half the month is
+ * then something you see before you have read a figure.
+ *
+ * Three things worth knowing about how it is built.
+ *
+ * **The layout needs a real width**, because a treemap squarifies against the
+ * box's aspect ratio — so this measures rather than working in percentages, and
+ * paints nothing until it has (`squarify` returns zero-size tiles for a
+ * zero-width box, which is exactly the right thing to render). `border-box` on
+ * the observation, as everywhere else in the app.
+ *
+ * **The ink is computed per block, not per theme.** White loses to black on
+ * eight of the twelve slots in the light theme and on eleven in the dark one,
+ * and `lib/shade.ts` invents further lightnesses that were never in the palette
+ * — see `lib/ink.ts`.
+ *
+ * **The tail gets chips.** A block too small for its name is not a block that
+ * explains itself, and dropping the category would make the areas lie. So the
+ * ones that could not be labelled are listed underneath, which also gives them
+ * a target big enough to press.
+ */
+export function CategoryMosaic({
+  slices,
+  height = 240,
+  onPick,
+}: {
+  slices: CategorySlice[]
+  height?: number
+  /** Where a block goes when pressed. Blocks are inert without it. */
+  onPick?: (slice: CategorySlice) => void
+}) {
+  const { money } = useApp()
+  const colorOf = useSliceColours(slices)
+  const box = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  /**
+   * Whether a change of layout should be animated.
+   *
+   * False for the first measurement, or every block would fly out from the
+   * top-left corner on arrival; true afterwards, so drilling into a category
+   * morphs the blocks into their new sizes instead of swapping them. A passive
+   * effect rather than a `requestAnimationFrame`, for the reason `BottomTabs`
+   * gives: a card first laid out while the tab is in the background would
+   * otherwise never turn its transitions on at all.
+   */
+  const [settled, setSettled] = useState(false)
+  /** Whether there is a box to measure at all — see the effect below. */
+  const drawn = slices.length > 0
+
+  /**
+   * `[drawn]`, not `[]`, and this is the trap that would otherwise have shipped
+   * it broken.
+   *
+   * There is nothing to observe until there are slices — the box is not rendered
+   * — and on a cold start `bookSlices` is empty for the first frames while the
+   * cache opens. Keyed on mount alone the effect fires once against a null ref
+   * and is never scheduled again, so the width stays 0, `squarify` keeps
+   * returning zero-size tiles, and the card is silently blank for ever. The same
+   * shape as `useMorphHeight` and `Sheet`'s focus effect, which carry the same
+   * note: an effect whose ref appears later must depend on the thing that makes
+   * it appear.
+   */
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    setWidth(el.clientWidth)
+    // `border-box`, as everywhere in this app: a content-box observation misses
+    // a change that happens entirely in padding, which is how the header's
+    // measurement went wrong on rotation.
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+    ro.observe(el, { box: 'border-box' })
+    return () => ro.disconnect()
+  }, [drawn])
+
+  const measured = width > 0
+  useEffect(() => {
+    if (measured && !reducedMotion()) setSettled(true)
+  }, [measured])
+
+  const tiles = useMemo(
+    () => squarify(slices.map((s) => s.totalMinor), width, height),
+    [slices, width, height],
+  )
+
+  if (!drawn) return null
+
+  const tail = slices.filter((_, i) => {
+    const t = tiles[i]
+    return t.w > 0 && t.h > 0 && (t.w < NAME_W || t.h < NAME_H)
+  })
+
+  return (
+    <div>
+      <div ref={box} className="relative w-full" style={{ height }}>
+        {slices.map((s, i) => {
+          const t = tiles[i]
+          if (!(t.w > 0) || !(t.h > 0)) return null
+          const fill = colorOf(s)
+          const ink = inkOn(fill)
+          const showName = t.w >= NAME_W && t.h >= NAME_H
+          const showAmount = showName && t.w >= AMOUNT_W && t.h >= AMOUNT_H
+          const pct = Math.round(s.fraction * 100)
+          const Tag = onPick ? 'button' : 'div'
+          return (
+            <div
+              key={s.categoryId}
+              className={cx('absolute', settled && 'transition-all duration-300 ease-out')}
+              style={{ left: t.x, top: t.y, width: t.w, height: t.h, padding: BLOCK_GAP / 2 }}
+            >
+              <Tag
+                {...(onPick
+                  ? { type: 'button' as const, onClick: () => onPick(s) }
+                  : { 'aria-hidden': true })}
+                title={`${s.name} · ${money(s.totalMinor)} · ${pct}%`}
+                aria-label={`${s.name}, ${money(s.totalMinor)}, ${pct}% of the total`}
+                className={cx(
+                  'flex size-full flex-col gap-0.5 overflow-hidden rounded-lg px-2 py-1.5 text-left',
+                  onPick && 'cursor-pointer transition-opacity hover:opacity-90',
+                )}
+                style={{ background: fill, color: ink.color }}
+              >
+                {showName && <span className="truncate text-xs font-semibold leading-tight">{s.name}</span>}
+                {showAmount && (
+                  <span className="truncate text-xs leading-tight tabular">
+                    {money(s.totalMinor, { compact: t.w < 96 })}
+                  </span>
+                )}
+              </Tag>
+            </div>
+          )
+        })}
+      </div>
+      {tail.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-1.5">
+          {tail.map((s) => {
+            const Tag = onPick ? 'button' : 'span'
+            return (
+              <li key={s.categoryId}>
+                <Tag
+                  {...(onPick ? { type: 'button' as const, onClick: () => onPick(s) } : {})}
+                  className={cx(
+                    'inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-ink-2',
+                    onPick && 'cursor-pointer transition-colors hover:text-ink',
+                  )}
+                >
+                  <span className="size-1.5 shrink-0 rounded-full" style={{ background: colorOf(s) }} />
+                  <span className="max-w-32 truncate">{s.name}</span>
+                  <span className="font-medium tabular">{money(s.totalMinor, { compact: true })}</span>
+                </Tag>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
   )
 }
 
