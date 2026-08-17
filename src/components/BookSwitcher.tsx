@@ -163,7 +163,7 @@ export function BookLens({ onOpenChange }: { onOpenChange?: (open: boolean) => v
       className={cx(
         // `h-11` is `CONTROL_H`'s touch height, so the lens, the settings button
         // and the add button are one size across the whole top and bottom edge.
-        'pointer-events-auto relative h-11 shrink-0 overflow-hidden rounded-full',
+        'pointer-events-auto relative h-11 shrink-0 touch-none overflow-hidden rounded-full',
         // Exactly what the settings disc wears, and nothing else. A tint alone
         // is what this used to be, and it was legible only because it sat on a
         // solid bar; floating over the rows, `bg-accent/12` is 12% of whatever

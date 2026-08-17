@@ -474,6 +474,22 @@ the single place a level comes from.
   on 28px bold — a doubled ghost along the top of every letter, which is the
   exact fault the stack exists to remove. Anything sitting in the ramp when
   nothing is moving wants to be fully sharp or fully blurred, never mixed.
+- **The floating chrome must refuse the gesture, not merely survive it.** Both
+  bars sit OUTSIDE `#app-scroll`, positioned against the frame, so a drag that
+  starts on one has no scroller to act on — and iOS answers that by rubber-
+  banding the viewport, which carries the whole app with it, bars included. They
+  visibly slid and snapped back, which is the one thing the frame arrangement
+  exists to prevent. `overscroll-behavior` is no help: on `<body>` it does
+  nothing in Safari, and on `<html>` it takes the page's own bounce with it.
+  Two halves, both wanted: `touch-none` on each control (declarative, enough
+  almost everywhere) and a non-passive `touchmove` → `preventDefault` on the
+  header and the dock (the guarantee, because WebKit has been unreliable about
+  `touch-action` on an element with no scrollable ancestor — exactly this case).
+  Attached to the two containers rather than to each control, because both are
+  `pointer-events-none` with children opting back in: a touch on a bar bubbles
+  through, and a touch on the empty space beside one never enters the subtree at
+  all. That asymmetry is the feature — the page stays draggable everywhere the
+  chrome is not.
 - **Pull down to dismiss lives in one hook, and it has three sharp edges.**
   `useSwipeDismiss` is on `Sheet` and on the settings modal, so everything
   modal in the app inherits it — confirmations, the drill sheet, every form.

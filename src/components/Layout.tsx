@@ -203,6 +203,40 @@ export function Layout({ children }: { children: ReactNode }) {
   }, [])
 
 
+  /**
+   * The floating chrome does not move. Ever.
+   *
+   * Both bars sit OUTSIDE `#app-scroll`, positioned against the frame, so a drag
+   * starting on one has no scroller to act on — and iOS answers that by
+   * rubber-banding the viewport itself, which carries the whole app with it,
+   * bars included. They were being dragged up and down and snapping back, which
+   * is the one thing this arrangement exists to prevent. `overscroll-behavior`
+   * cannot help: on `<body>` it does nothing in Safari, and on `<html>` it takes
+   * the page's own bounce away with it (see `lib/scroll.ts`).
+   *
+   * Two halves, deliberately. `touch-none` on each control is the declarative
+   * answer and is enough almost everywhere. This listener is the guarantee:
+   * WebKit has been unreliable about `touch-action` on an element with no
+   * scrollable ancestor — which is exactly the case here — and a bar that holds
+   * still on nine devices is not a bar that holds still.
+   *
+   * Attached to the header and the dock rather than to each control, because
+   * both are `pointer-events-none` with their children opting back in: a touch
+   * on a bar bubbles through here, and a touch on the empty space beside one
+   * never enters this subtree at all. Which is the behaviour wanted — the page
+   * behind the chrome stays scrollable everywhere the chrome is not.
+   */
+  useEffect(() => {
+    const nodes = [headerRef.current, dockRef.current].filter((n): n is HTMLElement => Boolean(n))
+    const hold = (e: TouchEvent) => {
+      if (e.cancelable) e.preventDefault()
+    }
+    for (const n of nodes) n.addEventListener('touchmove', hold, { passive: false })
+    return () => {
+      for (const n of nodes) n.removeEventListener('touchmove', hold)
+    }
+  }, [])
+
   // Which way the page travels on arrival. Derived during render rather than in
   // an effect: the animation has to be on the very first frame of the new page,
   // and an effect only runs after it has already painted in place.
@@ -455,7 +489,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 else navigate('/settings', { state: { background: location } })
               }}
               className={cx(
-                'pointer-events-auto relative grid size-11 place-items-center rounded-full',
+                'pointer-events-auto relative grid size-11 place-items-center rounded-full touch-none',
                 CHROME_FROST,
                 settingsOpen || location.pathname.startsWith('/settings')
                   ? 'text-accent'
@@ -632,7 +666,7 @@ export function Layout({ children }: { children: ReactNode }) {
           aria-label="Add transaction"
           aria-expanded={addOpen}
           className={cx(
-            'pointer-events-auto absolute bottom-full right-3.5 mb-3 grid size-11 place-items-center',
+            'pointer-events-auto absolute bottom-full right-3.5 mb-3 grid size-11 place-items-center touch-none',
             'rounded-full bg-accent text-accent-ink shadow-lg shadow-accent/30',
             'transition-[scale,opacity] duration-200 ease-out active:scale-95 motion-reduce:transition-none',
             addOpen && 'pointer-events-none scale-50 opacity-0',
@@ -805,7 +839,7 @@ function BottomTabs({ pathname }: { pathname: string }) {
         // earlier in the DOM. Two positioned elements at `z-index: auto` are
         // painted in document order, so no z-index is needed either side — and
         // adding one would only invite the next person to add a bigger one.
-        'pointer-events-auto relative rounded-full p-[5px]',
+        'pointer-events-auto relative touch-none rounded-full p-[5px]',
         // The frost, which finally has something to be frosted about now that
         // the page runs underneath. Thinner than the strip it replaces
         // (`bg-surface/90 backdrop-blur-md`) so that a row travelling behind it
