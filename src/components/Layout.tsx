@@ -4,18 +4,20 @@ import {
 } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
-  Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, CloudOff, AlertTriangle,
+  Home, Receipt, PiggyBank, CalendarClock, ChartPie, Settings, Plus, X, CloudOff, AlertTriangle,
   PanelLeftClose, PanelLeftOpen, Target, ArrowDownToLine,
 } from 'lucide-react'
 import { useSyncState } from '../hooks/useSync'
 import { installUpdate, useUpdateState } from '../lib/updates'
 import { DrillSheet } from './DrillSheet'
-import { cx, CHROME_FROST, PILL_MS, PILL_SPRING } from './ui'
+import { cx, useWide, CHROME_FROST, PILL_MS, PILL_SPRING } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
 import { APP_SCROLLER_ID } from '../lib/scroll'
 import { useHeadlineValue } from '../lib/headline'
+import { backgroundHref, resolveBackground } from '../lib/modalRoute'
+import { SettingsOverlay, SETTINGS_EXIT_MS } from './SettingsOverlay'
 import { BookLens } from './BookSwitcher'
 
 const NAV = [
@@ -77,8 +79,55 @@ export function Layout({ children }: { children: ReactNode }) {
   // covering the place it goes. Both only mean anything below `md`.
   const headline = useHeadlineValue()
   const [lensOpen, setLensOpen] = useState(false)
-  const { pathname, search } = useLocation()
+  const location = useLocation()
+  const { search } = location
   const navigate = useNavigate()
+
+  /**
+   * Settings, over the page rather than instead of it.
+   *
+   * `background` is the location the modal was opened from, and while it is set
+   * that is the page actually on screen — so everything this component derives
+   * about "which page am I on" has to read `pathname`, the background's, and
+   * not `location.pathname`, which says `/settings`. Getting that wrong lights
+   * no tab, titles the window "Settings" over the Activity list, and offers the
+   * book lens on a screen that has no figures.
+   */
+  const wide = useWide()
+  const background = wide ? undefined : resolveBackground(location)
+  const pathname = background?.pathname ?? location.pathname
+  const settingsOpen = Boolean(background) && location.pathname.startsWith('/settings')
+
+  /**
+   * The modal outlives `settingsOpen` by `SETTINGS_EXIT_MS`, so it has
+   * something to animate out over — the same freeze `Sheet` uses, and for the
+   * same reason: the route has already changed by the time the exit begins.
+   */
+  const [settingsShown, setSettingsShown] = useState(settingsOpen)
+  useEffect(() => {
+    if (settingsOpen) {
+      setSettingsShown(true)
+      return
+    }
+    const t = setTimeout(() => setSettingsShown(false), SETTINGS_EXIT_MS)
+    return () => clearTimeout(t)
+  }, [settingsOpen])
+
+  /**
+   * Out, from however deep in Settings you got.
+   *
+   * Deliberately not `navigate(-1)`: that is one step, and the group screens are
+   * real routes, so from `/settings/data` it would land back on the Settings
+   * index with the modal still up. The X closes the whole thing wherever it is
+   * pressed. `replace` keeps the modal from stacking a second copy of the page
+   * on top of itself, and costs nothing visually — the page underneath has been
+   * mounted the entire time, so this changes which location the routes are read
+   * from and not what is rendered.
+   */
+  function closeSettings() {
+    navigate(background ? backgroundHref(background) : '/', { replace: true })
+  }
+
   const title = TITLES[pathname] ?? 'Hearth'
 
   /**
@@ -299,7 +348,14 @@ export function Layout({ children }: { children: ReactNode }) {
       */}
       <header
         ref={headerRef}
-        className="pt-safe pointer-events-none absolute inset-x-0 top-0 z-30 md:hidden"
+        className={cx(
+          'pt-safe pointer-events-none absolute inset-x-0 top-0 md:hidden',
+          // Above the settings modal while it is up, because the disc in here
+          // has become the X that closes it. Still under a `Sheet` (z-50)
+          // either way: a confirmation raised from inside Settings has to cover
+          // the control that opened it.
+          settingsShown ? 'z-[46]' : 'z-30',
+        )}
       >
         {/* The same fade as the dock's, upside down: clear below the discs and
             fully blurred by the top of the screen, so rows leave under the
@@ -352,7 +408,10 @@ export function Layout({ children }: { children: ReactNode }) {
             className={cx(
               'pointer-events-none absolute inset-x-0 flex justify-center px-16',
               'transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none',
-              headline && !lensOpen ? 'opacity-100' : 'scale-90 opacity-0',
+              // Gone while Settings is up: the page underneath is still
+              // mounted and still publishing its month, and a month floating
+              // over the Appearance card belongs to nothing on screen.
+              headline && !lensOpen && !settingsOpen ? 'opacity-100' : 'scale-90 opacity-0',
             )}
           >
             <span
@@ -368,24 +427,62 @@ export function Layout({ children }: { children: ReactNode }) {
           {/* The book lens, on the pages that have one. Absent rather than
               disabled elsewhere: `LENS_PATHS` decides, and Settings has no
               figures for a lens to act on. */}
-          {LENS_PATHS.has(pathname) && <BookLens onOpenChange={setLensOpen} />}
+          {/* `pathname` is the page underneath, so this survives the modal
+              opening — which is wrong, since the lens acts on figures that are
+              now covered. Hidden rather than unmounted, so it does not lose its
+              place in the row while the X is being pressed. */}
+          {LENS_PATHS.has(pathname) && !settingsOpen && <BookLens onOpenChange={setLensOpen} />}
           {/* A group, not a slot. Anything added later joins from the right
               edge inward, so Settings never moves out from under the thumb
               that has learned where it is. */}
           <div className="relative ml-auto flex items-center gap-2">
-            <NavLink
-              to="/settings"
-              aria-label="Settings"
-              className={({ isActive }) =>
-                cx(
-                  'pointer-events-auto grid size-11 place-items-center rounded-full',
-                  CHROME_FROST,
-                  isActive ? 'text-accent' : 'text-ink-2',
-                )
-              }
+            {/* One disc, two glyphs, and it is the same element throughout —
+                the gear turns into the X rather than being swapped for it, so
+                the thing you pressed to get here is visibly the thing that
+                takes you back.
+
+                The two rotate in opposite directions through the crossover,
+                which is what stops it reading as a fade: the gear winds a
+                quarter turn clockwise as it shrinks away and the X unwinds into
+                place behind it. `--ease-settle` overshoots slightly, so the X
+                arrives with a small bounce. */}
+            <button
+              type="button"
+              aria-label={settingsOpen ? 'Close settings' : 'Settings'}
+              aria-expanded={settingsOpen}
+              onClick={() => {
+                if (settingsOpen) closeSettings()
+                else navigate('/settings', { state: { background: location } })
+              }}
+              className={cx(
+                'pointer-events-auto relative grid size-11 place-items-center rounded-full',
+                CHROME_FROST,
+                settingsOpen || location.pathname.startsWith('/settings')
+                  ? 'text-accent'
+                  : 'text-ink-2',
+              )}
             >
-              <Settings size={20} />
-            </NavLink>
+              <span
+                aria-hidden
+                className={cx(
+                  'absolute transition-[transform,opacity] duration-300 motion-reduce:transition-none',
+                  settingsOpen ? 'rotate-90 scale-0 opacity-0' : 'rotate-0 scale-100 opacity-100',
+                )}
+                style={{ transitionTimingFunction: 'var(--ease-settle)' }}
+              >
+                <Settings size={20} />
+              </span>
+              <span
+                aria-hidden
+                className={cx(
+                  'absolute transition-[transform,opacity] duration-300 motion-reduce:transition-none',
+                  settingsOpen ? 'rotate-0 scale-100 opacity-100' : '-rotate-90 scale-0 opacity-0',
+                )}
+                style={{ transitionTimingFunction: 'var(--ease-settle)' }}
+              >
+                <X size={21} strokeWidth={2.4} />
+              </span>
+            </button>
           </div>
         </div>
       </header>
@@ -451,6 +548,12 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </main>
       </div>
+
+      {/* Settings, over the page and under a sheet. Positioned against the
+          FRAME, like everything else here that must not move with the scroll —
+          and phone only, because a wide screen has the sidebar and Settings
+          there is a page like any other. */}
+      {settingsShown && <SettingsOverlay leaving={!settingsOpen} />}
 
       {/* The rows behind whatever figure was last pressed. Mounted here rather
           than per page: it is a modal over the whole app, and the charts that

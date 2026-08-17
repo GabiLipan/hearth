@@ -644,7 +644,12 @@ export function Segmented<T extends string>({
         // sits next to a search box in four different toolbars, and deriving
         // its height from a line box put it 4px short of one.
         CONTROL_H,
-        'relative flex rounded-xl bg-surface-2 p-1 [--seg-pad:0.25rem] md:rounded-lg md:p-0.5 md:[--seg-pad:0.125rem]',
+        // A capsule, like the tab bar and the book lens — `rounded-full` at
+        // both levels, so the thumb nests in the track's own corner instead of
+        // sitting in it as a smaller, differently-shaped box. Every toggle in
+        // the app is this control, so the language is stated once here rather
+        // than at eleven call sites.
+        'relative flex rounded-full bg-surface-2 p-1 [--seg-pad:0.25rem] md:p-0.5 md:[--seg-pad:0.125rem]',
         className,
       )}
       // A RADIOGROUP, not a tablist. It was announced as "tab 2 of 3" and then
@@ -669,7 +674,11 @@ export function Segmented<T extends string>({
       <span
         aria-hidden
         className={cx(
-          'absolute inset-y-1 rounded-lg bg-surface shadow-sm ring-1 ring-hairline md:inset-y-0.5 md:rounded-md',
+          // Tinted rather than raised. A white thumb with a ring reads as a
+          // switch lying on a grey track; `bg-accent/12` is what the travelling
+          // pill in the tab bar is, and it says "this is the one you chose" in
+          // the same voice at both ends of the app.
+          'absolute inset-y-1 rounded-full bg-accent/12 md:inset-y-0.5',
           thumb && 'transition-[left,width] duration-200 ease-out motion-reduce:transition-none',
         )}
         style={
@@ -710,8 +719,11 @@ export function Segmented<T extends string>({
             // height now. Left as a plain button rather than a flex box so
             // `truncate` still applies to the label; a button centres its own
             // content vertically without being told to.
-            'relative h-full min-w-0 flex-auto truncate whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors md:rounded-md md:px-2.5',
-            value === o.value ? 'text-ink' : 'text-ink-3 hover:text-ink-2',
+            'relative h-full min-w-0 flex-auto truncate whitespace-nowrap rounded-full px-3 text-sm transition-colors md:px-2.5',
+            // The chosen option goes accent and gains weight, so the answer is
+            // legible from the label alone — the tint behind it is 12%, which
+            // is a hint rather than a statement on its own.
+            value === o.value ? 'font-semibold text-accent' : 'font-medium text-ink-3 hover:text-ink-2',
           )}
         >
           {o.label}

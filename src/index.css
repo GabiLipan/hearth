@@ -619,6 +619,31 @@ select,
   to { transform: scale(1); }
 }
 
+/**
+ * Settings arriving over the page, and leaving again.
+ *
+ * A slide from the bottom rather than a scale: this covers the whole screen, so
+ * there is no shape for it to grow FROM, and a full-viewport scale reads as the
+ * app itself zooming. The fade is short and front-loaded — by a third of the
+ * way up it is fully opaque, so the travel is a solid panel moving rather than
+ * a ghost resolving.
+ *
+ * Out is quicker than in, for the reason `origin-out` is: something you have
+ * finished with must not keep you waiting, and there is no settle to spend the
+ * time on. `SETTINGS_EXIT_MS` must outlast this or the last frames are cut off.
+ */
+@keyframes settings-in {
+  from { transform: translateY(100%); opacity: 0.4; }
+  35% { opacity: 1; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes settings-out {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(100%); opacity: 0.4; }
+}
+.animate-settings-in { animation: settings-in 0.32s var(--ease-out-soft); }
+.animate-settings-out { animation: settings-out 0.24s var(--ease-in-soft) forwards; }
+
 .animate-sheet { animation: sheet-up 0.24s var(--ease-out-soft); }
 .animate-sheet-out { animation: sheet-down 0.18s var(--ease-in-soft) forwards; }
 .animate-fade { animation: fade-in 0.18s ease-out; }

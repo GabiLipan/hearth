@@ -474,6 +474,38 @@ the single place a level comes from.
   on 28px bold — a doubled ghost along the top of every letter, which is the
   exact fault the stack exists to remove. Anything sitting in the ramp when
   nothing is moving wants to be fully sharp or fully blurred, never mixed.
+- **Every toggle in the app is `Segmented`, and it is a capsule now.** Both
+  levels are `rounded-full`, so the thumb nests in the track's own corner rather
+  than sitting in it as a smaller, differently-shaped box, and the thumb is
+  `bg-accent/12` — the same tint the tab bar's travelling pill uses — with the
+  chosen option in accent and a heavier weight. Eleven call sites inherit that,
+  which is the point: Expense/Income, the theme, the book on a wide screen and
+  the Reports controls are one language stated once. The remaining `aria-pressed`
+  controls are NOT toggles and should stay as they are — the icon and colour
+  pickers are grids, and Reports' phone view switch is a `FilterChip` matching
+  the chips beside it.
+- **Settings is a modal route on a phone, and the background is held for the
+  whole subtree.** It renders over the page rather than instead of it, so
+  closing it gives back the scroll position rather than the top of a rebuilt
+  page — `App` renders the ordinary routes against `location.state.background`
+  while the address says `/settings`, and `Layout` renders the settings routes
+  as a layer. Three things that will bite:
+  - **`Layout` must derive every page-ish thing from the BACKGROUND's pathname**,
+    not the location's, or the modal lights no tab, titles the window "Settings"
+    over the Activity list, and offers the book lens on a screen with no figures.
+  - **The background cannot come from `location.state` alone.** Settings' group
+    screens are ordinary `<Link to="/settings/data">`s, and a link cannot know it
+    is inside a modal — the first tap would land on an entry with no state and
+    drop Settings into the page slot mid-gesture. `resolveBackground` remembers
+    it while the path stays under `/settings` and forgets it the moment it
+    leaves. It is module scope because `App` and `Layout` need the same answer in
+    the same render pass.
+  - **It is gated to phone widths with `useWide`**, because the X that closes it
+    lives in a header that is `md:hidden`. Above `md` a modal would be a layer
+    nothing could dismiss, and an iPad Mini crosses that breakpoint on rotation.
+  Closing is `navigate(background, { replace: true })`, never `navigate(-1)`:
+  the group screens are real routes, so one step back from `/settings/data` is
+  the Settings index with the modal still up.
 - **A `ResizeObserver` watches the CONTENT box unless told otherwise**, and both
   `--header-h` and `--tabbar-h` are a fixed row inside padding that is entirely
   `env(safe-area-inset-*)`. So on the one event that changes them — a rotation
