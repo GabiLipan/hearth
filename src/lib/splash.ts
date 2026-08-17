@@ -22,18 +22,23 @@
  *
  * On a warm start React paints in well under 100ms, and an animation cut off
  * three frames in reads as a glitch — a flicker of something orange rather than
- * a fire being lit. So the splash lives at least as long as its own entrance,
- * measured from when the DOCUMENT started rather than from when this module
- * ran: the interesting case is a cold start, where the difference between the
- * two is most of the wait. `performance.now()` is time since navigation start,
- * which is exactly that clock and needs nothing stamped anywhere to read it.
+ * a fire being lit. So the splash lives long enough to be seen moving, measured
+ * from when the DOCUMENT started rather than from when this module ran: the
+ * interesting case is a cold start, where the difference between the two is most
+ * of the wait. `performance.now()` is time since navigation start, which is
+ * exactly that clock and needs nothing stamped anywhere to read it.
+ *
+ * The number is the 420ms entrance plus enough of the first breath for the
+ * ripple to reach the end of the word. It is a floor and nothing more: the
+ * animation itself loops, so there is no point at which it is "finished" and
+ * this must never be read as one.
  *
  * The ceiling is in `index.html` instead, for the case this function is never
  * reached at all.
  */
 
-/** How long the entrance keyframes in `index.html` run for, end to end. */
-const ENTRANCE_MS = 940
+/** The least time the splash is worth showing for. See above. */
+const MIN_VISIBLE_MS = 1080
 
 /** The fade, which must match `#boot.leaving`'s animation duration. */
 const EXIT_MS = 220
@@ -47,7 +52,7 @@ export function dismissSplash() {
   const el = document.getElementById('boot')
   if (!el) return
 
-  const wait = Math.max(0, ENTRANCE_MS - performance.now())
+  const wait = Math.max(0, MIN_VISIBLE_MS - performance.now())
   setTimeout(() => {
     el.classList.add('leaving')
     // A timer rather than `animationend`, for the reason the toast and the

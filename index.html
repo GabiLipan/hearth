@@ -72,12 +72,29 @@
       `[data-theme]` is on the root by the time this rule is read; no attribute
       at all (the `catch` above) is light, which matches the app's default.
 
-      The mark keeps its dark ground as a card in the middle, which is what the
-      manifest's `background_color` now joins onto: the OS's dark tile shrinks
-      into the card rather than being replaced. It also keeps the fire and the
-      cream wordmark on the one background both were drawn for — on the light
-      page the word would be invisible and the glow would have nothing to spill
-      onto.
+      The dark ground the mark was drawn against is now the ICON's own tile,
+      standing beside the name rather than behind both — which is also what the
+      manifest's `background_color` joins onto: the OS's dark tile shrinks into
+      the icon rather than being replaced. The wordmark left that ground with
+      the card, so it is `--ink` (both values, literal, same reason as `--page`)
+      rather than the cream it used to be — cream on the light page is invisible.
+
+      ## It is one continuous animation, not an entrance
+
+      The icon breathes and the name ripples in step with it, and both go on for
+      as long as the splash is there: nothing about the shape of the animation
+      says how far along the boot is, because nothing here knows. A one-shot
+      entrance had to guess a duration, and a boot slower than the guess left a
+      still picture on screen for the rest of the wait — which reads as a hang,
+      which is the one thing a splash exists to prevent.
+
+      Both loops share `--pulse` and both are SAMPLED from the same sine at ten
+      points, run `linear`, so the samples are the easing (the same discipline
+      `origin-in` follows in `index.css`, for the same reason: stops chosen by
+      hand animate at a near-constant speed through the middle, which is what
+      "it feels linear" means). The letters carry a phase delay each, so the
+      crest travels through the word behind the icon's — one motion in two
+      places rather than two motions that happen to agree.
 
       ## What it must not do
 
@@ -96,6 +113,15 @@
       do not correct until a scroll (see `.app-frame`), and a cold start is the
       only time this is ever on screen — it would be wrong every single time.
       A fixed box is the layout viewport itself, which needs no settling.
+
+      The mark and the name together are 40% of the width, and every number
+      inside them is a fraction of THAT rather than of the viewport: `.brand` is
+      an inline-size container query container, so `cqw` is one hundredth of the
+      row, and the icon, the gap and the type cannot drift out of proportion
+      with each other however the row was sized. Which matters because it is
+      clamped at both ends — 40vw is 150px on a small phone, where the name
+      would be too small to read the ripple in, and 570px on a laptop, where a
+      logo that size reads as an error page.
     -->
     <style>
       #boot {
@@ -110,109 +136,157 @@
       }
       :root[data-theme="dark"] #boot { background: #0d0d0d; }
 
-      /* The card the mark sits on: the ground the fire, the glow and the cream
-         wordmark were all drawn against, and the colour the OS splash hands
-         over. The hairline is what separates it from the dark page, where the
-         two colours are four points apart; on the light page the shadow does
-         that job and the hairline is invisible. */
-      #boot .plate {
+      /* The mark and the name on one line, sized as a fraction of the screen
+         and then measured from the inside. `cqw` is one hundredth of this row,
+         so the three sizes below are stated as proportions of the lockup rather
+         than of the viewport; where container queries are unsupported `cqw`
+         falls back to the small-viewport unit, which for a 40vw row is close
+         enough that the lockup is merely a shade wide. */
+      #boot .brand {
+        container-type: inline-size;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 26px;
-        padding: 46px 58px 42px;
-        /* An app icon's corner, which is what this rectangle is standing in
-           for: a superellipse rather than a quarter-circle, at roughly the 22%
-           of the shorter side Apple's own mask uses. `corner-shape` is the only
-           way to say that without giving up `box-shadow` — `clip-path` would
-           take the shadow and the hairline with it, since it clips everything
-           the element paints. Where it is not supported the declaration is
-           dropped and the radius alone applies, which is an ordinary rounded
-           rectangle: the shape degrades, nothing breaks. */
-        border-radius: 54px;
+        gap: 6cqw;
+        width: clamp(150px, 40vw, 420px);
+        /* One line, always: the wave is a horizontal reading and a name that
+           wrapped under the icon would be a different picture entirely. */
+        white-space: nowrap;
+      }
+
+      /* The app icon itself: the tile, not the fire alone. The corner is a
+         superellipse rather than a quarter-circle, at roughly the 22% of the
+         side Apple's own mask uses. `corner-shape` is the only way to say that
+         without giving up `box-shadow` — `clip-path` would take the shadow and
+         the hairline with it, since it clips everything the element paints.
+         Where it is not supported the declaration is dropped and the radius
+         alone applies, which is an ordinary rounded rectangle: the shape
+         degrades, nothing breaks.
+
+         The hairline is what separates the tile from the dark page, where the
+         two colours are four points apart; on the light page the shadow does
+         that job and the hairline is invisible. */
+      #boot .icon {
+        position: relative;
+        flex: 0 0 auto;
+        width: 25cqw;
+        height: 25cqw;
+        border-radius: 22%;
         corner-shape: squircle;
+        overflow: hidden;
         background: linear-gradient(160deg, #2a2320 0%, #14100e 100%);
         box-shadow:
           inset 0 0 0 1px rgba(246, 227, 203, 0.08),
           0 4px 8px -2px rgba(0, 0, 0, 0.22),
           0 18px 36px -10px rgba(0, 0, 0, 0.28);
       }
-      #boot .mark {
-        position: relative;
-        width: 112px;
-        height: 112px;
-      }
-      #boot .mark > svg {
+      #boot .icon > svg {
         position: absolute;
         inset: 0;
         width: 100%;
         height: 100%;
-        /* The fire grows out of the hearthstone rather than out of its own
-           middle, so the origin is the stone's line — y127 of 180. */
-        transform-origin: 50% 71%;
       }
+      #boot .glow { opacity: 0.55; }
+
       #boot .word {
         margin: 0;
-        font: 600 0.82rem/1 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
-        letter-spacing: 0.24em;
+        font: 600 13cqw/1 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+        letter-spacing: 0.16em;
+        /* Letter-spacing is added AFTER the last letter too, so without this
+           the lockup carries a sliver of empty space on its right and sits
+           visibly left of the middle of the screen. */
+        margin-right: -0.16em;
         text-transform: uppercase;
-        color: #f6e3cb;
-        opacity: 0;
+        /* `--ink`, light. Kept in step with `index.css` by hand. */
+        color: #0b0b0b;
+      }
+      :root[data-theme="dark"] #boot .word { color: #ffffff; }
+      /* Transformable, and each letter its own place in the wave. Inline boxes
+         cannot be moved, so the spans have to be `inline-block`; letter-spacing
+         still applies between them. */
+      #boot .word > span {
+        display: inline-block;
+        will-change: transform;
+        animation: boot-wave var(--pulse) linear infinite;
+        /* A fourteenth of the cycle per letter, so the crest takes a bit over a
+           third of one pulse to cross the word: slow enough to read as one
+           travelling thing, fast enough that the far end is still visibly part
+           of the same motion as the icon. */
+        animation-delay: calc(var(--i) * var(--pulse) / 14);
       }
 
       /*
-        The arch's scale stops are SAMPLED from the same damped spring every
-        sheet in the app is animated on — mass 1, w 20, z 0.82, read at fifteen
-        points. They are the same numbers as `origin-in` in `index.css`, and
-        they run `linear` for the same reason: the samples ARE the easing, and a
-        curve on top would bend an already-curved motion twice. Two thirds of
-        the travel is over in the first quarter and the rest is a settle, which
-        is what makes it read as catching rather than as growing.
+        ## The two loops
+
+        One period, `--pulse`, and one curve: `(1 − cos 2πt) / 2` read at ten
+        points and run `linear`, because the samples ARE the easing. A sine is
+        the honest shape for something oscillating rather than arriving — the
+        springs sampled elsewhere in the app are step responses, which is a
+        different question — and hand-picked stops on a loop this slow are
+        exactly where a constant-speed middle shows.
+
+        Amplitudes are small on purpose. The icon reaches 1.05, which at 100px
+        is two and a half pixels of growth per side; the letters lift 0.085em,
+        which is under 2px at phone sizes. The motion has to say "still working"
+        without becoming the thing you are looking at for the whole of a slow
+        cold start.
       */
-      @keyframes boot-arch {
-        0%   { opacity: 0; transform: scaleY(0.300); }
-        5%   { opacity: 0.3; transform: scaleY(0.429); }
-        10%  { opacity: 0.7; transform: scaleY(0.495); }
-        15%  { opacity: 1; transform: scaleY(0.578); }
-        20%  { transform: scaleY(0.662); }
-        26%  { transform: scaleY(0.754); }
-        32%  { transform: scaleY(0.831); }
-        38%  { transform: scaleY(0.891); }
-        45%  { transform: scaleY(0.940); }
-        52%  { transform: scaleY(0.972); }
-        60%  { transform: scaleY(0.993); }
-        68%  { transform: scaleY(1.003); }
-        76%  { transform: scaleY(1.006); }
-        85%  { transform: scaleY(1.006); }
-        100% { opacity: 1; transform: scaleY(1); }
+      @keyframes boot-pulse {
+        0%   { transform: scale(1); }
+        10%  { transform: scale(1.005); }
+        20%  { transform: scale(1.017); }
+        30%  { transform: scale(1.033); }
+        40%  { transform: scale(1.045); }
+        50%  { transform: scale(1.050); }
+        60%  { transform: scale(1.045); }
+        70%  { transform: scale(1.033); }
+        80%  { transform: scale(1.017); }
+        90%  { transform: scale(1.005); }
+        100% { transform: scale(1); }
       }
-      /* The light spilling past the opening, which is what makes the glow read
-         as light rather than as paint. It overshoots and settles back, so the
-         fire flares as it takes and then steadies. */
-      @keyframes boot-glow {
-        0%   { opacity: 0; transform: scale(0.5) translateY(14%); }
-        35%  { opacity: 0.85; }
-        60%  { opacity: 0.5; transform: scale(1.06) translateY(0); }
-        100% { opacity: 0.55; transform: scale(1); }
+      /* The fire brightening with the breath, on the same curve — the glow is
+         light spilling past the opening, so it has to swell with it rather than
+         sit at a constant while the tile moves. */
+      @keyframes boot-fire {
+        0%   { opacity: 0.50; }
+        10%  { opacity: 0.53; }
+        20%  { opacity: 0.60; }
+        30%  { opacity: 0.68; }
+        40%  { opacity: 0.75; }
+        50%  { opacity: 0.78; }
+        60%  { opacity: 0.75; }
+        70%  { opacity: 0.68; }
+        80%  { opacity: 0.60; }
+        90%  { opacity: 0.53; }
+        100% { opacity: 0.50; }
       }
-      @keyframes boot-stone {
-        0%   { opacity: 0.06; transform: scaleX(0.86); }
-        100% { opacity: 1; transform: scaleX(1); }
+      @keyframes boot-wave {
+        0%   { transform: translateY(0); }
+        10%  { transform: translateY(-0.008em); }
+        20%  { transform: translateY(-0.029em); }
+        30%  { transform: translateY(-0.056em); }
+        40%  { transform: translateY(-0.077em); }
+        50%  { transform: translateY(-0.085em); }
+        60%  { transform: translateY(-0.077em); }
+        70%  { transform: translateY(-0.056em); }
+        80%  { transform: translateY(-0.029em); }
+        90%  { transform: translateY(-0.008em); }
+        100% { transform: translateY(0); }
       }
-      @keyframes boot-word {
-        0%   { opacity: 0; transform: translateY(5px); }
-        100% { opacity: 0.8; transform: none; }
+      /* The one thing that is not a loop, and the only place a duration is
+         asserted: the lockup arriving over the page the OS handed us. */
+      @keyframes boot-in {
+        0%   { opacity: 0; transform: translateY(8px) scale(0.965); }
+        100% { opacity: 1; transform: none; }
       }
       @keyframes boot-out {
         0%   { opacity: 1; }
         100% { opacity: 0; }
       }
 
-      #boot .glow  { animation: boot-glow 780ms linear both; }
-      #boot .arch  { animation: boot-arch 620ms linear both; }
-      #boot .stone { animation: boot-stone 420ms cubic-bezier(0.22, 0.7, 0.3, 1) 340ms both; transform-origin: 50% 50%; }
-      #boot .word  { animation: boot-word 420ms cubic-bezier(0.22, 0.7, 0.3, 1) 520ms both; }
+      #boot .brand { --pulse: 1700ms; animation: boot-in 420ms cubic-bezier(0.22, 0.7, 0.3, 1) both; }
+      #boot .icon  { animation: boot-pulse var(--pulse) linear infinite; }
+      #boot .glow  { animation: boot-fire var(--pulse) linear infinite; }
 
       /* `pointer-events: none` the instant it starts leaving, so the 220ms it
          spends fading cannot swallow a tap on the app already behind it. */
@@ -222,22 +296,22 @@
       }
 
       /* The state change stays legible — the mark is there and then the app is
-         — but nothing travels, scales or blooms. */
+         — but nothing breathes, travels or ripples. A perpetual animation is
+         the case this query exists for. */
       @media (prefers-reduced-motion: reduce) {
-        #boot .glow, #boot .arch, #boot .stone, #boot .word {
+        #boot .brand, #boot .icon, #boot .glow, #boot .word > span {
           animation: none;
           opacity: 1;
           transform: none;
         }
         #boot .glow { opacity: 0.55; }
-        #boot .word { opacity: 0.8; }
       }
     </style>
   </head>
   <body>
     <div id="boot" aria-hidden="true">
-      <div class="plate">
-        <div class="mark">
+      <div class="brand">
+        <div class="icon">
           <!-- Geometry from `BrandMark.tsx`: the arch runs y41–y127 and the
                hearthstone to y136, both centred on x90 of a 180 tile. Kept in
                step with it by hand, like `public/logo.svg` already is. -->
@@ -263,7 +337,10 @@
             <rect x="34" y="127" width="112" height="9" rx="4.5" fill="#F6E3CB" opacity="0.22" />
           </svg>
         </div>
-        <p class="word">Hearth</p>
+        <!-- One span per letter, each carrying its place in the wave. Written
+             out rather than split in script for the reason the whole splash is
+             in this file: nothing in the bundle has painted yet. -->
+        <p class="word"><span style="--i:0">H</span><span style="--i:1">e</span><span style="--i:2">a</span><span style="--i:3">r</span><span style="--i:4">t</span><span style="--i:5">h</span></p>
       </div>
     </div>
     <div id="root"></div>

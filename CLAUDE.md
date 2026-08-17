@@ -653,21 +653,36 @@ the single place a level comes from.
   sign-in waits on the network, and tying the splash to that hangs the app on a
   fireplace on exactly the offline launches the cache exists for. And it has a
   floor as well as a ceiling — a warm start paints in under 100ms, and an
-  entrance cut off three frames in reads as a glitch rather than as motion. The
+  animation cut off three frames in reads as a glitch rather than as motion. The
   ceiling is an inline `setTimeout` in `index.html` rather than in `splash.ts`,
   because the case it covers is the bundle never arriving to call anything.
+
+  **What it shows is a lockup that LOOPS, not an entrance that finishes.** The
+  icon and the name sit on one line in the middle of the screen at 40% of the
+  width; the icon breathes to 1.05 and the letters lift 0.085em behind it, both
+  on one period (`--pulse`) and both sampled from the same sine — one motion in
+  two places rather than two that happen to agree. It loops because nothing here
+  knows how long the boot will take: a one-shot entrance had to guess, and a
+  slower boot left a still picture on screen for the rest of the wait, which
+  reads as a hang. `MIN_VISIBLE_MS` in `splash.ts` is therefore a floor and not
+  a completion — there is no frame at which the animation is done. Two sizing
+  notes: `.brand` is an inline-size container so the icon, gap and type are
+  stated in `cqw` and cannot drift out of proportion however the row was sized
+  (it is clamped at both ends), and the word cancels its own trailing
+  letter-spacing or the whole lockup sits visibly left of centre.
 
   **Its ground is the app's `--page`, not the mark's dark**, written out as two
   literal colours under `[data-theme]` because the stylesheet is in the bundle
   and this has to be right on the first frame — the theme is already stamped on
-  the root by the script above it. The mark and the wordmark keep the dark they
-  were drawn for, as a rounded card in the middle: the cream word is invisible
-  on the light page and the glow has nothing to spill onto. So the join the
-  splash is now honest about is the one with the APP, which is what you look at
-  for the rest of the session, rather than the one with the OS.
-  `manifest.background_color` cannot be themed at runtime and so can no longer
-  match the frame after it; it stays the card's dark, which the OS's tile now
-  shrinks into rather than being replaced by.
+  the root by the script above it. The dark the mark was drawn against is the
+  ICON's own tile now, beside the name rather than behind both, so the wordmark
+  is `--ink` (both values, same reason) rather than the cream it was on the card
+  — cream on the light page is invisible. So the join the splash is honest about
+  is the one with the APP, which is what you look at for the rest of the
+  session, rather than the one with the OS. `manifest.background_color` cannot
+  be themed at runtime and so can no longer match the frame after it; it stays
+  the icon's dark, which the OS's tile now shrinks into rather than being
+  replaced by.
 - **`overscroll-behavior` propagates to the viewport from `<html>` only**, where
   `overflow` propagates from `<body>` too. So the declaration on `body` does
   nothing in Safari and stops Chrome's pull-to-refresh, which is exactly what is
