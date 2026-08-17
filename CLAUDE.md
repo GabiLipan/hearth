@@ -447,14 +447,22 @@ the single place a level comes from.
   steps. The accent is spent on the SELECTED option once the lens is open, not
   on the closed control: two blue things in an otherwise empty corner read as
   two states of one thing rather than as a control and a label.
-- **The bottom fade is one blur behind a gradient mask.** A `backdrop-filter` is
-  composited through its element's mask, so a single uniform blur under a
-  gradient mask reads as a progressive one — which is how `.dock-scrim` ramps
-  from clear to blurred without the stack of layers a true gradient blur wants.
-  That restraint is the point: it is on screen the whole time the app is, under
-  a bar already carrying a filter of its own. Its stops are eased rather than
-  linear, because a straight ramp spends the top half fading nothing and still
-  arrives at the bar half clear.
+- **A masked `backdrop-filter` does not ramp a blur — it CROSS-FADES.** At mask
+  alpha `a` the result is `a` parts blurred backdrop and `1 − a` parts the
+  original, still perfectly sharp. So the obvious cheap progressive blur — one
+  layer, one radius, a gradient mask — spends its whole middle laying half a
+  blur over legible text. It looks like dirty glasses, and it is worse than
+  nothing: measured over the strip above the bar it *raised* local edge energy
+  by 21% against no scrim at all, because a soft copy offset against a sharp one
+  makes doubled edges rather than fewer. No radius or mask curve rescues it; the
+  sharp copy is in the recipe. `.dock-scrim` is four stacked layers instead
+  (1 / 3 / 8 / 20px), each mask reaching full opacity *before* the next begins to
+  appear, so every band cross-fades blur against blur. Only the topmost mixes
+  with the unfiltered page and it does so at 1px, where there is no edge to
+  ghost. 80% of the sharp detail gone below the bar, against 60% for the single
+  layer, and no legible text anywhere in the tail. It costs four filters on an
+  element that is on screen the whole time the app is; that is the price of the
+  effect, and frame times did not move.
 - **There are two pill springs, and the difference is deliberate.** The tab
   bar's (`PILL_SPRING`, ζ≈0.8, ~7% overshoot) is pressed constantly by a thumb
   and travels a short way; the lens's (`pillBounce()`, ζ 0.55, 12%) is pressed

@@ -313,27 +313,70 @@ select,
  * a straight ramp puts too much of the fade in the top half, where there is
  * nothing yet to hide, and then arrives at the bar still half clear.
  */
-.dock-scrim {
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--page) 50%, transparent)
-  );
+/**
+ * The fade under the floating tab bar: content dissolving as it leaves the
+ * screen, rather than running off a hard edge.
+ *
+ * **A masked `backdrop-filter` does not ramp a blur — it CROSS-FADES.** At mask
+ * alpha a, what you get is `a` parts blurred backdrop and `1 - a` parts the
+ * original, sharp one. So a single layer at `blur(8px)` under a linear mask
+ * spends its whole middle showing half a blur laid over perfectly legible text:
+ * dirty glasses, not depth. That was the first attempt and it is a dead end —
+ * no radius or mask curve fixes it, because the sharp copy is in the recipe.
+ *
+ * The fix is a stack. Each layer's backdrop already contains the layer below
+ * it, so radii compound (≈22px by the bottom here), and each mask reaches full
+ * opacity BEFORE the next one starts to appear. Every band therefore cross-fades
+ * blur against blur rather than blur against sharp. Only the topmost band mixes
+ * with the unfiltered page, and it does so at 1px, where the mix is invisible —
+ * which is the whole trick: put the cross-fade where the blur is too small to
+ * have an edge to ghost.
+ *
+ * It costs four `backdrop-filter`s on an element that is on screen the entire
+ * time the app is. That is the price of the effect; the cheap version is the
+ * one above and it looks broken. If this ever needs to come down, drop layer 2
+ * and widen layer 3's ramp — going to a single layer will bring the ghosting
+ * straight back.
+ */
+.dock-scrim > span {
+  position: absolute;
+  inset: 0;
+}
+.dock-scrim > span:nth-child(1) {
+  -webkit-backdrop-filter: blur(1px);
+  backdrop-filter: blur(1px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 34%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 34%);
+}
+.dock-scrim > span:nth-child(2) {
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 24%, #000 54%);
+  mask-image: linear-gradient(to bottom, transparent 24%, #000 54%);
+}
+.dock-scrim > span:nth-child(3) {
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
-  -webkit-mask-image: linear-gradient(
+  -webkit-mask-image: linear-gradient(to bottom, transparent 46%, #000 74%);
+  mask-image: linear-gradient(to bottom, transparent 46%, #000 74%);
+}
+.dock-scrim > span:nth-child(4) {
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 68%, #000 96%);
+  mask-image: linear-gradient(to bottom, transparent 68%, #000 96%);
+}
+/**
+ * The wash, last so it sits OVER the blur rather than being blurred by it.
+ * A smear of the page's own colour is still a smear; this is what turns it
+ * into the page quietly running out.
+ */
+.dock-scrim > span:nth-child(5) {
+  background: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.18) 34%,
-    rgba(0, 0, 0, 0.6) 67%,
-    #000 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.18) 34%,
-    rgba(0, 0, 0, 0.6) 67%,
-    #000 100%
+    color-mix(in srgb, var(--page) 22%, transparent) 55%,
+    color-mix(in srgb, var(--page) 68%, transparent) 100%
   );
 }
 

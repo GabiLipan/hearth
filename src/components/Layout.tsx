@@ -456,15 +456,22 @@ export function Layout({ children }: { children: ReactNode }) {
             sharply into it. Absolute and FIRST, so the two positioned siblings
             after it paint on top in document order.
 
-            `-top-8` puts its leading edge above the bar, where it is still
+            `-top-10` puts its leading edge above the bar, where it is still
             completely clear — the fade has to begin before the bar does or you
-            see the join. The blur ramps because the mask ramps: a masked
-            `backdrop-filter` composites the blurred result through the mask, so
-            an element with one blur and a gradient mask reads as a progressive
-            one, for a single filter rather than the stack of them a true
-            gradient blur needs. Worth the restraint — this is on screen the
-            entire time the app is. */}
-        <span aria-hidden className="dock-scrim pointer-events-none absolute inset-x-0 -top-8 bottom-0" />
+            see the join, and the ramp needs the room to arrive gradually.
+
+            Five children, because a masked `backdrop-filter` cross-fades
+            between the blurred backdrop and the sharp one rather than ramping
+            the radius: one layer under a gradient is half a blur laid over
+            legible text. Four stacked blurs and a wash instead — see
+            `.dock-scrim` for why the bands overlap the way they do. */}
+        <span aria-hidden className="dock-scrim pointer-events-none absolute inset-x-0 -top-10 bottom-0">
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+        </span>
 
         {/* Withdraws while the sheet is open, so the sheet reads as the button
             itself having opened up rather than as something covering it.
