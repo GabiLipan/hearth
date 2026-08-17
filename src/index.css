@@ -58,6 +58,12 @@
      #0d0d0d page is a shadow nobody has ever seen. See the dark block. */
   --elev-1: 0 1px 2px rgba(11, 11, 11, 0.05), 0 1px 3px rgba(11, 11, 11, 0.04);
   --elev-2: 0 4px 6px -2px rgba(11, 11, 11, 0.06), 0 12px 24px -6px rgba(11, 11, 11, 0.1);
+  /* `--elev-2` cast upward, for a panel that arrives from the bottom of the
+     screen and covers it: its only visible edge is the top one, and a shadow
+     pointing down is a shadow behind the panel where nobody can see it. Heavier
+     than `--elev-2`, because this separates a full-screen layer from the page
+     it has just covered rather than a card from the page it sits on. */
+  --elev-up: 0 -1px 3px rgba(11, 11, 11, 0.06), 0 -14px 28px -8px rgba(11, 11, 11, 0.16);
 }
 
 :root[data-theme="dark"] {
@@ -94,6 +100,7 @@
      separated from the page by its hairline alone. */
   --elev-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.35);
   --elev-2: 0 4px 8px -2px rgba(0, 0, 0, 0.55), 0 14px 28px -8px rgba(0, 0, 0, 0.5);
+  --elev-up: 0 -1px 3px rgba(0, 0, 0, 0.55), 0 -16px 32px -8px rgba(0, 0, 0, 0.6);
 }
 
 @theme inline {

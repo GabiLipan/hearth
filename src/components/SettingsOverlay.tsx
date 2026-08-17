@@ -58,6 +58,14 @@ export function SettingsOverlay({ leaving, onDismiss }: { leaving: boolean; onDi
         // confirmation raised from inside Settings has to cover Settings, and
         // Settings has to cover the bar it is standing in front of.
         'absolute inset-0 z-[45] overflow-hidden bg-page',
+        // The same top corners a `Sheet` has, and a shadow cast upward, which
+        // is where its one visible edge is. At rest both are off-screen — the
+        // corners sit on the frame's own top edge, and the frame clips the
+        // shadow above them — so this is spent entirely on the two moments it
+        // is moving: arriving, and being pulled back down by a finger, which is
+        // when it stops being a page that replaced the last one and becomes a
+        // panel lying over it.
+        'rounded-t-3xl shadow-[var(--elev-up)]',
         // No keyframed exit when it was thrown: a CSS animation beats the
         // inline transform the drag is holding, so it would jump back to the
         // top and slide down again from there.

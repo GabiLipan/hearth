@@ -122,7 +122,16 @@
         justify-content: center;
         gap: 26px;
         padding: 46px 58px 42px;
-        border-radius: 34px;
+        /* An app icon's corner, which is what this rectangle is standing in
+           for: a superellipse rather than a quarter-circle, at roughly the 22%
+           of the shorter side Apple's own mask uses. `corner-shape` is the only
+           way to say that without giving up `box-shadow` — `clip-path` would
+           take the shadow and the hairline with it, since it clips everything
+           the element paints. Where it is not supported the declaration is
+           dropped and the radius alone applies, which is an ordinary rounded
+           rectangle: the shape degrades, nothing breaks. */
+        border-radius: 54px;
+        corner-shape: squircle;
         background: linear-gradient(160deg, #2a2320 0%, #14100e 100%);
         box-shadow:
           inset 0 0 0 1px rgba(246, 227, 203, 0.08),

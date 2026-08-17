@@ -104,8 +104,10 @@ export function useSwipeDismiss({
     let decided = false
 
     const move = (y: number) => {
-      // Upward is resisted rather than blocked: the panel gives a little, so
-      // the gesture feels like it is attached to something rather than jammed.
+      // Only reachable once the gesture has committed downward, so `y < 0` is
+      // a finger that pulled the panel down and is now taking it back past
+      // where it started. Resisted rather than blocked: the panel gives a
+      // little, so it feels attached to something rather than jammed.
       el.style.transform = `translateY(${y < 0 ? y / 4 : y}px)`
     }
 
@@ -147,7 +149,17 @@ export function useSwipeDismiss({
         if (Math.abs(dy) < SLOP && Math.abs(dx) < SLOP) return
         // Predominantly vertical, or it is a sideways gesture — a chip row, a
         // wide table — and none of our business.
-        if (Math.abs(dy) <= Math.abs(dx)) {
+        //
+        // And predominantly DOWNWARD. `stealsFromScroller` has already refused
+        // a gesture that starts part-way down a scroller, so everything
+        // reaching here starts at the top — where an upward drag is the whole
+        // of how you read the rest of the page. Without this the gesture
+        // committed to either direction and then `preventDefault`ed, so a swipe
+        // up from the top of a sheet scrolled nothing and instead dragged the
+        // panel a resisted quarter-inch: not a sheet that scrolled badly, a
+        // sheet that could not be scrolled at all, since every scroll has to
+        // start from the top once.
+        if (dy <= 0 || Math.abs(dy) <= Math.abs(dx)) {
           active = false
           return
         }
@@ -186,16 +198,19 @@ export function useSwipeDismiss({
       settle()
     }
 
+    // The system taking the gesture away is not a drop — put it back.
+    const onCancel = () => { active = false; settle() }
+
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
-    // The system taking the gesture away is not a drop — put it back.
-    el.addEventListener('touchcancel', () => { active = false; settle() }, { passive: true })
+    el.addEventListener('touchcancel', onCancel, { passive: true })
 
     return () => {
       el.removeEventListener('touchstart', onStart)
       el.removeEventListener('touchmove', onMove)
       el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onCancel)
       el.style.transform = ''
       el.style.transition = ''
     }

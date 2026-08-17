@@ -490,7 +490,7 @@ the single place a level comes from.
   through, and a touch on the empty space beside one never enters the subtree at
   all. That asymmetry is the feature — the page stays draggable everywhere the
   chrome is not.
-- **Pull down to dismiss lives in one hook, and it has three sharp edges.**
+- **Pull down to dismiss lives in one hook, and it has four sharp edges.**
   `useSwipeDismiss` is on `Sheet` and on the settings modal, so everything
   modal in the app inherits it — confirmations, the drill sheet, every form.
   - **It is `touchstart`/`touchmove`, not pointer events, and that is not a
@@ -503,6 +503,16 @@ the single place a level comes from.
     `animate-origin-out`, `animate-settings-out` — would snap back to the top and
     leave from there, which is the one jump the drag exists to remove. The hook
     returns `dismissing` and every caller MUST use it to suppress its own exit.
+  - **It commits DOWNWARD only, and the direction test is what makes the sheet
+    scrollable at all.** `stealsFromScroller` has already refused a gesture that
+    starts part-way down a scroller, so everything reaching the direction test
+    starts at the top — where an upward drag is the whole of how you read the
+    rest of the page. Committing on "predominantly vertical" and then
+    `preventDefault`ing meant a swipe up from the top scrolled nothing and
+    dragged the panel a resisted quarter-inch instead: not a sheet that scrolled
+    badly, a sheet that could not be scrolled, since every scroll starts from
+    the top once. The resistance in `move` is still there and now only ever
+    means a finger taking a pulled-down panel back past where it started.
   - **The listeners attach to a ref that does not exist yet** unless `enabled`
     waits for `shown`, the same trap `useMorphHeight` and the focus effect carry
     notes about: on the render where `open` first turns true, `Sheet` returns
@@ -545,6 +555,12 @@ the single place a level comes from.
   - **It is gated to phone widths with `useWide`**, because the X that closes it
     lives in a header that is `md:hidden`. Above `md` a modal would be a layer
     nothing could dismiss, and an iPad Mini crosses that breakpoint on rotation.
+  It carries a `Sheet`'s top corners and a shadow cast UPWARD (`--elev-up`,
+  defined per theme like the other two), both of which are off screen at rest —
+  the corners sit on the frame's own top edge and the frame clips the shadow
+  above them. They are spent entirely on the two moments it moves: arriving, and
+  being pulled back down, which is when it has to stop reading as a page that
+  replaced the last one.
   Closing is `navigate(background, { replace: true })`, never `navigate(-1)`:
   the group screens are real routes, so one step back from `/settings/data` is
   the Settings index with the modal still up.
