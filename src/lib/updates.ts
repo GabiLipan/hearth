@@ -18,10 +18,16 @@ import { registerSW } from 'virtual:pwa-register'
  *
  * So this file does the two things the platform will not:
  *
- *   - **Checks when the app comes back to the front.** `visibilitychange` fires
- *     on a restore even though nothing reloaded, which is exactly the moment a
- *     check is worth doing and the moment nothing else does one. Throttled, so
- *     glancing at the app twenty times an hour is not twenty requests.
+ *   - **Checks when the app comes back to the front.** A restore fires
+ *     `visibilitychange`, `focus` or `pageshow` even though nothing reloaded,
+ *     which is exactly the moment a check is worth doing and the moment nothing
+ *     else does one. All three are listened for, plus `online`, because no one
+ *     of them fires on every platform and version; the throttle is what makes
+ *     the overlap free, so glancing at the app twenty times an hour is not
+ *     twenty requests.
+ *   - **Never reports the outcome of a question it did not get an answer to.**
+ *     A failed check says so, and — since it learned nothing — does not spend
+ *     the throttle on the way out.
  *   - **Says what it found, and waits to be told.** A new version is announced
  *     rather than applied: applying it reloads the page, and doing that
  *     unasked can throw away a half-typed transaction. Nothing here is queued
@@ -74,6 +80,16 @@ const STAMP_URL = 'version.json'
 const CATCH_UP_MS = 8000
 /** How long between automatic checks — a foreground return sooner than this is ignored. */
 const THROTTLE_MS = 60_000
+/**
+ * And how long after a check that could not reach the server.
+ *
+ * Deliberately far shorter than the throttle. The commonest failure is a resume
+ * where the app is in front of you before the radio is back, and charging the
+ * full minute for it means the next two or three chances to notice — the focus
+ * event, a glance away and back — are all refused on the strength of a check
+ * that never got an answer.
+ */
+const RETRY_MS = 8000
 /** And a slow heartbeat for an app somebody leaves open all day. */
 const HEARTBEAT_MS = 30 * 60_000
 
@@ -96,7 +112,19 @@ function set(patch: Partial<UpdateState>) {
 /** Let the waiting worker take over, and reload onto it. Set by `initUpdates`. */
 let applyUpdate: ((reload?: boolean) => Promise<void>) | undefined
 let registration: ServiceWorkerRegistration | undefined
-let lastCheckAt = 0
+/** The earliest an AUTOMATIC check may run again. Manual ones ignore it. */
+let nextAutoCheckAt = 0
+/**
+ * The check currently running, if any.
+ *
+ * Every caller joins it rather than starting a second. Without this, the two
+ * listeners that fire together on an iOS resume — `visibilitychange` and
+ * `focus` — could both get past the throttle in the same millisecond, and two
+ * runs would then interleave their `set` calls: one writing `current` while the
+ * other is eight seconds into its catch-up loop and about to write `checking`
+ * back over it. The screen would end up on whichever finished last.
+ */
+let inFlight: Promise<void> | undefined
 
 /**
  * Register the service worker, and start watching for new versions.
@@ -129,13 +157,21 @@ export function initUpdates() {
     },
   })
 
+  // Four ways to hear "the app is in front of somebody again", because no one
+  // of them fires on every platform and the throttle makes the overlap free.
+  // `pageshow` is the one that matters most on iOS: a resumed PWA is often
+  // restored from the page cache, which is a `pageshow` with `persisted` set
+  // and — depending on version — no visibility change at all, because the page
+  // was never marked hidden on the way out.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void checkForUpdate()
   })
-  // A restore does not always change visibility — a PWA resumed from the app
-  // switcher can come back focused and visible throughout — so `focus` is the
-  // second half of "the app is in front of somebody again".
   window.addEventListener('focus', () => void checkForUpdate())
+  window.addEventListener('pageshow', () => void checkForUpdate())
+  // And when the network comes back, which is the other half of the commonest
+  // failure: the check that ran on resume could not reach the server, and
+  // nothing else was going to happen until the app was put away and reopened.
+  window.addEventListener('online', () => void checkForUpdate())
   setInterval(() => {
     if (document.visibilityState === 'visible') void checkForUpdate()
   }, HEARTBEAT_MS)
@@ -148,16 +184,37 @@ export function initUpdates() {
  * callers stay silent, because a check nobody asked for should not make the
  * screen flicker between "checking" and "up to date" every time the app is
  * glanced at.
+ *
+ * This is the gate — what can be answered without asking anybody, and whether
+ * asking is allowed yet. `run` is the check itself.
  */
-export async function checkForUpdate({ manual = false } = {}): Promise<void> {
-  // Already downloaded and waiting: there is nothing left to look for, and a
-  // check that reported "up to date" over the top of it would be a lie.
-  if (state.status === 'ready') return
-  if (!manual && Date.now() - lastCheckAt < THROTTLE_MS) return
+export function checkForUpdate({ manual = false } = {}): Promise<void> {
+  // A worker sitting in `waiting` is the strongest evidence there is, and it
+  // needs no network to read. Answering from it FIRST fixes the case that looked
+  // most like the feature being broken: offline, with a new version already
+  // downloaded, `run`'s fetch fails and the app says "could not reach the
+  // server" over the top of an update it is holding in its hand. It also covers
+  // a worker that became `waiting` while the page was in the background, where
+  // `onNeedRefresh` may never have been delivered.
+  if (registration?.waiting) {
+    set({ status: 'ready', checkedAt: Date.now() })
+    return Promise.resolve()
+  }
+  // Nothing left to look for, and a check reporting "up to date" over the top of
+  // this would be a lie.
+  if (state.status === 'ready') return Promise.resolve()
+  if (!manual && Date.now() < nextAutoCheckAt) return Promise.resolve()
+  if (inFlight) return inFlight
 
-  lastCheckAt = Date.now()
   if (manual) set({ status: 'checking' })
+  inFlight = run().finally(() => {
+    inFlight = undefined
+  })
+  return inFlight
+}
 
+/** One check, start to finish. Never called directly — see `checkForUpdate`. */
+async function run(): Promise<void> {
   /**
    * Ask the SERVER, not the service worker.
    *
@@ -182,9 +239,15 @@ export async function checkForUpdate({ manual = false } = {}): Promise<void> {
     // used to fall back to the previous status with a fresh timestamp, which
     // read on screen as "up to date, as of just now" — the app confidently
     // reporting the outcome of a question it never got an answer to.
+    //
+    // And it must not spend the throttle either: a question that got no answer
+    // is one still worth asking, so the next resume tries again in seconds
+    // rather than being turned away for a minute on the strength of it.
+    nextAutoCheckAt = Date.now() + RETRY_MS
     set({ status: 'offline', checkedAt: Date.now() })
     return
   }
+  nextAutoCheckAt = Date.now() + THROTTLE_MS
   if (serverBuiltAt === state.builtAt) {
     set({ status: 'current', checkedAt: Date.now() })
     return
@@ -204,6 +267,13 @@ export async function checkForUpdate({ manual = false } = {}): Promise<void> {
   }
   const until = Date.now() + CATCH_UP_MS
   while (Date.now() < until) {
+    // A tick BEFORE the first verdict, deliberately. `update()` resolving means
+    // the registration job finished, not that its side effects are readable, so
+    // asking straight away can find neither `installing` nor `waiting` set for a
+    // worker that is in fact half way through installing — and this loop would
+    // then give up on an update that was arriving normally, and send the reader
+    // to the heavy path for no reason.
+    await new Promise((r) => setTimeout(r, 250))
     if (registration.waiting) {
       set({ status: 'ready', checkedAt: Date.now() })
       return
@@ -214,7 +284,6 @@ export async function checkForUpdate({ manual = false } = {}): Promise<void> {
       // past that.
       break
     }
-    await new Promise((r) => setTimeout(r, 250))
   }
   set({ status: registration.waiting ? 'ready' : 'stale', checkedAt: Date.now() })
 }
@@ -246,6 +315,16 @@ export async function installUpdate(): Promise<void> {
   // `reload()` alone can be served from the back/forward cache on iOS; a fresh
   // navigation to the same URL cannot.
   window.location.replace(window.location.href)
+}
+
+/**
+ * The state, read outside React.
+ *
+ * The store is module-level, so this is the same value the hook below serves —
+ * it is not a second copy and cannot disagree with what is on screen.
+ */
+export function updateState(): UpdateState {
+  return state
 }
 
 export function useUpdateState(): UpdateState {

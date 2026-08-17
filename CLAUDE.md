@@ -1016,14 +1016,45 @@ the single place a level comes from.
   i.e. on page load — never runs again, and the app can sit several deploys
   behind. Force-quitting it repeatedly is the folk remedy and works only by
   accident, when one of those launches happens to be a cold start. `lib/updates.ts`
-  checks on `visibilitychange` and `focus` instead (throttled to a minute, with a
-  half-hourly heartbeat), which is the one signal a restore does emit. Verified
-  end to end rather than reasoned about: deploy while the page stays open, fire a
+  checks on `visibilitychange`, `focus`, `pageshow` and `online` instead
+  (throttled to a minute, with a half-hourly heartbeat) — four, because no one of
+  them fires on every platform and version, and `pageshow` is the one a PWA
+  restored from the page cache emits when it was never marked hidden on the way
+  out. The throttle is what makes the overlap free. Verified end to end rather
+  than reasoned about: deploy while the page stays open, fire a
   background/foreground pair, and a waiting worker appears within half a second.
   `registerType` is `prompt`, not `autoUpdate`, for a second reason — `autoUpdate`
   reloads the page the moment the new worker activates, and in an installed app
   that lands in the middle of typing a transaction. The outbox survives a reload;
   a half-filled form does not.
+
+  **Four ways a check could mislead rather than fail**, all now pinned by
+  `updates.test.ts` — which fails against each of them, since a test for this is
+  worthless if it only asserts the happy path:
+  - **A waiting worker is answered from FIRST, before the network.** A
+    downloaded update needs no confirming, and asking anyway meant that offline,
+    with a new version in hand, the app said "could not reach the server" about
+    it. It also covers a worker that reached `waiting` while the page was
+    backgrounded, where `onNeedRefresh` may never be delivered.
+  - **A failed check does not spend the throttle.** It learned nothing, so the
+    next resume retries in seconds rather than being refused for a minute — the
+    commonest failure by far is a resume that beats the radio back.
+  - **Overlapping checks are one check.** Three of those listeners can fire in
+    the same millisecond, and two runs would interleave their writes: one
+    setting `current` while the other is mid-catch-up and about to put
+    `checking` back over it.
+  - **The catch-up loop waits a tick before its first verdict.**
+    `registration.update()` resolving means the job finished, not that
+    `installing` is readable yet, so an eager first look at a worker arriving
+    perfectly normally saw neither `installing` nor `waiting` and called the
+    build `stale` — sending the reader to the heavy unregister-and-reload path
+    for no reason.
+
+  The version card lives at the bottom of the Settings INDEX only. It used to be
+  on all six group screens as well, on the reasoning that each is the bottom of
+  a phone's navigation — but six copies of "which version is this" is one answer
+  asked six times, and a Check for updates button under a list of categories
+  reads as being about categories.
   Activity's filters are `useSticky`/`useStickyIds` (session-scoped, per tab —
   a preference belongs in `settings`, but a filter is a question you are in the
   middle of asking and one asked last Tuesday must not still be hiding rows).

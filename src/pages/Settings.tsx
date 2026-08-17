@@ -1072,7 +1072,15 @@ function VersionCard() {
   )
 }
 
-/** The line under the app, on whichever screen is the bottom of Settings. */
+/**
+ * The line under the app, at the bottom of the Settings INDEX and nowhere else.
+ *
+ * It used to be at the bottom of every group screen as well, on the reasoning
+ * that each of those is the bottom of a phone's navigation. Six copies of "which
+ * version is this" is not six answers, though — it is one answer asked six
+ * times, and a Check for updates button beside a list of categories reads as
+ * something to do with categories. The index is one tap away from any of them.
+ */
 function Colophon() {
   return (
     <>
@@ -1204,7 +1212,6 @@ export function SettingsGroupPage() {
         </Link>
       </div>
       <Body />
-      <Colophon />
     </div>
   )
 }
