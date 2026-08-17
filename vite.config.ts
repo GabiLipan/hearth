@@ -118,13 +118,20 @@ export default defineConfig({
          * Both the tile's own dark, and they still have to agree.
          *
          * These two paint the screen the OS shows before a single line of the
-         * app has run, and it cannot be themed at runtime — so the only thing
-         * they can be right about is the frame that comes NEXT. That used to be
-         * the light page, and both were `#f9f9f7` for exactly that reason. It
-         * is now the boot splash in `index.html`, which opens on the mark's own
-         * ground, so these follow it: the OS paints the dark tile, the page
-         * paints the same dark tile, and the fire is lit on top of it. There is
-         * no frame in the sequence belonging to neither.
+         * app has run, and it CANNOT be themed at runtime — one value serves a
+         * light launch and a dark one alike. So the only thing they can be
+         * right about is the frame that comes next, and the boot splash in
+         * `index.html` no longer offers one: its ground is the app's own
+         * `--page`, which is a different colour depending on the theme.
+         *
+         * They stay the mark's dark, which is now the colour of the CARD the
+         * splash centres — so the OS's dark tile shrinks into the card rather
+         * than being replaced by an unrelated colour, and the one thing on
+         * screen either side of the handover is the same dark rectangle with
+         * the same mark on it. A launch into the light theme still changes the
+         * ground around it, and that is the trade: the alternative was showing
+         * every light-theme user a full dark screen and then a light app, which
+         * is the same flash a second later and against the app instead.
          *
          * They must not disagree with each other either, which is the original
          * bug: `theme_color` was the dark surface while `background_color` was

@@ -640,9 +640,18 @@ the single place a level comes from.
   entrance cut off three frames in reads as a glitch rather than as motion. The
   ceiling is an inline `setTimeout` in `index.html` rather than in `splash.ts`,
   because the case it covers is the bundle never arriving to call anything.
-  `manifest.background_color` is the splash's own dark for the same reason it
-  used to be the light page: it is the frame immediately before, and its only
-  job is to match whatever comes next.
+
+  **Its ground is the app's `--page`, not the mark's dark**, written out as two
+  literal colours under `[data-theme]` because the stylesheet is in the bundle
+  and this has to be right on the first frame — the theme is already stamped on
+  the root by the script above it. The mark and the wordmark keep the dark they
+  were drawn for, as a rounded card in the middle: the cream word is invisible
+  on the light page and the glow has nothing to spill onto. So the join the
+  splash is now honest about is the one with the APP, which is what you look at
+  for the rest of the session, rather than the one with the OS.
+  `manifest.background_color` cannot be themed at runtime and so can no longer
+  match the frame after it; it stays the card's dark, which the OS's tile now
+  shrinks into rather than being replaced by.
 - **`overscroll-behavior` propagates to the viewport from `<html>` only**, where
   `overflow` propagates from `<body>` too. So the declaration on `body` does
   nothing in Safari and stops Chrome's pull-to-refresh, which is exactly what is

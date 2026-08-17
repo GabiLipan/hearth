@@ -60,10 +60,24 @@
       inside the bundle appears AFTER the blank page it exists to cover, which
       is a flash of empty app and then a splash, i.e. worse than none.
 
-      So the manifest's `background_color` is the tile's own dark, this opens on
-      exactly that colour, and the join between the two is invisible. Between
-      the icon being tapped and the fire being lit there is no frame that
-      belongs to neither.
+      ## Why the ground is the app's page colour
+
+      This used to fill the screen with the mark's own dark, which meant a
+      light-theme user's launch went dark tile → dark splash → light app: the
+      join with the OS was invisible and the join with the APP, which is the one
+      you look at for the rest of the session, was a flash. It paints `--page`
+      instead — the same two values `index.css` defines, written out literally
+      because the stylesheet is in the bundle and this has to be right on the
+      first frame. The theme is already resolved above, before first paint, so
+      `[data-theme]` is on the root by the time this rule is read; no attribute
+      at all (the `catch` above) is light, which matches the app's default.
+
+      The mark keeps its dark ground as a card in the middle, which is what the
+      manifest's `background_color` now joins onto: the OS's dark tile shrinks
+      into the card rather than being replaced. It also keeps the fire and the
+      cream wordmark on the one background both were drawn for — on the light
+      page the word would be invisible and the glow would have nothing to spill
+      onto.
 
       ## What it must not do
 
@@ -89,11 +103,31 @@
         inset: 0;
         z-index: 100;
         display: flex;
+        align-items: center;
+        justify-content: center;
+        /* `--page`, light. Kept in step with `index.css` by hand. */
+        background: #f9f9f7;
+      }
+      :root[data-theme="dark"] #boot { background: #0d0d0d; }
+
+      /* The card the mark sits on: the ground the fire, the glow and the cream
+         wordmark were all drawn against, and the colour the OS splash hands
+         over. The hairline is what separates it from the dark page, where the
+         two colours are four points apart; on the light page the shadow does
+         that job and the hairline is invisible. */
+      #boot .plate {
+        display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         gap: 26px;
+        padding: 46px 58px 42px;
+        border-radius: 34px;
         background: linear-gradient(160deg, #2a2320 0%, #14100e 100%);
+        box-shadow:
+          inset 0 0 0 1px rgba(246, 227, 203, 0.08),
+          0 4px 8px -2px rgba(0, 0, 0, 0.22),
+          0 18px 36px -10px rgba(0, 0, 0, 0.28);
       }
       #boot .mark {
         position: relative;
@@ -193,33 +227,35 @@
   </head>
   <body>
     <div id="boot" aria-hidden="true">
-      <div class="mark">
-        <!-- Geometry from `BrandMark.tsx`: the arch runs y41–y127 and the
-             hearthstone to y136, both centred on x90 of a 180 tile. Kept in
-             step with it by hand, like `public/logo.svg` already is. -->
-        <svg class="glow" viewBox="0 0 180 180">
-          <defs>
-            <filter id="bootBlur" x="-60%" y="-60%" width="220%" height="220%">
-              <feGaussianBlur stdDeviation="13" />
-            </filter>
-          </defs>
-          <path d="M52 127 V79 a38 38 0 0 1 76 0 v48 z" fill="#F4813A" filter="url(#bootBlur)" />
-        </svg>
-        <svg class="arch" viewBox="0 0 180 180">
-          <defs>
-            <radialGradient id="bootGlow" cx="50%" cy="58%" r="62%">
-              <stop offset="0" stop-color="#FFD08A" />
-              <stop offset="0.42" stop-color="#F4813A" />
-              <stop offset="1" stop-color="#C0361A" />
-            </radialGradient>
-          </defs>
-          <path d="M52 127 V79 a38 38 0 0 1 76 0 v48 z" fill="url(#bootGlow)" />
-        </svg>
-        <svg class="stone" viewBox="0 0 180 180">
-          <rect x="34" y="127" width="112" height="9" rx="4.5" fill="#F6E3CB" opacity="0.22" />
-        </svg>
+      <div class="plate">
+        <div class="mark">
+          <!-- Geometry from `BrandMark.tsx`: the arch runs y41–y127 and the
+               hearthstone to y136, both centred on x90 of a 180 tile. Kept in
+               step with it by hand, like `public/logo.svg` already is. -->
+          <svg class="glow" viewBox="0 0 180 180">
+            <defs>
+              <filter id="bootBlur" x="-60%" y="-60%" width="220%" height="220%">
+                <feGaussianBlur stdDeviation="13" />
+              </filter>
+            </defs>
+            <path d="M52 127 V79 a38 38 0 0 1 76 0 v48 z" fill="#F4813A" filter="url(#bootBlur)" />
+          </svg>
+          <svg class="arch" viewBox="0 0 180 180">
+            <defs>
+              <radialGradient id="bootGlow" cx="50%" cy="58%" r="62%">
+                <stop offset="0" stop-color="#FFD08A" />
+                <stop offset="0.42" stop-color="#F4813A" />
+                <stop offset="1" stop-color="#C0361A" />
+              </radialGradient>
+            </defs>
+            <path d="M52 127 V79 a38 38 0 0 1 76 0 v48 z" fill="url(#bootGlow)" />
+          </svg>
+          <svg class="stone" viewBox="0 0 180 180">
+            <rect x="34" y="127" width="112" height="9" rx="4.5" fill="#F6E3CB" opacity="0.22" />
+          </svg>
+        </div>
+        <p class="word">Hearth</p>
       </div>
-      <p class="word">Hearth</p>
     </div>
     <div id="root"></div>
     <script>
