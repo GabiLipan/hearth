@@ -282,6 +282,20 @@ select,
   padding-top: env(safe-area-inset-top);
 }
 
+/**
+ * The gap under the floating tab bar.
+ *
+ * Not `pb-safe`. The safe-area inset is the whole home-indicator strip, and a
+ * bar held that far up leaves a band of empty page under it that reads as a
+ * mistake; the indicator itself only needs the bottom third of its own inset.
+ * So: the inset less half a line, floored at 12px for a device that has no
+ * inset at all (a browser tab, a flat-bottomed phone) where the bar still wants
+ * a margin rather than sitting on the edge.
+ */
+.pb-dock {
+  padding-bottom: max(0.75rem, calc(env(safe-area-inset-bottom) - 0.5rem));
+}
+
 /* Recharts positions its tooltip inside the chart container and sets no
    z-index on it, so anything absolutely positioned AFTER the chart in DOM
    order paints over the top — which is exactly what the donut's centre figure

@@ -24,6 +24,21 @@ export function cx(...parts: (string | false | undefined | null)[]) {
   return parts.filter(Boolean).join(' ')
 }
 
+/**
+ * The app's one travelling-pill spring.
+ *
+ * Damped: overshoots by a few per cent and settles, so a pill lands with weight
+ * rather than gliding to a stop. Shared rather than restated because two things
+ * now travel on it — the tab bar's selection and the book lens opening in the
+ * header — and they sit at opposite ends of the same screen. Two curves that
+ * were meant to match and drifted would be visible every time you used both.
+ */
+export const PILL_MS = 460
+export const PILL_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
+
+/** Whether to animate at all. Read at call time, not cached: it can change. */
+export const motionOk = () => !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
 /* ---------- Column layout ---------- */
 /**
  * How many columns fit, from a list of `[minWidth, columns]` steps.

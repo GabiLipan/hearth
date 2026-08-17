@@ -10,7 +10,7 @@ import {
 import { useSyncState } from '../hooks/useSync'
 import { installUpdate, useUpdateState } from '../lib/updates'
 import { DrillSheet } from './DrillSheet'
-import { cx } from './ui'
+import { cx, PILL_MS, PILL_SPRING } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
@@ -116,17 +116,28 @@ export function Layout({ children }: { children: ReactNode }) {
    * Zero on desktop, where the bar is `md:hidden` and there is nothing to clear.
    */
   const headerRef = useRef<HTMLElement>(null)
+  const dockRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
-    const el = headerRef.current
-    if (!el) return
-    const write = () =>
-      document.documentElement.style.setProperty('--header-h', `${el.offsetHeight}px`)
+    const pairs: [HTMLElement | null, string][] = [
+      [headerRef.current, '--header-h'],
+      // The mirror at the other end. Both bars float over the scroller now, so
+      // both have to hand back the room they no longer occupy, and neither
+      // height is a constant: one is a row plus `env(safe-area-inset-top)`, the
+      // other a capsule plus the home indicator's inset, and every phone,
+      // orientation and browser tab answers differently.
+      [dockRef.current, '--tabbar-h'],
+    ]
+    const write = () => {
+      for (const [el, prop] of pairs) {
+        if (el) document.documentElement.style.setProperty(prop, `${el.offsetHeight}px`)
+      }
+    }
     const ro = new ResizeObserver(write)
-    ro.observe(el)
+    for (const [el] of pairs) if (el) ro.observe(el)
     write()
     return () => {
       ro.disconnect()
-      document.documentElement.style.removeProperty('--header-h')
+      for (const [, prop] of pairs) document.documentElement.style.removeProperty(prop)
     }
   }, [])
 
@@ -241,41 +252,66 @@ export function Layout({ children }: { children: ReactNode }) {
       </aside>
 
       {/*
-        Mobile top bar, over the scroller rather than inside it.
+        Mobile top controls — a layer over the scroller, not a bar.
+
+        There is no plate and no title here any more. The tab bar names the page
+        already, in the other most valuable strip of the screen, so a permanent
+        title bar was spending 52px saying the same word twice; the title is a
+        large heading at the top of the CONTENT now (see `main`), where it opens
+        the page and then scrolls away. What is left is the two controls that
+        have to stay reachable wherever you are, floating over the rows with a
+        frosted disc each.
+
+        The consequence to remember: this element spans the full width of every
+        page and is mostly empty, so it MUST be `pointer-events-none` with its
+        children opting back in. As a solid bar it could afford to swallow taps
+        across the top of the screen because there was nothing behind it; as a
+        transparent layer, the first card is behind it.
 
         It was `sticky top-0` within the scroller, which is not a place a bounce
         leaves alone: sticky never rises above its own natural position, so
         pulling down past the top of a page carried the bar down with the
         content — the same complaint as the tab bar, at the other end.
 
-        Absolute over the frame instead, with the scroller padded to match, so
-        the rows still pass BEHIND it and it keeps its frosted edge. A bar in
-        flow above the scroller would hold still just as well and would cut the
-        content off at a hard line instead, which is a different-looking app.
+        Absolute over the frame instead, so the rows pass BEHIND the discs. Note
+        `absolute`, never `fixed`: the frame is a box this app sizes itself, so
+        positioning against it survives the rubber band that moves the viewport
+        out from under anything `fixed`. That distinction is the whole reason
+        the bottom bar sits where it does, and it is what lets both edges float
+        now.
 
-        `--header-h` is what pads the scroller, so the measurement is now
-        load-bearing in a second place — Activity's month headings already stick
-        to it, and they still sit exactly where they did.
+        `--header-h` is what pads the scroller, so the measurement is
+        load-bearing in a second place — Activity's month headings stick to it,
+        and they still sit exactly where they did, now just under the discs
+        rather than under a bar.
       */}
       <header
         ref={headerRef}
-        className="pt-safe absolute inset-x-0 top-0 z-30 border-b border-hairline bg-page/80 backdrop-blur-md md:hidden"
+        className="pt-safe pointer-events-none absolute inset-x-0 top-0 z-30 md:hidden"
       >
-        <div className="flex h-13 items-center gap-2 px-4 py-2.5">
-          <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight">{title}</h1>
-          {/* The book lens, on the pages that have one. It used to be a
-              full-width row inside each page; here it costs nothing and is
-              always in the same place. */}
+        <div className="flex items-center gap-2 px-3.5 pb-3 pt-2">
+          {/* The book lens, on the pages that have one. Absent rather than
+              disabled elsewhere: `LENS_PATHS` decides, and Settings has no
+              figures for a lens to act on. */}
           {LENS_PATHS.has(pathname) && <BookLens />}
-          <NavLink
-            to="/settings"
-            aria-label="Settings"
-            className={({ isActive }) =>
-              cx('grid size-9 place-items-center rounded-full', isActive ? 'bg-surface-2 text-ink' : 'text-ink-2')
-            }
-          >
-            <Settings size={20} />
-          </NavLink>
+          {/* A group, not a slot. Anything added later joins from the right
+              edge inward, so Settings never moves out from under the thumb
+              that has learned where it is. */}
+          <div className="ml-auto flex items-center gap-2">
+            <NavLink
+              to="/settings"
+              aria-label="Settings"
+              className={({ isActive }) =>
+                cx(
+                  'pointer-events-auto grid size-11 place-items-center rounded-full',
+                  'border border-hairline bg-surface/80 shadow-[var(--elev-2)] backdrop-blur-[10px]',
+                  isActive ? 'text-accent' : 'text-ink-2',
+                )
+              }
+            >
+              <Settings size={20} />
+            </NavLink>
+          </div>
         </div>
       </header>
 
@@ -290,7 +326,15 @@ export function Layout({ children }: { children: ReactNode }) {
           The padding is the top bar's own height, since the bar sits OVER this
           element rather than inside it. Zero on desktop, where the bar is
           `md:hidden` and therefore measures nothing. */}
-      <div id={APP_SCROLLER_ID} className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)]">
+      {/* `--tabbar-h` is the mirror of `--header-h` at the other end: the tab
+          bar floats over this element now rather than sitting in flow below it,
+          so the room it used to occupy has to be given back as padding or the
+          last row of every page ends up underneath it. Zero on desktop, where
+          the dock is `md:hidden` and measures nothing. */}
+      <div
+        id={APP_SCROLLER_ID}
+        className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] pb-[var(--tabbar-h,0px)]"
+      >
         <SyncBanner />
         <UpdateBanner />
 
@@ -304,13 +348,18 @@ export function Layout({ children }: { children: ReactNode }) {
             edge, and the page title would otherwise sit under the clock. Left
             off below `md`, where the top bar carries `pt-safe` and this
             element's scroller is already padded past it. */}
-        {/* `pb-20` clears the FAB and nothing else. It was `pb-32`, for a tab
-            bar that used to be `fixed` and therefore lay OVER the end of the
-            page; the bar is in flow below this scroller now, so most of that
-            was simply a dead band under the last card. */}
-        <main className="w-full min-w-0 flex-1 px-4 pb-20 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-[calc(1rem_+_env(safe-area-inset-top))] xl:px-6">
-          {/* Desktop page title. Mobile gets the same title in its top bar. */}
-          <h1 className="mb-3 hidden text-xl font-bold tracking-tight md:block">{title}</h1>
+        {/* `pb-16` clears the FAB and nothing else — the bar's own room is the
+            scroller's `pb-[--tabbar-h]` above, and stacking both here would put
+            a dead band under the last card. 64px is the button (44) plus the
+            gap it keeps from the bar (12) plus a little air. */}
+        <main className="w-full min-w-0 flex-1 px-4 pb-16 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-[calc(1rem_+_env(safe-area-inset-top))] xl:px-6">
+          {/* The page title, in the content on every width now.
+              It used to be desktop-only, with a phone reading its title off the
+              top bar; there is no top bar to read any more. Large on a phone and
+              then gone — an opening statement rather than chrome, which is what
+              lets the top edge be two floating discs instead of a strip. The tab
+              bar is what says where you are once this has scrolled away. */}
+          <h1 className="mb-2 text-[1.75rem] font-bold leading-tight tracking-tight md:mb-3 md:text-xl">{title}</h1>
           {/* Keyed on the path so the animation restarts on every page change:
               re-running one means a new element, not a re-applied class. */}
           <div
@@ -342,30 +391,49 @@ export function Layout({ children }: { children: ReactNode }) {
         and `below` was correctly zero. The bar was being placed against a
         number the app never sees.
 
-        In flow at the bottom of a frame the app controls, there is no such
-        number. It also costs nothing now: the frame stopped scrolling when the
-        scroll moved inside it, so "outside the scroller" and "fixed" are no
-        longer the same requirement — which is what made the bar immune to the
-        rubber band, and it still is.
+        Positioned against a frame the app controls, there is no such number. It
+        also costs nothing: the frame stopped scrolling when the scroll moved
+        inside it, so "outside the scroller" and "fixed" are no longer the same
+        requirement — which is what made the bar immune to the rubber band, and
+        it still is.
+
+        `absolute` here rather than in flow, which is the one thing that changed
+        with the shape. A capsule only means anything if content passes behind
+        it, and in flow nothing could; the room it stops occupying is handed
+        back to the scroller as `--tabbar-h`. The bounce is untouched by this:
+        `.app-frame` is not what moves during one, so an element positioned
+        against it holds just as still as it did in flow. `fixed` would still be
+        wrong, for exactly the reasons above.
       */}
-      <div className="relative z-40 shrink-0 md:hidden">
+      <div
+        ref={dockRef}
+        className="pb-dock pointer-events-none absolute inset-x-0 bottom-0 z-40 px-3.5 md:hidden"
+      >
         {/* Withdraws while the sheet is open, so the sheet reads as the button
             itself having opened up rather than as something covering it.
             `bottom-full` puts it on the bar's top edge — the old
-            `4.75rem + safe-area` had to add up to the same place by hand. */}
+            `4.75rem + safe-area` had to add up to the same place by hand.
+
+            A circle, at `size-11` like the settings disc and the lens, so the
+            three floating controls are one size all round the screen; and
+            `right-3.5`, which is this element's own horizontal padding, so its
+            right edge lines up with the bar's rather than with the screen's. It
+            keeps the accent fill and the plus: it is the one thing here that
+            makes something rather than showing something, and a frosted disc
+            among frosted discs would bury that. */}
         <button
           type="button"
           onClick={() => setAddOpen(true)}
           aria-label="Add transaction"
           aria-expanded={addOpen}
           className={cx(
-            'absolute bottom-full right-4 mb-4 grid size-14 place-items-center',
-            'rounded-2xl bg-accent text-accent-ink shadow-lg shadow-accent/30',
+            'pointer-events-auto absolute bottom-full right-3.5 mb-3 grid size-11 place-items-center',
+            'rounded-full bg-accent text-accent-ink shadow-lg shadow-accent/30',
             'transition-[scale,opacity] duration-200 ease-out active:scale-95 motion-reduce:transition-none',
             addOpen && 'pointer-events-none scale-50 opacity-0',
           )}
         >
-          <Plus size={26} />
+          <Plus size={22} />
         </button>
 
         <BottomTabs pathname={pathname} />
@@ -376,9 +444,6 @@ export function Layout({ children }: { children: ReactNode }) {
   )
 }
 
-const TAB_MS = 460
-/** Damped: overshoots by a few per cent and settles, so the pill lands with weight. */
-const TAB_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
 /**
  * At most how far the pill is drawn outside the tab it belongs to.
  *
@@ -389,7 +454,11 @@ const TAB_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
  * padding out of the gap either side, which is the space going spare anyway.
  *
  * A maximum rather than a promise: it is clamped to the gap actually available,
- * so a narrow phone with six tabs and no room to give quietly gets none.
+ * so a narrow phone with six tabs and no room to give quietly gets none — and,
+ * since the bar became a capsule, to the ROW as well. The bar's 5px padding is
+ * the margin the pill is supposed to keep from the rim; unclamped, the first
+ * and last tabs would spend their bleed pushing straight through it and the two
+ * end pills would touch the edge while the four in the middle did not.
  */
 const PILL_BLEED = 9
 
@@ -465,9 +534,14 @@ function BottomTabs({ pathname }: { pathname: string }) {
       ...tabs.slice(1).map((el, i) => el.offsetLeft - (tabs[i].offsetLeft + tabs[i].offsetWidth)),
     )
     const bleed = Math.max(0, Math.min(PILL_BLEED, gap - 2))
-    const to = { left: active.offsetLeft, width: active.offsetWidth }
-    pill.style.left = `${to.left - bleed}px`
-    pill.style.width = `${to.width + bleed * 2}px`
+    // …and clamped to the row, so the end pills stop where the bar's padding
+    // says rather than eating through it. `clientWidth` is the row's content
+    // box, which is exactly the space inside the capsule's 5px.
+    const left = Math.max(0, active.offsetLeft - bleed)
+    const right = Math.min(wrap.clientWidth, active.offsetLeft + active.offsetWidth + bleed)
+    const to = { left, width: right - left }
+    pill.style.left = `${to.left}px`
+    pill.style.width = `${to.width}px`
     pill.style.opacity = '1'
     placed.current = true
 
@@ -476,17 +550,17 @@ function BottomTabs({ pathname }: { pathname: string }) {
     labels.forEach((el, i) => {
       if (Math.abs(was[i] - goes[i]) < 0.5) return
       el.animate([{ width: `${was[i]}px` }, { width: `${goes[i]}px` }], {
-        duration: TAB_MS,
-        easing: TAB_SPRING,
+        duration: PILL_MS,
+        easing: PILL_SPRING,
       })
     })
 
     pill.animate(
       [
         { left: `${from.left}px`, width: `${from.width}px` },
-        { left: `${to.left - bleed}px`, width: `${to.width + bleed * 2}px` },
+        { left: `${to.left}px`, width: `${to.width}px` },
       ],
-      { duration: TAB_MS, easing: TAB_SPRING },
+      { duration: PILL_MS, easing: PILL_SPRING },
     )
   }
 
@@ -515,24 +589,31 @@ function BottomTabs({ pathname }: { pathname: string }) {
   return (
     <nav
       className={cx(
-        // `pb-safe` is the whole story now: the bar sits at the bottom of a
-        // frame the app sizes itself, so there is no strip left under it to
-        // paint over. It used to carry an 8rem filler below its own edge, for
-        // the times iOS handed a standalone app a viewport that stopped short
-        // of the display — dead weight once the bar stopped being positioned
-        // against that viewport, and clipped by the frame in any case.
-        'pb-safe border-t border-hairline bg-surface/90 backdrop-blur-md',
+        // A capsule: `rounded-full` on a bar whose height is the tab row plus
+        // 5px each side, so the radius is half the height at both levels and
+        // the travelling pill nests inside the bar's own corner rather than
+        // fighting it. Five is where the gap reads as a margin and is still too
+        // small to read as a second surface — at nothing the pill becomes the
+        // bar's own edge, and much past eight the bar becomes a tray with a
+        // separate pill sitting in it.
+        'pointer-events-auto rounded-full border border-hairline p-[5px]',
+        // The frost, which finally has something to be frosted about now that
+        // the page runs underneath. Softer and more see-through than the strip
+        // it replaces (`bg-surface/90 backdrop-blur-md`): a floating object
+        // wants to look thin, and a solid one would just be a pill-shaped hole
+        // in the page.
+        'bg-surface/80 shadow-[var(--elev-2)] backdrop-blur-[10px]',
       )}
     >
-      {/* The padding here has to cover the pill's bleed as well as the tab, or
-          the first and last pills sit closer to the edge than the icons did.
-          Narrower below 360px, where six tabs and a label need the width more
-          than the margin does. */}
-      <div ref={wrapRef} className="relative flex items-center justify-between px-3 py-1.5 min-[360px]:px-5">
+      {/* No padding of its own any more — the bar's 5px is the margin, stated
+          once, and the pill's bleed is clamped to this box in `place`. */}
+      <div ref={wrapRef} className="relative flex items-center justify-between">
         <span
           ref={pillRef}
           aria-hidden
-          className="pointer-events-none absolute inset-y-1 rounded-full bg-accent/12 opacity-0"
+          // `inset-y-0`, not `inset-y-1`: the clearance is the bar's padding
+          // now, so stating it again here would double it.
+          className="pointer-events-none absolute inset-y-0 rounded-full bg-accent/12 opacity-0"
         />
         {NAV.map(({ to, label, icon: Icon }) => {
           const active = to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`)

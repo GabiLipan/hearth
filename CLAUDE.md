@@ -406,7 +406,7 @@ the single place a level comes from.
   Activity's month headings stick to it, and it is what stops the first card
   starting underneath the bar.
 - **Nothing on a phone is `position: fixed` any more.** The tab bar and the FAB
-  sit in flow at the bottom of `.app-frame`, because `fixed` resolves against a
+  are positioned against `.app-frame`, because `fixed` resolves against a
   viewport the app cannot see or correct — which is how the same bar was moved
   by the rubber band and then, separately, placed 60-odd pixels too high on
   every cold start. Anchoring it to a frame the app sizes itself removes both at
@@ -414,6 +414,42 @@ the single place a level comes from.
   inside it, so "outside the scroller" and "fixed" stopped being the same
   requirement. `Toaster` is the exception and is still fixed — it appears in
   response to something you did, by which time the viewport has long settled.
+
+  `absolute` within the frame rather than in flow, since the bars became
+  capsules: a floating shape only means anything if content passes behind it,
+  and in flow nothing could. The bounce is untouched by that — `.app-frame` is
+  not what moves during one — but the room the bars stop occupying has to be
+  handed back, which is what `--header-h` and `--tabbar-h` are. **Both are
+  measured, never constants**: one is a row plus `env(safe-area-inset-top)`, the
+  other a capsule plus the home indicator's inset, and a notched phone, a flat
+  one and the same phone in a browser tab all answer differently. One effect in
+  `Layout` writes both and a `ResizeObserver` keeps them true.
+- **Both bars are 5px larger than the pill inside them, and that is the whole
+  shape.** The bar's radius is half its height at both levels, so the travelling
+  pill nests in the bar's own corner. Two consequences worth not undoing:
+  `PILL_BLEED` is now clamped to the tab row (`wrap.clientWidth`) as well as to
+  the gap, or the first and last pills spend their bleed pushing through the
+  5px and touch the rim while the four in the middle do not; and the pill is
+  `inset-y-0`, not `inset-y-1`, because the clearance is stated once, as the
+  bar's padding.
+- **A floating control needs frost, not a tint.** The book lens was
+  `bg-accent/12` on a solid header bar, which was legible because the bar behind
+  it was opaque. Floating over the rows, 12% of an accent is 12% of whatever
+  transaction happens to be underneath, and the word inside it becomes
+  unreadable the moment you scroll — caught in dark mode, where a white row ran
+  straight through it. Anything that floats over the scroller carries the same
+  four: `border-hairline`, `bg-surface/80`, `backdrop-blur-[10px]`,
+  `shadow-[var(--elev-2)]`. The accent tint then goes *on top* of that, as a
+  layer, because it is what makes the control a lens rather than what makes it
+  visible.
+- **The mobile header is a layer, not a bar, so it must not take taps.** There
+  is no plate and no title in it any more — the tab bar names the page already,
+  so a permanent title bar was spending 52px saying the same word twice, and the
+  title is a large heading at the top of `main` that scrolls away. What is left
+  spans the full width of every page and is mostly empty, so the `<header>` is
+  `pointer-events-none` with its children opting back in. As a solid bar it
+  could afford to swallow taps across the top of the screen; as a transparent
+  layer, the first card is behind it.
 - **The document does not scroll. `#app-scroll` does.** This is the one
   structural thing to know about `Layout`: it is a frame exactly `h-dvh` tall
   that never scrolls, holding a single scrolling column, with the tab bar and

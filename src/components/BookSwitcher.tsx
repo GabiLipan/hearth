@@ -1,19 +1,28 @@
-import { Home, User, Layers, Check, ChevronDown, type LucideIcon } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Users, User, Layers, type LucideIcon } from 'lucide-react'
 import { BOOK_HINT, BOOK_LABEL, type BookId } from '../lib/books'
 import { useBook } from '../lib/cache'
-import { Popover, cx } from './ui'
+import { PILL_MS, PILL_SPRING, motionOk, cx } from './ui'
 import { Segmented } from './ui'
 
 /**
  * Three options and a month stepper still do not fit "Our household" across a
  * phone, however the widths are shared out, so there is a short form under
  * `md`. It is not an abbreviation so much as the same idea in fewer words.
+ *
+ * The icons are PEOPLE — two, one, the stack — and deliberately not a house.
+ * `household` wore `Home` for as long as the lens lived inside the page, where
+ * the surrounding words said what it was. In the phone's top-left corner, in an
+ * app whose first tab is also a house, it stopped reading as a lens at all and
+ * started reading as "go home"; the control became invisible to the person
+ * looking for it. A book is a question about whose money this is, so it asks it
+ * with people, and `Home` is left to mean exactly one thing in the app.
  */
 const BOOKS: { id: BookId; icon: LucideIcon; short: string }[] = [
   // The long labels are BOOK_LABEL. They fit because `Segmented` sizes each
   // option to its own content now: "Our household" being wider than "Mine" is
   // simply what it is, rather than forcing all three to be that wide.
-  { id: 'household', icon: Home, short: 'Ours' },
+  { id: 'household', icon: Users, short: 'Ours' },
   { id: 'mine', icon: User, short: 'Mine' },
   { id: 'all', icon: Layers, short: 'All' },
 ]
@@ -75,51 +84,152 @@ export function BookSwitcher({
  */
 export function BookLens() {
   const [book, setBook] = useBook()
+  const [open, setOpen] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const shutRef = useRef<HTMLButtonElement>(null)
+  const openRef = useRef<HTMLDivElement>(null)
   const current = BOOKS.find((b) => b.id === book) ?? BOOKS[0]
   const Icon = current.icon
 
+  /**
+   * The width, measured then animated — the same order `BottomTabs` uses, and
+   * for the same reason: the resting value is written to the element first, so
+   * however the animation ends (or never ends, in a backgrounded tab, where no
+   * finish event is delivered) the pill is already the size it should be. The
+   * animation carries no `fill` and is decoration over a layout that is
+   * correct.
+   *
+   * Both halves are `absolute` and `w-max`, so each measures its own natural
+   * width whatever the box around them is currently doing — which is what makes
+   * "how wide will this be once it opens" answerable before it opens. `book` is
+   * a dependency because the closed pill is as wide as the word in it, and
+   * "Ours" and "Mine" are not the same width.
+   */
+  useLayoutEffect(() => {
+    const box = boxRef.current
+    const target = open ? openRef.current : shutRef.current
+    if (!box || !target) return
+    const to = target.getBoundingClientRect().width
+    const from = box.getBoundingClientRect().width
+    box.getAnimations().forEach((a) => a.cancel())
+    box.style.width = `${to}px`
+    // `from` is 0 on the very first pass — the box has no in-flow content, so
+    // there is nothing to travel from and nothing worth animating.
+    if (!from || Math.abs(from - to) < 0.5 || !motionOk()) return
+    box.animate([{ width: `${from}px` }, { width: `${to}px` }], {
+      duration: PILL_MS,
+      easing: PILL_SPRING,
+    })
+  }, [open, book])
+
+  // Closing on an outside press is `pointerdown` rather than `click` so the
+  // pill is already shrinking as the finger lands somewhere else, and the
+  // capture phase so a press inside a scroller still reaches it.
+  useEffect(() => {
+    if (!open) return
+    const away = (e: PointerEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', away, true)
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('pointerdown', away, true)
+      document.removeEventListener('keydown', esc)
+    }
+  }, [open])
+
+  /** A radio group's arrow key chooses rather than merely pointing. */
+  function onKey(e: React.KeyboardEvent) {
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+    if (!step) return
+    e.preventDefault()
+    const i = BOOKS.findIndex((b) => b.id === book)
+    const next = BOOKS[(i + step + BOOKS.length) % BOOKS.length]
+    setBook(next.id)
+    openRef.current?.querySelector<HTMLElement>(`[data-book="${next.id}"]`)?.focus()
+  }
+
   return (
-    <Popover
-      align="right"
-      width="w-56"
-      trigger={({ open, toggle }) => (
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          aria-label={`Showing ${BOOK_LABEL[book]}`}
-          className="flex h-8 items-center gap-1.5 rounded-full bg-accent/12 px-2.5 text-sm font-semibold text-accent"
-        >
-          <Icon size={14} className="shrink-0" />
-          {current.short}
-          <ChevronDown size={13} className={cx('shrink-0 opacity-70 transition-transform', open && 'rotate-180')} />
-        </button>
+    <div
+      ref={boxRef}
+      className={cx(
+        // `h-11` is `CONTROL_H`'s touch height, so the lens, the settings button
+        // and the add button are one size across the whole top and bottom edge.
+        'pointer-events-auto relative h-11 shrink-0 overflow-hidden rounded-full',
+        // The same frost as the settings disc, and for a reason worth stating:
+        // a tint alone is what this used to be, and it was legible only because
+        // it sat on a solid bar. Floating over the rows, `bg-accent/12` is 12%
+        // of anything — a transaction scrolls straight through the control and
+        // the word in it becomes unreadable. The frost is what makes a floating
+        // control a control; the tint on top of it is what makes it a lens.
+        'border border-hairline bg-surface/80 shadow-[var(--elev-2)] backdrop-blur-[10px]',
+        'text-accent',
       )}
     >
-      {(close) => (
-        <div>
-          {BOOKS.map(({ id, icon: Each }) => (
+      <span aria-hidden className="pointer-events-none absolute inset-0 bg-accent/12" />
+
+      {/* Closed: a status light that says which book you are in without being
+          opened, which is the whole job of a lens indicator. */}
+      <button
+        ref={shutRef}
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-expanded={open}
+        aria-label={`Showing ${BOOK_LABEL[book]}. Change`}
+        inert={open}
+        className={cx(
+          'absolute left-0 top-0 flex h-full w-max items-center gap-1.5 px-3.5',
+          'text-sm font-semibold transition-opacity duration-150',
+          open && 'opacity-0',
+        )}
+      >
+        <Icon size={17} className="shrink-0" />
+        {current.short}
+      </button>
+
+      {/* Open: three options on one line. A radio group, not a menu — there is
+          nothing here to command, only a value to pick. */}
+      <div
+        ref={openRef}
+        role="radiogroup"
+        aria-label="Which book to show"
+        inert={!open}
+        onKeyDown={onKey}
+        className={cx(
+          'absolute left-0 top-0 flex h-full w-max items-center gap-0.5 p-1',
+          'transition-opacity duration-150',
+          open ? 'opacity-100' : 'opacity-0',
+        )}
+      >
+        {BOOKS.map(({ id, icon: Each, short }) => {
+          const on = id === book
+          return (
             <button
-              type="button"
               key={id}
+              type="button"
+              role="radio"
+              data-book={id}
+              aria-checked={on}
+              title={BOOK_HINT[id]}
+              tabIndex={on ? 0 : -1}
               onClick={() => {
                 setBook(id)
-                close()
+                setOpen(false)
               }}
-              className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-2"
+              className={cx(
+                'flex h-9 items-center gap-1.5 rounded-full px-2.5 text-sm font-semibold transition-colors',
+                on ? 'bg-accent/15 text-accent' : 'text-ink-2',
+              )}
             >
-              <Check size={15} className={cx('mt-0.5 shrink-0', id === book ? 'text-accent' : 'opacity-0')} />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  <Each size={14} className="shrink-0 text-ink-3" />
-                  {BOOK_LABEL[id]}
-                </span>
-                <span className="mt-0.5 block text-xs text-ink-3">{BOOK_HINT[id]}</span>
-              </span>
+              <Each size={15} className="shrink-0" />
+              {short}
             </button>
-          ))}
-        </div>
-      )}
-    </Popover>
+          )
+        })}
+      </div>
+    </div>
   )
 }

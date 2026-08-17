@@ -147,8 +147,11 @@ export function Toaster() {
       className={cx(
         'pointer-events-none fixed inset-x-0 z-[60] flex flex-col items-center gap-2 px-4',
         // Clear of the mobile tab bar and the FAB above it; an ordinary margin
-        // on a wide screen, where neither exists.
-        'bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-4',
+        // on a wide screen, where neither exists. `--tabbar-h` is the dock's
+        // measured height (bar plus the gap under it), so this tracks the bar
+        // rather than restating its size and drifting from it — which is what
+        // the hand-added `4.75rem + safe-area` here used to do.
+        'bottom-[calc(var(--tabbar-h,4.75rem)_+_3.5rem)] md:bottom-4',
       )}
     >
       {items.map((t) => (
