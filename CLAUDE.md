@@ -474,6 +474,32 @@ the single place a level comes from.
   on 28px bold — a doubled ghost along the top of every letter, which is the
   exact fault the stack exists to remove. Anything sitting in the ramp when
   nothing is moving wants to be fully sharp or fully blurred, never mixed.
+- **Pull down to dismiss lives in one hook, and it has three sharp edges.**
+  `useSwipeDismiss` is on `Sheet` and on the settings modal, so everything
+  modal in the app inherits it — confirmations, the drill sheet, every form.
+  - **It is `touchstart`/`touchmove`, not pointer events, and that is not a
+    style choice.** The gesture has to `preventDefault` the moment it commits,
+    or iOS rubber-bands the scroller under the finger while the panel is also
+    moving. Pointer events are passive by default on touch and cannot. It also
+    gives "mobile only" for free: a mouse never gets there.
+  - **A CSS animation beats an inline style for the property it animates.** So a
+    panel that keyframes its own `transform` on the way out — `animate-sheet-out`,
+    `animate-origin-out`, `animate-settings-out` — would snap back to the top and
+    leave from there, which is the one jump the drag exists to remove. The hook
+    returns `dismissing` and every caller MUST use it to suppress its own exit.
+  - **The listeners attach to a ref that does not exist yet** unless `enabled`
+    waits for `shown`, the same trap `useMorphHeight` and the focus effect carry
+    notes about: on the render where `open` first turns true, `Sheet` returns
+    `null`. Keyed on `open` alone the effect fires once against a null ref and
+    never looks again, and the gesture is dead on every sheet, silently. It was,
+    until a browser said so.
+
+  The rule for when a drag is a dismiss rather than a scroll is deliberately
+  positional, not modal: walk up from whatever was touched, and refuse if
+  anything on the way is scrolled away from its top. You can pull a sheet down
+  only from a point where pulling down would otherwise do nothing. `[data-no-swipe]`
+  opts a subtree out for the case that rule cannot cover — a slider, a
+  vertically draggable list.
 - **Every toggle in the app is `Segmented`, and it is a capsule now.** Both
   levels are `rounded-full`, so the thumb nests in the track's own corner rather
   than sitting in it as a smaller, differently-shaped box, and the thumb is

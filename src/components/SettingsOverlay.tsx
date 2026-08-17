@@ -1,7 +1,9 @@
+import { useRef } from 'react'
 import { Routes, Route, useLocation } from 'react-router-dom'
 import SettingsPage, { SettingsGroupPage, SETTINGS_GROUP_TITLES } from '../pages/Settings'
 import RulesPage from '../pages/Rules'
 import { cx } from './ui'
+import { useSwipeDismiss } from '../hooks/useSwipeDismiss'
 
 /**
  * How long the modal takes to leave, in ms.
@@ -32,7 +34,12 @@ export const SETTINGS_EXIT_MS = 260
  * `md:hidden` is not needed here because `Layout` only renders this below `md`;
  * a wide screen has a sidebar, and Settings there is a page like any other.
  */
-export function SettingsOverlay({ leaving }: { leaving: boolean }) {
+export function SettingsOverlay({ leaving, onDismiss }: { leaving: boolean; onDismiss: () => void }) {
+  const panel = useRef<HTMLDivElement>(null)
+  // Pull down to close, exactly as a sheet does. Enabled only while it is
+  // properly open: a panel already on its way out must not be grabbable.
+  const swipe = useSwipeDismiss({ panel, enabled: !leaving, onDismiss })
+
   /**
    * The heading, which the pages themselves deliberately do not render — they
    * were written for a top bar that said where you were, and `main` says it on
@@ -45,12 +52,16 @@ export function SettingsOverlay({ leaving }: { leaving: boolean }) {
 
   return (
     <div
+      ref={panel}
       className={cx(
         // Under a `Sheet` (z-50) and over the tab bar and the FAB (z-40): a
         // confirmation raised from inside Settings has to cover Settings, and
         // Settings has to cover the bar it is standing in front of.
         'absolute inset-0 z-[45] overflow-hidden bg-page',
-        leaving ? 'animate-settings-out' : 'animate-settings-in',
+        // No keyframed exit when it was thrown: a CSS animation beats the
+        // inline transform the drag is holding, so it would jump back to the
+        // top and slide down again from there.
+        leaving ? (swipe.dismissing ? '' : 'animate-settings-out') : 'animate-settings-in',
       )}
     >
       {/* Its own scroller, with the same top inset as the app's so the first

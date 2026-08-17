@@ -553,7 +553,7 @@ export function Layout({ children }: { children: ReactNode }) {
           FRAME, like everything else here that must not move with the scroll —
           and phone only, because a wide screen has the sidebar and Settings
           there is a page like any other. */}
-      {settingsShown && <SettingsOverlay leaving={!settingsOpen} />}
+      {settingsShown && <SettingsOverlay leaving={!settingsOpen} onDismiss={closeSettings} />}
 
       {/* The rows behind whatever figure was last pressed. Mounted here rather
           than per page: it is a modal over the whole app, and the charts that

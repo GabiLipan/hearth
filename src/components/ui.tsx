@@ -19,6 +19,7 @@ import { accountFace } from '../lib/accounts'
 import { slotVar } from '../lib/palette'
 import { appScroller } from '../lib/scroll'
 import { CategoryIcon } from './CategoryIcon'
+import { useSwipeDismiss } from '../hooks/useSwipeDismiss'
 
 export function cx(...parts: (string | false | undefined | null)[]) {
   return parts.filter(Boolean).join(' ')
@@ -1154,6 +1155,26 @@ export function Sheet({
     frame.current?.focus({ preventScroll: true })
   }, [open, shown])
 
+  /**
+   * Pull it down to close it.
+   *
+   * On the frame rather than on the box that positions it, because that box is
+   * where the grow-out-of-the-button animation lives and a transform there is
+   * already spoken for.
+   *
+   * `shown && host` as well as `open`, and this is the same trap
+   * `useMorphHeight` and the focus effect both carry a note about: on the
+   * render where `open` first turns true the phase has not caught up, `Sheet`
+   * still returns `null`, and there is no frame for the listeners to attach to.
+   * Keyed on `open` alone the effect fires once against a null ref and never
+   * looks again — the gesture is simply dead, silently, on every sheet.
+   */
+  const swipe = useSwipeDismiss({
+    panel: frame,
+    enabled: open && shown && Boolean(host),
+    onDismiss: onClose,
+  })
+
   if (!shown || !host) return null
   const leaving = phase === 'closing'
   const body = (
@@ -1207,7 +1228,10 @@ export function Sheet({
           // sheet's top edge lands underneath the island on a modern iPhone,
           // and the keyboard shrinking the viewport pulls it higher still.
           'pt-[max(calc(env(safe-area-inset-top)+0.75rem),1.5rem)] sm:pt-0',
-          from && (leaving ? 'animate-origin-out' : 'animate-origin'),
+          // Not while it is being thrown: the collapse-into-the-button exit
+          // and the drag are two different journeys, and playing both makes
+          // the sheet shrink towards a corner while it is on its way down.
+          from && (leaving ? (swipe.dismissing ? '' : 'animate-origin-out') : 'animate-origin'),
         )}
         style={{
           top: inset.top,
@@ -1235,7 +1259,10 @@ export function Sheet({
             wide ? 'sm:max-w-2xl lg:max-w-3xl' : 'sm:max-w-md lg:max-w-lg',
             // With an origin the whole frame scales out of the button, so the
             // sheet must not also travel inside it.
-            !from && (leaving ? 'animate-sheet-out' : 'animate-sheet'),
+            // Same reasoning as the origin exit above: a keyframed transform
+            // would beat the inline one the drag is holding, so the sheet would
+            // snap back to the top and slide down again from there.
+            !from && (leaving ? (swipe.dismissing ? '' : 'animate-sheet-out') : 'animate-sheet'),
             // Nothing in a sheet that has already been dismissed is clickable —
             // what is on screen during the exit is a picture of the old one.
             leaving && 'pointer-events-none',
