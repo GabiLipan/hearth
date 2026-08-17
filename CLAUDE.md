@@ -116,6 +116,8 @@ by a scrolling chart and the axis pinned beside it),
 behind the `showOwed` flag; see `useFlag`), `shade.ts` (telling apart
 two categories the palette gave one colour),
 `scroll.ts` (the element the app scrolls, which is not the document, and why),
+`headline.ts` (what the phone's header says once a page has been scrolled into,
+published by the page and read by the header),
 `splash.ts` (taking the boot splash off, once there is an app behind it),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
@@ -402,9 +404,9 @@ the single place a level comes from.
   now, with the scroller padded by `--header-h` to match, so the rows still pass
   BEHIND it and it keeps its frosted edge. In flow above the scroller would hold
   just as still and would cut the content off at a hard line instead, which is a
-  different-looking app. `--header-h` is therefore load-bearing twice over:
-  Activity's month headings stick to it, and it is what stops the first card
-  starting underneath the bar.
+  different-looking app. `--header-h` is what stops the first card starting
+  underneath the bar, and it is what `appScrollerTopInset()` reads, so a jump
+  lands where the eye expects rather than under the discs.
 - **Nothing on a phone is `position: fixed` any more.** The tab bar and the FAB
   are positioned against `.app-frame`, because `fixed` resolves against a
   viewport the app cannot see or correct — which is how the same bar was moved
@@ -507,11 +509,23 @@ the single place a level comes from.
   `top: var(--header-h)` — left over from when the bar was `sticky top-0` inside
   the scroller and there was no padding under it. Both were true at once for
   exactly one commit, and the headings parked at TWICE the bar's height,
-  floating in the middle of the rows they belonged to. They are `top-0` now: the
-  clearance is stated once, in the padding. Anything else that wants to stick
-  under the bar wants `top-0` too, and anything that wants to SCROLL something
-  to that line wants `appScrollerTopInset()` — the same number, read from the
-  scroller, rather than a second constant to drift from the first.
+  floating in the middle of the rows they belonged to. The clearance is stated
+  once, in the padding: anything that wants to stick under the bar wants
+  `top-0`, and anything that wants to SCROLL something to that line wants
+  `appScrollerTopInset()` — the same number, read from the scroller, rather than
+  a second constant to drift from the first.
+
+  Those headings do not stick at all any more, and the reason is worth keeping:
+  a sticky band works by butting into the underside of something solid, and once
+  the top bar became two floating discs there was nothing for it to butt into —
+  it was a full-width rectangle with square corners parked in the middle of the
+  rows, separating nothing from nothing, in a screen where everything else that
+  floats is a capsule. The job moved rather than being dropped. `lib/headline.ts`
+  lets a page publish a line, and the header shows it in the middle, between the
+  lens and the settings disc, for as long as you are inside that month's rows —
+  the same answer, in the place the eye already goes for it. It is `null` above
+  the first heading, so the capsule is absent rather than repeating the large
+  page title that is still on screen there.
 - **The boot splash is in `index.html`, and only its dismissal is in the app.**
   The OS splash cannot be animated — Android composites the launcher icon on
   `background_color`, iOS shows a still image — so the animated opening is the

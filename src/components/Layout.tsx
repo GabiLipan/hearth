@@ -15,6 +15,7 @@ import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
 import { APP_SCROLLER_ID } from '../lib/scroll'
+import { useHeadlineValue } from '../lib/headline'
 import { BookLens } from './BookSwitcher'
 
 const NAV = [
@@ -72,6 +73,10 @@ const tabIndex = (path: string) => {
 export function Layout({ children }: { children: ReactNode }) {
   const [addOpen, setAddOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  // What the page underneath says it is showing, and whether the lens is
+  // covering the place it goes. Both only mean anything below `md`.
+  const headline = useHeadlineValue()
+  const [lensOpen, setLensOpen] = useState(false)
   const { pathname, search } = useLocation()
   const navigate = useNavigate()
   const title = TITLES[pathname] ?? 'Hearth'
@@ -289,15 +294,47 @@ export function Layout({ children }: { children: ReactNode }) {
         ref={headerRef}
         className="pt-safe pointer-events-none absolute inset-x-0 top-0 z-30 md:hidden"
       >
-        <div className="flex items-center gap-2 px-3.5 pb-3 pt-2">
+        <div className="relative flex items-center gap-2 px-3.5 pb-3 pt-2">
+          {/* Whatever the page says it is showing, once it has been scrolled
+              into — today that is Activity's month, and it is here because with
+              no bar left to butt into, a sticky heading in the list was a
+              full-width band with square edges separating nothing from nothing.
+
+              Absolutely centred rather than a flex child, so the line is
+              centred on the SCREEN rather than in whatever room the two
+              controls happen to leave — the lens is 88px and the settings disc
+              44, and a middle measured between them is visibly off. First in
+              the DOM so both controls, which are positioned, paint over it.
+
+              It hides while the lens is open, because the lens expands from 44
+              to something over 200 and would otherwise cover the left half of
+              this and leave the rest poking out. */}
+          <span
+            aria-hidden
+            className={cx(
+              'pointer-events-none absolute inset-x-0 flex justify-center px-16',
+              'transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none',
+              headline && !lensOpen ? 'opacity-100' : 'scale-90 opacity-0',
+            )}
+          >
+            <span
+              className={cx(
+                'max-w-full truncate rounded-full px-3 py-1.5 text-[13px] font-semibold text-ink',
+                CHROME_FROST,
+              )}
+            >
+              {headline}
+            </span>
+          </span>
+
           {/* The book lens, on the pages that have one. Absent rather than
               disabled elsewhere: `LENS_PATHS` decides, and Settings has no
               figures for a lens to act on. */}
-          {LENS_PATHS.has(pathname) && <BookLens />}
+          {LENS_PATHS.has(pathname) && <BookLens onOpenChange={setLensOpen} />}
           {/* A group, not a slot. Anything added later joins from the right
               edge inward, so Settings never moves out from under the thumb
               that has learned where it is. */}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="relative ml-auto flex items-center gap-2">
             <NavLink
               to="/settings"
               aria-label="Settings"

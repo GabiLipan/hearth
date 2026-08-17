@@ -23,6 +23,7 @@ import { applyContributor, learnContributors, suggestContributor, taggable } fro
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
 import { useSticky, useStickyIds } from '../lib/sticky'
+import { useHeadline } from '../lib/headline'
 import { matchesDrill, narrows, readDrill } from '../lib/drill'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
@@ -382,6 +383,7 @@ export default function Activity() {
    * pass several without any of them crossing a threshold band.
    */
   const [atMonth, setAtMonth] = useState<string | null>(null)
+  const [passed, setPassed] = useState<string | null>(null)
   useEffect(() => {
     let frame = 0
     const read = () => {
@@ -397,6 +399,10 @@ export default function Activity() {
         else break
       }
       setAtMonth(current ?? heads[0]?.dataset.month ?? null)
+      // Without the fallback, this time. `Jump to` wants a month to name even
+      // at the very top of the list; the header wants to say nothing there,
+      // because the page's own large title is still on screen saying it.
+      setPassed(current)
     }
     const onScroll = () => {
       if (!frame) frame = requestAnimationFrame(read)
@@ -408,6 +414,21 @@ export default function Activity() {
       if (frame) cancelAnimationFrame(frame)
     }
   }, [visible.length])
+
+  /**
+   * The month, in the phone's header, once you have scrolled into the list.
+   *
+   * This is where the sticky heading went. As `sticky top-0` it worked by
+   * butting into the underside of a solid top bar; with the bar gone it was a
+   * full-width band with square edges, parked in the middle of the rows and
+   * separating nothing from nothing. The header has a middle that is empty by
+   * design, and a month is exactly the kind of thing it should hold: a fact
+   * about where you are, not a control.
+   *
+   * `null` above the first heading, so the capsule is absent rather than
+   * duplicating the large "Activity" title that is still on screen there.
+   */
+  useHeadline(passed ? monthLabel(passed) : null)
 
   const rows = useMemo(() => {
     // The visible rows, cut into months. Every heading carries the whole
@@ -1314,47 +1335,29 @@ function MonthHeading({
   money: (minor: number, opts?: { sign?: boolean }) => string
   dense?: boolean
   /**
-   * Follow the scroll, under the mobile top bar.
+   * The phone's version: carries the row count, and scrolls away.
    *
-   * `top-0`, and it must NOT be `--header-h`. A sticky inset is measured from
-   * the scroll container's CONTENT box, not its padding box — so the scroller's
-   * own `pt-[var(--header-h)]`, which is what holds the first card clear of the
-   * absolutely positioned bar, is already the whole of the clearance this needs.
-   * Naming the header height here as well parks the heading at TWICE the bar's
-   * height, floating in the middle of the rows it belongs to. That is what it
-   * did when the bar was lifted out of the scroller: as `sticky top-0` inside
-   * the scroller the bar had no padding under it and the offset was the only
-   * thing holding the heading down, and both halves were true at once for
-   * exactly one commit.
+   * It used to stick. `sticky top-0` worked by butting into the underside of
+   * the solid top bar, which is what gave an opaque full-width band an edge to
+   * be an edge against — and the bar is gone. Left sticking it was a rectangle
+   * with square corners floating in the middle of the rows, in a screen where
+   * everything else that floats is a frosted capsule.
    *
-   * So the clearance is stated in one place. If the bar's height ever stops
-   * being the scroller's padding, this becomes wrong again — and visibly, which
-   * is the right way round.
+   * The job moved rather than being dropped: `useHeadline` puts the month in
+   * the header's empty middle for as long as you are inside that month's rows,
+   * which is the same answer in the place the eye already goes for it. What is
+   * left here is an ordinary heading, so it needs no fill, no z-index and no
+   * negative margin — and `appScrollerTopInset()` is still what `Jump to`
+   * scrolls it to, since the anchor never moved.
    *
-   * Sticky works here despite `main` carrying `overflow-x: clip` on mobile:
-   * `clip` is the one overflow value that does NOT force the other axis to
-   * become a scroll container, so the vertical axis stays `visible` and the
-   * nearest scroller is `#app-scroll` rather than something between. Any other
-   * value there — `hidden`, `auto` — and this silently stops moving.
-   *
-   * Phone only. On desktop every row already carries its full date, so there
-   * is nothing to lose track of, and the table's own sticky first column would
-   * have to be reasoned about alongside it.
+   * Desktop keeps `dense` and neither: every row there carries its full date.
    */
   sticky?: boolean
 }) {
   return (
     <div
       data-month={month}
-      className={cx(
-        'flex items-baseline justify-between gap-3',
-        dense ? '' : 'mb-2 px-1',
-        // An opaque background, for the same reason `table.pinned` needs one:
-        // the rows scrolling underneath are otherwise plainly readable through
-        // it. The negative margin plus padding lets that background reach the
-        // full width of the list rather than stopping at the text.
-        sticky && 'sticky top-0 z-20 -mx-1 bg-page/95 px-2 py-1.5 backdrop-blur-sm',
-      )}
+      className={cx('flex items-baseline justify-between gap-3', dense ? '' : 'mb-2 px-1')}
     >
       <h2 className={cx('font-semibold', dense ? 'text-xs uppercase tracking-wide text-ink-2' : 'text-base')}>
         {monthLabel(month)}

@@ -82,9 +82,14 @@ export function BookSwitcher({
  * room, all three options are visible at once there, and hiding two of them
  * behind a menu would be a downgrade bought with space nobody needed.
  */
-export function BookLens() {
+export function BookLens({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const [book, setBook] = useBook()
   const [open, setOpen] = useState(false)
+  // The header needs to know, because what it shows in the middle sits exactly
+  // where this expands to. Reported rather than lifted: the open state is this
+  // control's own business, and everything else here reads better for it being
+  // local.
+  useEffect(() => onOpenChange?.(open), [open, onOpenChange])
   const boxRef = useRef<HTMLDivElement>(null)
   const shutRef = useRef<HTMLButtonElement>(null)
   const openRef = useRef<HTMLDivElement>(null)
