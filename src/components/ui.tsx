@@ -25,19 +25,64 @@ export function cx(...parts: (string | false | undefined | null)[]) {
 }
 
 /**
- * The app's one travelling-pill spring.
+ * The travelling-pill spring: the tab bar's selection sliding between tabs.
  *
- * Damped: overshoots by a few per cent and settles, so a pill lands with weight
- * rather than gliding to a stop. Shared rather than restated because two things
- * now travel on it — the tab bar's selection and the book lens opening in the
- * header — and they sit at opposite ends of the same screen. Two curves that
- * were meant to match and drifted would be visible every time you used both.
+ * Damped, overshooting by around seven per cent and settling, so a pill lands
+ * with weight rather than gliding to a stop. Six tabs a thumb's width apart get
+ * used constantly, and a bouncier curve there would be exhausting.
  */
 export const PILL_MS = 460
 export const PILL_SPRING = 'cubic-bezier(0.33, 1.35, 0.5, 1)'
 
+/**
+ * The same idea with the damping taken off, for the book lens opening.
+ *
+ * The lens is pressed occasionally and travels a long way — a 44px disc into a
+ * 230px row of options — so it can afford the character the tab pill cannot.
+ * Nineteen samples of the step response of mass 1, ω 20, **ζ 0.55** (against
+ * the tab pill's ~0.8), read every 30ms: 12% past the target at 180ms, then two
+ * diminishing swings back. Run `linear`, because the samples ARE the easing.
+ *
+ * Sampled, never hand-picked. Stops chosen by eye animate at a near-constant
+ * speed through the middle, which is exactly what "it feels linear" means; a
+ * real spring spends two thirds of its travel in the first quarter of the time
+ * and the rest settling, and that distribution is the whole effect.
+ *
+ * `linear()` needs Safari 17.2, and an unsupported easing string does not
+ * degrade in the Web Animations API — it throws — so this is a function with a
+ * probe rather than a constant. The fallback is an ordinary cubic-bezier with
+ * as much overshoot as one control point can express.
+ */
+export const PILL_BOUNCE_MS = 540
+const BOUNCE_LINEAR =
+  'linear(0, 0.142, 0.435, 0.731, 0.952, 1.079, 1.124, 1.116, 1.082, 1.044,' +
+  ' 1.012, 0.993, 0.985, 0.985, 0.988, 0.993, 0.997, 1, 1)'
+let bounce: string | undefined
+export function pillBounce() {
+  if (bounce) return bounce
+  const ok =
+    typeof CSS !== 'undefined' &&
+    typeof CSS.supports === 'function' &&
+    CSS.supports('transition-timing-function', BOUNCE_LINEAR)
+  bounce = ok ? BOUNCE_LINEAR : 'cubic-bezier(0.2, 1.7, 0.4, 1)'
+  return bounce
+}
+
 /** Whether to animate at all. Read at call time, not cached: it can change. */
 export const motionOk = () => !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/**
+ * What a control floating over the scroller wears.
+ *
+ * Four properties, always together, because a tint alone is only legible on
+ * something opaque and there is nothing opaque left up there — see the book
+ * lens, which was `bg-accent/12` on a solid bar and became 12% of whatever
+ * transaction happened to be underneath it. Stated once so the lens, the
+ * settings disc and the tab bar cannot drift apart: they are meant to read as
+ * one set of objects at two ends of the same screen.
+ */
+export const CHROME_FROST =
+  'border border-hairline bg-surface/65 shadow-[var(--elev-2)] backdrop-blur-[6px]'
 
 /* ---------- Column layout ---------- */
 /**

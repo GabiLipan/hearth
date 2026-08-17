@@ -437,11 +437,31 @@ the single place a level comes from.
   it was opaque. Floating over the rows, 12% of an accent is 12% of whatever
   transaction happens to be underneath, and the word inside it becomes
   unreadable the moment you scroll — caught in dark mode, where a white row ran
-  straight through it. Anything that floats over the scroller carries the same
-  four: `border-hairline`, `bg-surface/80`, `backdrop-blur-[10px]`,
-  `shadow-[var(--elev-2)]`. The accent tint then goes *on top* of that, as a
-  layer, because it is what makes the control a lens rather than what makes it
-  visible.
+  straight through it. `CHROME_FROST` in `ui.tsx` is the four properties that go
+  together, stated once so the lens, the settings disc and the tab bar cannot
+  drift: they are meant to read as one set of objects at two ends of one screen.
+  Deliberately thin (65%, 6px) — the point of floating the bars was to see
+  things pass behind them, and a frost that hides the page is a bar with extra
+  steps. The accent is spent on the SELECTED option once the lens is open, not
+  on the closed control: two blue things in an otherwise empty corner read as
+  two states of one thing rather than as a control and a label.
+- **The bottom fade is one blur behind a gradient mask.** A `backdrop-filter` is
+  composited through its element's mask, so a single uniform blur under a
+  gradient mask reads as a progressive one — which is how `.dock-scrim` ramps
+  from clear to blurred without the stack of layers a true gradient blur wants.
+  That restraint is the point: it is on screen the whole time the app is, under
+  a bar already carrying a filter of its own. Its stops are eased rather than
+  linear, because a straight ramp spends the top half fading nothing and still
+  arrives at the bar half clear.
+- **There are two pill springs, and the difference is deliberate.** The tab
+  bar's (`PILL_SPRING`, ζ≈0.8, ~7% overshoot) is pressed constantly by a thumb
+  and travels a short way; the lens's (`pillBounce()`, ζ 0.55, 12%) is pressed
+  occasionally and travels from a 44px disc to a 230px row. Both are SAMPLED
+  from a spring rather than hand-picked — see the `origin-in` note below for why
+  chosen stops always feel linear. The lens's is a `linear()` easing, which
+  needs Safari 17.2 and, unlike a CSS declaration, does not degrade in the Web
+  Animations API — it throws — so `pillBounce()` probes with `CSS.supports`
+  before handing one back.
 - **The mobile header is a layer, not a bar, so it must not take taps.** There
   is no plate and no title in it any more — the tab bar names the page already,
   so a permanent title bar was spending 52px saying the same word twice, and the

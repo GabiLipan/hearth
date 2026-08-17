@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Users, User, Layers, type LucideIcon } from 'lucide-react'
 import { BOOK_HINT, BOOK_LABEL, type BookId } from '../lib/books'
 import { useBook } from '../lib/cache'
-import { PILL_MS, PILL_SPRING, motionOk, cx } from './ui'
+import { CHROME_FROST, PILL_BOUNCE_MS, pillBounce, motionOk, cx } from './ui'
 import { Segmented } from './ui'
 
 /**
@@ -117,8 +117,8 @@ export function BookLens() {
     // there is nothing to travel from and nothing worth animating.
     if (!from || Math.abs(from - to) < 0.5 || !motionOk()) return
     box.animate([{ width: `${from}px` }, { width: `${to}px` }], {
-      duration: PILL_MS,
-      easing: PILL_SPRING,
+      duration: PILL_BOUNCE_MS,
+      easing: pillBounce(),
     })
   }, [open, book])
 
@@ -159,20 +159,20 @@ export function BookLens() {
         // `h-11` is `CONTROL_H`'s touch height, so the lens, the settings button
         // and the add button are one size across the whole top and bottom edge.
         'pointer-events-auto relative h-11 shrink-0 overflow-hidden rounded-full',
-        // The same frost as the settings disc, and for a reason worth stating:
-        // a tint alone is what this used to be, and it was legible only because
-        // it sat on a solid bar. Floating over the rows, `bg-accent/12` is 12%
-        // of anything — a transaction scrolls straight through the control and
-        // the word in it becomes unreadable. The frost is what makes a floating
-        // control a control; the tint on top of it is what makes it a lens.
-        'border border-hairline bg-surface/80 shadow-[var(--elev-2)] backdrop-blur-[10px]',
-        'text-accent',
+        // Exactly what the settings disc wears, and nothing else. A tint alone
+        // is what this used to be, and it was legible only because it sat on a
+        // solid bar; floating over the rows, `bg-accent/12` is 12% of whatever
+        // transaction happens to be underneath. The frost is what makes a
+        // floating control a control.
+        CHROME_FROST,
+        // Closed, this is a control like any other — the accent belongs to the
+        // OPTION you have chosen, and there is no option on show until it
+        // opens. Two blue things in the corner of a mostly-empty header read as
+        // two states of something rather than as one control and one label.
+        'text-ink-2',
       )}
     >
-      <span aria-hidden className="pointer-events-none absolute inset-0 bg-accent/12" />
-
-      {/* Closed: a status light that says which book you are in without being
-          opened, which is the whole job of a lens indicator. */}
+      {/* Closed: which book you are in, said in a word rather than in colour. */}
       <button
         ref={shutRef}
         type="button"

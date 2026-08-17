@@ -296,6 +296,47 @@ select,
   padding-bottom: max(0.75rem, calc(env(safe-area-inset-bottom) - 0.5rem));
 }
 
+/**
+ * The fade under the floating tab bar.
+ *
+ * Clear at the top, half the page colour and properly blurred by the bottom, so
+ * rows leave the screen behind the bar instead of running off a hard edge.
+ *
+ * The blur is progressive, and the mask is what makes it so: a `backdrop-filter`
+ * is composited through its element's mask, so one uniform blur behind a
+ * gradient mask reads as a ramp. Stacking several layers at increasing radii is
+ * the higher-fidelity way and costs a `backdrop-filter` each — on an element
+ * that is on screen the whole time the app is, and already sits under a bar
+ * carrying one of its own.
+ *
+ * The stops are eased rather than linear (0.18 at a third, 0.6 at two thirds):
+ * a straight ramp puts too much of the fade in the top half, where there is
+ * nothing yet to hide, and then arrives at the bar still half clear.
+ */
+.dock-scrim {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--page) 50%, transparent)
+  );
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.18) 34%,
+    rgba(0, 0, 0, 0.6) 67%,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.18) 34%,
+    rgba(0, 0, 0, 0.6) 67%,
+    #000 100%
+  );
+}
+
 /* Recharts positions its tooltip inside the chart container and sets no
    z-index on it, so anything absolutely positioned AFTER the chart in DOM
    order paints over the top — which is exactly what the donut's centre figure

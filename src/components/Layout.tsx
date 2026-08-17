@@ -10,7 +10,7 @@ import {
 import { useSyncState } from '../hooks/useSync'
 import { installUpdate, useUpdateState } from '../lib/updates'
 import { DrillSheet } from './DrillSheet'
-import { cx, PILL_MS, PILL_SPRING } from './ui'
+import { cx, CHROME_FROST, PILL_MS, PILL_SPRING } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
@@ -304,7 +304,7 @@ export function Layout({ children }: { children: ReactNode }) {
               className={({ isActive }) =>
                 cx(
                   'pointer-events-auto grid size-11 place-items-center rounded-full',
-                  'border border-hairline bg-surface/80 shadow-[var(--elev-2)] backdrop-blur-[10px]',
+                  CHROME_FROST,
                   isActive ? 'text-accent' : 'text-ink-2',
                 )
               }
@@ -415,6 +415,20 @@ export function Layout({ children }: { children: ReactNode }) {
         ref={dockRef}
         className="pb-dock pointer-events-none absolute inset-x-0 bottom-0 z-40 px-3.5 md:hidden"
       >
+        {/* The scrim: the page fading out under the bar rather than running
+            sharply into it. Absolute and FIRST, so the two positioned siblings
+            after it paint on top in document order.
+
+            `-top-8` puts its leading edge above the bar, where it is still
+            completely clear — the fade has to begin before the bar does or you
+            see the join. The blur ramps because the mask ramps: a masked
+            `backdrop-filter` composites the blurred result through the mask, so
+            an element with one blur and a gradient mask reads as a progressive
+            one, for a single filter rather than the stack of them a true
+            gradient blur needs. Worth the restraint — this is on screen the
+            entire time the app is. */}
+        <span aria-hidden className="dock-scrim pointer-events-none absolute inset-x-0 -top-8 bottom-0" />
+
         {/* Withdraws while the sheet is open, so the sheet reads as the button
             itself having opened up rather than as something covering it.
             `bottom-full` puts it on the bar's top edge — the old
@@ -602,13 +616,17 @@ function BottomTabs({ pathname }: { pathname: string }) {
         // small to read as a second surface — at nothing the pill becomes the
         // bar's own edge, and much past eight the bar becomes a tray with a
         // separate pill sitting in it.
-        'pointer-events-auto rounded-full border border-hairline p-[5px]',
+        // `relative` so it paints over the scrim, which is an absolute sibling
+        // earlier in the DOM. Two positioned elements at `z-index: auto` are
+        // painted in document order, so no z-index is needed either side — and
+        // adding one would only invite the next person to add a bigger one.
+        'pointer-events-auto relative rounded-full p-[5px]',
         // The frost, which finally has something to be frosted about now that
-        // the page runs underneath. Softer and more see-through than the strip
-        // it replaces (`bg-surface/90 backdrop-blur-md`): a floating object
-        // wants to look thin, and a solid one would just be a pill-shaped hole
-        // in the page.
-        'bg-surface/80 shadow-[var(--elev-2)] backdrop-blur-[10px]',
+        // the page runs underneath. Thinner than the strip it replaces
+        // (`bg-surface/90 backdrop-blur-md`) so that a row travelling behind it
+        // stays legible as a row: a floating object wants to look thin, and a
+        // solid one is just a pill-shaped hole in the page.
+        CHROME_FROST,
       )}
     >
       {/* No padding of its own any more — the bar's 5px is the margin, stated
