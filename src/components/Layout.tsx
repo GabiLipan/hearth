@@ -325,15 +325,22 @@ export function Layout({ children }: { children: ReactNode }) {
           for every absolutely positioned descendant in the app.
           The padding is the top bar's own height, since the bar sits OVER this
           element rather than inside it. Zero on desktop, where the bar is
-          `md:hidden` and therefore measures nothing. */}
-      {/* `--tabbar-h` is the mirror of `--header-h` at the other end: the tab
-          bar floats over this element now rather than sitting in flow below it,
-          so the room it used to occupy has to be given back as padding or the
-          last row of every page ends up underneath it. Zero on desktop, where
-          the dock is `md:hidden` and measures nothing. */}
+          `md:hidden` and therefore measures nothing.
+          Above `md` the inset is the status bar instead, and it belongs to the
+          COLUMN rather than to `main`: the banners are the first thing in here
+          now, so an inset on `main` alone left "A new version of Hearth is
+          ready" sitting under the clock on an installed iPad. `env()` resolves
+          to 0 in a browser tab, so this costs a desktop nothing. Below `md` the
+          same reasoning is what puts a banner clear of the floating discs —
+          `--header-h` is their whole clearance, and a banner is the first thing
+          it applies to.
+          `--tabbar-h` is the mirror at the other end: the tab bar floats over
+          this element now rather than sitting in flow below it, so the room it
+          used to occupy has to be given back or the last row of every page ends
+          up underneath it. Zero on desktop, where the dock is `md:hidden`. */}
       <div
         id={APP_SCROLLER_ID}
-        className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] pb-[var(--tabbar-h,0px)]"
+        className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] pb-[var(--tabbar-h,0px)] md:pt-[env(safe-area-inset-top)]"
       >
         <SyncBanner />
         <UpdateBanner />
@@ -344,15 +351,14 @@ export function Layout({ children }: { children: ReactNode }) {
             On a phone this element is exactly the width of the viewport, so it
             clips where the viewport would have — and unlike the same rule on
             <html>, it does not propagate to the viewport. */}
-        {/* Same inset on the content column: the sidebar is only half the top
-            edge, and the page title would otherwise sit under the clock. Left
-            off below `md`, where the top bar carries `pt-safe` and this
-            element's scroller is already padded past it. */}
+        {/* The status-bar inset used to be stated here. It is on the scroller
+            above instead, so that whatever is first in the column — a banner,
+            or this — clears the clock. Stating it twice would double it. */}
         {/* `pb-16` clears the FAB and nothing else — the bar's own room is the
             scroller's `pb-[--tabbar-h]` above, and stacking both here would put
             a dead band under the last card. 64px is the button (44) plus the
             gap it keeps from the bar (12) plus a little air. */}
-        <main className="w-full min-w-0 flex-1 px-4 pb-16 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 md:pt-[calc(1rem_+_env(safe-area-inset-top))] xl:px-6">
+        <main className="w-full min-w-0 flex-1 px-4 pb-16 pt-4 max-md:overflow-x-clip md:px-5 md:pb-8 xl:px-6">
           {/* The page title, in the content on every width now.
               It used to be desktop-only, with a phone reading its title off the
               top bar; there is no top bar to read any more. Large on a phone and
