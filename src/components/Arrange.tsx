@@ -394,7 +394,12 @@ export function Arrange({
         // on the wrapper itself cannot see that, because the wrapper always has
         // the inner box (and, while arranging, the controls) inside it; `:has`
         // asks about the inner box instead.
-        className={cx('relative min-w-0 [&:has(>div:empty)]:hidden', editing && 'touch-none select-none')}
+        // `h-full` all the way down to the card: the box a section is given
+        // can now be taller than the section asked for — a row is as tall as
+        // its tallest card, a stretched column hands out its slack — and a
+        // height nobody passes on is a card floating at the top of a hole
+        // rather than a card that filled it. See `Columns`'s `fill` and `Fill`.
+        className={cx('relative h-full min-w-0 [&:has(>div:empty)]:hidden', editing && 'touch-none select-none')}
         style={lifted ? { transform: `translate(${drag.dx}px, ${drag.dy}px)`, zIndex: 30 } : undefined}
         tabIndex={editing ? 0 : undefined}
         aria-label={editing ? `${def.label}. Arrow keys to move, Enter to change its width.` : undefined}
@@ -407,6 +412,12 @@ export function Arrange({
         <div
           className={cx(
             'transition-[box-shadow,transform,opacity]',
+            // The card itself, whatever the section rendered, becomes a column
+            // as tall as the box it was given. Stated here rather than on
+            // twenty-odd cards, which is also what stops half of them drifting
+            // out of it: a card that is not a flex column has nothing for
+            // `Fill` to grow inside.
+            'h-full [&>*]:flex [&>*]:h-full [&>*]:flex-col',
             editing && 'rounded-2xl ring-2 ring-dashed ring-accent/40 md:rounded-xl',
             lifted && 'scale-[1.02] opacity-95 shadow-2xl ring-accent',
           )}
@@ -458,13 +469,16 @@ export function Arrange({
       <div ref={wrap} className={cx('relative flex flex-col', gap)}>
         {bands(visible, columns).map((band, i) =>
           band.kind === 'masonry' ? (
-            <Columns key={`b${i}`} count={columns} gap={gap}>
+            <Columns key={`b${i}`} count={columns} gap={gap} fill>
               {band.items.map(section)}
             </Columns>
           ) : (
             <div key={`b${i}`} className={cx('flex flex-col', gap)}>
               {band.rows.map((row, j) => (
-                <div key={j} className={cx('flex items-start', gap)}>
+                // `items-stretch`, so two sections sharing a row end at the
+                // same line rather than the shorter one leaving a notch in the
+                // page down to the next row.
+                <div key={j} className={cx('flex items-stretch', gap)}>
                   {row.map(({ item, span }) => (
                     <div
                       key={item.id}

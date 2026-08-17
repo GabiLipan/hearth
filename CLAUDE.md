@@ -1197,6 +1197,30 @@ the single place a level comes from.
   array, and drops boxes of zero size — a section whose data has nothing to show
   renders empty and is hidden, and a zero box at the origin would otherwise win
   "nearest centre" from the far corner of the page.
+- **A card ends where the tallest card beside it ends, and the slack goes to the
+  picture.** Two sections sharing a row, or a masonry column shorter than the one
+  next to it, used to leave a hole in the page down to the next full-width card —
+  visibly so on Reports, where two charts of unequal height sit under a full-width
+  breakdown. Rows are `items-stretch`, `Columns` takes `fill` (every column as
+  tall as the tallest, the slack shared out among the cards in it), and `Arrange`
+  passes `h-full` all the way down so the card itself is a flex column — a height
+  nobody hands on is a card floating at the top of a hole rather than one that
+  filled it. `Fill` in `ui.tsx` is what a chart uses to spend the space.
+  Three things about it that are load-bearing. The stretch cannot disturb the
+  balancing it is measured from: after it every column is exactly the tallest
+  column's height, so re-running the distribution over the grown heights is a
+  fixed point rather than a loop. `Fill` settles the same way rather than
+  measuring, because there is nothing stable to measure — the height offered
+  depends on the card's height, which depends on the height the chart took — so
+  it subtracts the child's own overhead (a legend, a row of chips: whatever it
+  came out taller than the number it was given) and lands on the right height in
+  one pass, in both directions. And it has a ceiling as well as a floor: `min` is
+  what the chart would have been alone and it is never squeezed below it, `max`
+  stops "fill the space" next to something very tall from drawing a bar chart
+  half a screen high — past it the card keeps the remainder as white space, which
+  is the lesser fault. `Columns` without `fill` is unchanged, which is what
+  Settings wants: a stretched card of prose is a taller box with the same words
+  at the top of it.
 - **A wrapper cannot see that its child rendered nothing.** Widgets return null
   all the time (no accounts, no bills due), and `:empty` on the wrapper never
   matches because the wrapper always holds the inner box — and, while arranging,

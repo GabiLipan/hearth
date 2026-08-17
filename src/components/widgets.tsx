@@ -31,7 +31,7 @@ import { parseAmount, currencySymbol } from '../lib/money'
 import { syncNow } from '../lib/session'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
-import { AccountDot, Button, Card, CardHeader, CategoryDot, Field, Progress, Select, Sheet, TextInput, cx } from './ui'
+import { AccountDot, Button, Card, CardHeader, CategoryDot, Field, Fill, Progress, Select, Sheet, TextInput, cx } from './ui'
 import { BudgetBullet } from './BudgetBullet'
 import { CategoryIcon } from './CategoryIcon'
 import { CategoryBars, CategoryDonut, CategoryMosaic, Sparkline, SpendBars, type TrendShape } from './charts'
@@ -434,19 +434,25 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
             /* A little taller than the ring's 180: the blocks are the full
                width of the card, so height is what decides how many of them can
                carry a legible name rather than falling back to a chip. */
-            <CategoryMosaic slices={slices} height={190} onPick={pickSlice} />
+            <Fill min={190}>
+              {(height) => <CategoryMosaic slices={slices} height={height} onPick={pickSlice} />}
+            </Fill>
           ) : (
             <CategoryBars slices={slices} onPick={pickSlice} />
           )}
         </>
       ) : (
-        <CategoryDonut
-          slices={slices}
-          height={180}
-          onPick={pickSlice}
-          pickLabel={(s) => (!drill && canDrill(s.categoryId) ? 'Look inside' : 'See transactions')}
-          centerLabel={{ title: drill ? 'in here' : 'spent', value: money(spent, { compact: true }) }}
-        />
+        <Fill min={180}>
+          {(height) => (
+            <CategoryDonut
+              slices={slices}
+              height={height}
+              onPick={pickSlice}
+              pickLabel={(s) => (!drill && canDrill(s.categoryId) ? 'Look inside' : 'See transactions')}
+              centerLabel={{ title: drill ? 'in here' : 'spent', value: money(spent, { compact: true }) }}
+            />
+          )}
+        </Fill>
       )}
       {/* The donut itself is not clickable, so the way in is a row of buttons
           under it — the same arrangement Reports uses, and the same reasons:
@@ -494,13 +500,17 @@ export function TrendWidget({ data, variant, options, controls }: WidgetProps) {
         </h3>
         {controls}
       </div>
-      <SpendBars
-        data={series}
-        height={170}
-        visible={across}
-        shape={(variant as TrendShape) ?? 'bars'}
-        onPickMonth={(m) => openRows({ month: m })}
-      />
+      <Fill min={170}>
+        {(height) => (
+          <SpendBars
+            data={series}
+            height={height}
+            visible={across}
+            shape={(variant as TrendShape) ?? 'bars'}
+            onPickMonth={(m) => openRows({ month: m })}
+          />
+        )}
+      </Fill>
       {months > across && (
         <p className="mt-1 text-xs text-ink-3">Scroll the chart back for earlier months.</p>
       )}

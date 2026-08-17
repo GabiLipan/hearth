@@ -33,7 +33,7 @@ import {
   type BookId,
 } from '../lib/books'
 import { useApp } from '../state/AppContext'
-import { Card, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, useColumnCount, cx } from '../components/ui'
+import { Card, Fill, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, useColumnCount, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { Arrange, useLayout } from '../components/Arrange'
@@ -704,22 +704,29 @@ export default function Reports() {
             /* Taller than the home widget's, because this is a full-width panel
                on its own: the blocks squarify against the box, so a long thin
                one would give every category a letterbox. */
-            <CategoryMosaic slices={slices} height={300} onPick={pickSlice} />
+            <Fill min={300}>
+              {(height) => <CategoryMosaic slices={slices} height={height} onPick={pickSlice} />}
+            </Fill>
           ) : (
-            <CategoryDonut
-              slices={slices}
-              onPick={pickSlice}
-              // What a press does depends on whether THIS category has
-              // anything left inside it, so the label is asked per slice — on a
-              // phone it is the only wording the gesture gets, and a button
-              // saying "Look inside" that opens a list of rows instead is worse
-              // than no label at all.
-              pickLabel={(s) => (!drill && canDrill(s.categoryId) ? 'Look inside' : 'See transactions')}
-              centerLabel={{
-                title: drill ? 'in here' : 'spent',
-                value: money(slices.reduce((s, x) => s + x.totalMinor, 0), { compact: true }),
-              }}
-            />
+            <Fill min={240}>
+              {(height) => (
+                <CategoryDonut
+                  slices={slices}
+                  height={height}
+                  onPick={pickSlice}
+                  // What a press does depends on whether THIS category has
+                  // anything left inside it, so the label is asked per slice — on a
+                  // phone it is the only wording the gesture gets, and a button
+                  // saying "Look inside" that opens a list of rows instead is worse
+                  // than no label at all.
+                  pickLabel={(s) => (!drill && canDrill(s.categoryId) ? 'Look inside' : 'See transactions')}
+                  centerLabel={{
+                    title: drill ? 'in here' : 'spent',
+                    value: money(slices.reduce((s, x) => s + x.totalMinor, 0), { compact: true }),
+                  }}
+                />
+              )}
+            </Fill>
           )}
           {/* The buttons stay even though the chart is now clickable: they are
               the keyboard path, and a hit target big enough for a thumb on the
@@ -886,12 +893,17 @@ export default function Reports() {
         return !monthly ? null : (
           <Card className="p-5 md:p-4">
             {heading(`${words.spend} each month`, controls, scrollHint)}
-            <SpendBars
-              data={longSeries}
-              visible={monthsShown}
-              shape={(variant as TrendShape) ?? 'bars'}
-              onPickMonth={(m) => seeMonth(m)}
-            />
+            <Fill min={220}>
+              {(height) => (
+                <SpendBars
+                  data={longSeries}
+                  height={height}
+                  visible={monthsShown}
+                  shape={(variant as TrendShape) ?? 'bars'}
+                  onPickMonth={(m) => seeMonth(m)}
+                />
+              )}
+            </Fill>
           </Card>
         )
 
@@ -902,12 +914,17 @@ export default function Reports() {
               book === 'household' ? 'Paid in vs spent' : book === 'mine' ? 'Earned vs spent' : 'In vs out',
               controls,
             )}
-            <IncomeSpendBars
-              data={longSeries}
-              visible={monthsShown}
-              shape={(variant as InOutShape) ?? 'bars'}
-              onPickMonth={(m) => seeMonth(m)}
-            />
+            <Fill min={240}>
+              {(height) => (
+                <IncomeSpendBars
+                  data={longSeries}
+                  height={height}
+                  visible={monthsShown}
+                  shape={(variant as InOutShape) ?? 'bars'}
+                  onPickMonth={(m) => seeMonth(m)}
+                />
+              )}
+            </Fill>
           </Card>
         )
 
@@ -922,12 +939,17 @@ export default function Reports() {
               controls,
               words.netHint,
             )}
-            <NetLine
-              data={longSeries}
-              visible={monthsShown}
-              shape={(variant as TrendShape) ?? 'line'}
-              onPickMonth={(m) => seeMonth(m)}
-            />
+            <Fill min={220}>
+              {(height) => (
+                <NetLine
+                  data={longSeries}
+                  height={height}
+                  visible={monthsShown}
+                  shape={(variant as TrendShape) ?? 'line'}
+                  onPickMonth={(m) => seeMonth(m)}
+                />
+              )}
+            </Fill>
           </Card>
         )
 
@@ -942,7 +964,7 @@ export default function Reports() {
               controls,
               'Paid in, then out again, in the order it happened. The last bar is what is still sitting in the current account.',
             )}
-            <Waterfall steps={waterfall} />
+            <Fill min={260}>{(height) => <Waterfall steps={waterfall} height={height} />}</Fill>
           </Card>
         )
 
@@ -956,7 +978,7 @@ export default function Reports() {
               controls,
               "Each bar is one month's earnings, split into what went to the household, what you spent on yourself, and what stayed put.",
             )}
-            <SalaryStack data={salary} />
+            <Fill min={240}>{(height) => <SalaryStack data={salary} height={height} />}</Fill>
           </Card>
         )
 
@@ -968,7 +990,7 @@ export default function Reports() {
               controls,
               'How much of the spending is bills you track. Anything not tracked as a bill counts as chosen, so this is only as good as your bill list.',
             )}
-            <FixedVariableBars data={committed} />
+            <Fill min={240}>{(height) => <FixedVariableBars data={committed} height={height} />}</Fill>
           </Card>
         )
 
@@ -982,7 +1004,7 @@ export default function Reports() {
                 ? 'What was left with you, as a share of what you earned. Money moved to the household is not spending, but it is not kept either.'
                 : 'What did not go out again, as a share of what came in. Below the line, more went out than in.',
             )}
-            <SavingsRateLine data={kept} />
+            <Fill min={220}>{(height) => <SavingsRateLine data={kept} height={height} />}</Fill>
           </Card>
         )
 
@@ -1028,7 +1050,7 @@ export default function Reports() {
               controls,
               'Spending so far against the same point the month before — the one comparison a part-finished month can honestly make.',
             )}
-            <PaceLine points={pacePoints} month={month} />
+            <Fill min={220}>{(height) => <PaceLine points={pacePoints} month={month} height={height} />}</Fill>
           </Card>
         )
 

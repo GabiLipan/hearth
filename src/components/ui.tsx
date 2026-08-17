@@ -152,12 +152,36 @@ export function useWide(): boolean {
 export function Columns({
   count,
   gap,
+  fill,
   children,
   className,
 }: {
   count: number
   /** Tailwind gap classes, applied both between columns and within them. */
   gap: string
+  /**
+   * Whether a short column should stretch to the height of the tallest one.
+   *
+   * Balancing gets the columns close and cannot get them equal — cards are
+   * whatever height their contents are — so the bottom of a masonry band is
+   * ragged by construction, and with two cards in two columns there is nothing
+   * to balance at all: one simply ends higher than the other and the page has a
+   * hole in it down to the next full-width card. With this on, every column is
+   * as tall as the tallest and the slack is handed to the cards in it to share,
+   * which is only useful where a card can spend it — see `Fill`. Off for a page
+   * of prose-shaped cards (Settings), where a stretched card is just a taller
+   * box with the same words at the top of it.
+   *
+   * Growing every card in the column rather than only the last is deliberate:
+   * one card absorbing a whole column's slack is one chart twice the height of
+   * its neighbour, where a share each is a row of charts that all grew a little.
+   *
+   * The stretch does not disturb the balancing it is measured from. After it,
+   * every column is exactly the tallest column's height, so re-running the
+   * distribution over the grown heights puts every item back where it already
+   * was — a fixed point, not a loop.
+   */
+  fill?: boolean
   children: ReactNode
   className?: string
 }) {
@@ -202,7 +226,7 @@ export function Columns({
   }, [items.length, count, heights])
 
   return (
-    <div className={cx('flex items-start', gap, className)}>
+    <div className={cx('flex', fill ? 'items-stretch' : 'items-start', gap, className)}>
       {columns.map((indices, col) => (
         <div key={col} className={cx('flex min-w-0 flex-1 flex-col', gap)}>
           {indices.map((i) => (
@@ -211,14 +235,82 @@ export function Columns({
               ref={(el) => {
                 nodes.current[i] = el
               }}
-              // A child that renders nothing must not still occupy a gap.
-              className="empty:hidden"
+              // A child that renders nothing must not still occupy a gap — and
+              // must not be handed a share of the slack either, which is why
+              // the grow is refused to an item that measured as nothing.
+              className={cx('empty:hidden', fill && (heights[i] ?? 1) > 0 && 'grow')}
             >
               {items[i]}
             </div>
           ))}
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * The space a card has left, given to whatever inside it can use it.
+ *
+ * Cards in a row are as tall as the tallest of them, and a card in a stretched
+ * masonry column is as tall as its share of the slack makes it. Both leave a
+ * card holding more height than its contents asked for, and the honest thing to
+ * do with it is give it to the picture: a chart drawn 60px taller is a chart,
+ * where 60px of blank card under one is a mistake. So a chart that can be any
+ * height goes in here rather than being handed a constant.
+ *
+ * `min` is what the chart would have been on its own and is a floor, never a
+ * squeeze — a card is never SHORTER for being in a row. `max` is the ceiling,
+ * because "fill the space" next to something very tall is how a bar chart ends
+ * up half a screen high; past it the card keeps the remainder as white space,
+ * which is the lesser of the two faults.
+ *
+ * The arithmetic is a fixed point rather than a measurement, because there is
+ * nothing stable to measure: the height offered depends on the card's height,
+ * which depends on the height the chart took. Given `h`, the child comes out
+ * `h + overhead` tall — its legend, its row of chips, whatever it draws beside
+ * the plot — so the next offer is the box less that overhead. Where the box is
+ * content-sized (this is the tallest card, nothing is stretching it) that
+ * arrives back at the same number and stops; where the box is stretched it
+ * lands on the exact height that fills it, once.
+ */
+export function Fill({
+  min,
+  max = min * 2,
+  children,
+}: {
+  min: number
+  max?: number
+  children: (height: number) => ReactNode
+}) {
+  const box = useRef<HTMLDivElement>(null)
+  const content = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState(min)
+
+  useLayoutEffect(() => {
+    const outer = box.current
+    const inner = content.current
+    if (!outer || !inner) return
+    const measure = () =>
+      setHeight((given) => {
+        const overhead = Math.max(0, inner.offsetHeight - given)
+        const next = Math.round(Math.min(max, Math.max(min, outer.clientHeight - overhead)))
+        // A pixel of hysteresis: sub-pixel layout would otherwise have the two
+        // observations nudging each other for ever.
+        return Math.abs(next - given) < 1 ? given : next
+      })
+    // `border-box` for the reason every observation in this app takes it: a
+    // content-box measurement misses a change that happens in padding.
+    const ro = new ResizeObserver(measure)
+    ro.observe(outer, { box: 'border-box' })
+    ro.observe(inner, { box: 'border-box' })
+    measure()
+    return () => ro.disconnect()
+  }, [min, max])
+
+  return (
+    <div ref={box} className="flex-1" style={{ minHeight: min }}>
+      <div ref={content}>{children(height)}</div>
     </div>
   )
 }
