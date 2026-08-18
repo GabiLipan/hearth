@@ -72,7 +72,7 @@ export default function Goals() {
 
   return (
     <div>
-      <Toolbar className="justify-between">
+      <Toolbar spread>
         <p className="min-w-0 flex-1 text-sm text-ink-3">
           Money set aside for something specific. Add to a pot by moving money into the account that holds it.
         </p>
@@ -83,7 +83,7 @@ export default function Goals() {
 
       {/* Wide screens only: on a phone the lens lives in the header, so this
           whole row would be an empty margin. */}
-      <Toolbar className="hidden md:flex">
+      <Toolbar className="max-md:hidden">
         <BookSwitcher book={book} onChange={setBook} className="hidden md:flex md:w-auto" />
       </Toolbar>
 

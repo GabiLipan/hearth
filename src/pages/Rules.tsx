@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, Plus, Search, Trash2, Wand2, Check } from 'lucide-react'
+import { ChevronLeft, Plus, Trash2, Wand2, Check } from 'lucide-react'
 import type { Rule, Transaction } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import { useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules, useCacheReady } from '../lib/cache'
@@ -19,6 +19,7 @@ import {
   Field,
   Select,
   Sheet,
+  SearchInput,
   TextInput,
   Toolbar,
   cx,
@@ -132,7 +133,7 @@ export default function RulesPage() {
 
   return (
     <div>
-      <Toolbar className="justify-between">
+      <Toolbar spread>
         <div className="flex min-w-0 items-center gap-2">
           <Link
             to="/settings"
@@ -172,15 +173,13 @@ export default function RulesPage() {
       )}
 
       {rules.length > 4 && (
-        <div className="relative mb-3 max-w-sm md:mb-2.5">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-          <TextInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search rules"
-            className="pl-9! md:pl-8!"
-          />
-        </div>
+        <SearchInput
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Search rules"
+          aria-label="Search rules"
+          className="mb-3 max-w-sm md:mb-2.5"
+        />
       )}
 
       {rules.length === 0 ? (

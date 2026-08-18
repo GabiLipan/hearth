@@ -1067,7 +1067,7 @@ export default function Reports() {
   return (
     <div>
       {/* Wide screens keep every control visible at once. */}
-      <Toolbar className="hidden md:flex">
+      <Toolbar className="max-md:hidden">
         <BookSwitcher book={book} onChange={changeBook} className="hidden md:flex md:w-auto" />
         <Segmented
           value={view}

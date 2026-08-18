@@ -186,7 +186,7 @@ export default function Bills() {
 
   return (
     <div>
-      <Toolbar className="justify-between">
+      <Toolbar spread>
         <div className="min-w-0 md:flex md:items-baseline md:gap-2">
           <p className="text-sm text-ink-3 md:order-2">
             {book === 'household'
@@ -208,7 +208,7 @@ export default function Bills() {
           reports splits these too. */}
       {/* Wide screens only: on a phone the lens lives in the header, so this
           whole row would be an empty margin. */}
-      <Toolbar className="hidden md:flex">
+      <Toolbar className="max-md:hidden">
         <BookSwitcher book={book} onChange={setBook} className="hidden md:flex md:w-auto" />
       </Toolbar>
 

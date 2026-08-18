@@ -29,7 +29,7 @@ import { useHeadline } from '../lib/headline'
 import { matchesDrill, narrows, readDrill } from '../lib/drill'
 import { thisMonthKey, monthLabel, monthKey, fmtDay, fmtFullDate } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, FilterBar, FilterChip, Popover, TextInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
+import { AccountDot, Card, CategoryDot, CONTROL_H, Empty, FilterBar, FilterChip, Popover, SearchInput, Toolbar, Button, table, ScrollTable, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { TransactionForm } from '../components/TransactionForm'
@@ -496,7 +496,7 @@ export default function Activity() {
     <div>
       {/* Wide screens keep the toolbar: there is room for every control at
           full size, and each one is visible without being opened. */}
-      <Toolbar className="hidden md:flex">
+      <Toolbar className="max-md:hidden">
         {/* Same lens as Reports, Home and Budgets. Activity is a ledger rather
             than an account of what happened, so `all` is a perfectly ordinary
             answer here — but "show me the joint account's rows" is the question
@@ -506,15 +506,13 @@ export default function Activity() {
         {/* Not "all transactions" any more: a search runs inside the book and
             the filters on screen, and saying otherwise would make an empty
             result look like a missing row rather than a narrow lens. */}
-        <div className="relative min-w-0 flex-1 basis-52 md:max-w-72 md:flex-none">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-          <TextInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search transactions"
-            className="pl-9! md:pl-8!"
-          />
-        </div>
+        <SearchInput
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Search transactions"
+          aria-label="Search transactions"
+          className="w-52 shrink-0 md:w-64"
+        />
 
         <CategoryFilter parents={parents} value={catFilter} onChange={setCatFilter} />
         <AccountFilter accounts={accounts} value={accountFilter} onChange={setAccountFilter} />

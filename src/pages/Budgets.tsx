@@ -176,7 +176,7 @@ export default function Budgets() {
   return (
     <div>
       {/* Wide screens keep every control visible at once. */}
-      <Toolbar className="hidden md:flex">
+      <Toolbar className="max-md:hidden">
         <MonthStepper month={month} onChange={setMonth} label={monthLabel} canGoForward={!isCurrent} />
         {userId && <BookSwitcher book={book} onChange={setBook} className="md:w-auto" />}
         {budgeted.length > 0 && (

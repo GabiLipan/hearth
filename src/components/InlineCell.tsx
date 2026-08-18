@@ -298,7 +298,8 @@ export function CategoryEditor({
               commit({ categoryId: order[0].id }, 'next')
             }
           }}
-          className="h-8 w-full rounded-lg bg-surface-2 pl-8 pr-2 text-sm outline-none"
+          // A capsule, like every other search box in the app.
+          className="h-8 w-full rounded-full bg-surface-2 pl-8 pr-2.5 text-sm outline-none"
         />
       </div>
       <div className="max-h-60 overflow-y-auto">

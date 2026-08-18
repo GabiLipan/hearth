@@ -1,6 +1,6 @@
 import {
   useEffect, useLayoutEffect, useRef, useState,
-  type ReactNode,
+  type ReactNode, type Ref,
 } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -10,7 +10,7 @@ import {
 import { useSyncState } from '../hooks/useSync'
 import { installUpdate, useUpdateState } from '../lib/updates'
 import { DrillSheet } from './DrillSheet'
-import { cx, useWide, CHROME_FROST, PILL_MS, PILL_SPRING } from './ui'
+import { cx, useWide, motionOk, CHROME_FROST, PILL_MS, PILL_SPRING } from './ui'
 import { BrandMark } from './BrandMark'
 import { TransactionForm } from './TransactionForm'
 import { SETTINGS_GROUP_TITLES } from '../pages/Settings'
@@ -171,9 +171,14 @@ export function Layout({ children }: { children: ReactNode }) {
    */
   const headerRef = useRef<HTMLElement>(null)
   const dockRef = useRef<HTMLDivElement>(null)
+  const railRef = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     const pairs: [HTMLElement | null, string][] = [
       [headerRef.current, '--header-h'],
+      // The desktop rail's footprint, so a layer floating over the CONTENT can
+      // start where the content does. Zero on a phone, where the rail is
+      // `md:hidden` and measures nothing — the same trick as the two bars.
+      [railRef.current, '--rail-w'],
       // The mirror at the other end. Both bars float over the scroller now, so
       // both have to hand back the room they no longer occupy, and neither
       // height is a constant: one is a row plus `env(safe-area-inset-top)`, the
@@ -183,7 +188,16 @@ export function Layout({ children }: { children: ReactNode }) {
     ]
     const write = () => {
       for (const [el, prop] of pairs) {
-        if (el) document.documentElement.style.setProperty(prop, `${el.offsetHeight}px`)
+        if (!el) continue
+        // Width for the rail, height for the two bars: each is measured across
+        // the axis it takes room away on.
+        // The rail's far edge rather than its width: it floats now, with a
+        // gutter of its own either side, and what a layer over the content
+        // needs to know is where the content STARTS. `.app-frame` is the whole
+        // viewport, so the rail's right edge in client coordinates is exactly
+        // that. Zero while it is `display: none` on a phone, which is right.
+        const px = prop === '--rail-w' ? el.getBoundingClientRect().right : el.offsetHeight
+        document.documentElement.style.setProperty(prop, `${px}px`)
       }
     }
     const ro = new ResizeObserver(write)
@@ -253,15 +267,6 @@ export function Layout({ children }: { children: ReactNode }) {
     })
   }
 
-  // Collapsed items lose their visible label, so the accessible name has to come
-  // from somewhere — `title` also gives a native tooltip on hover.
-  const navItem = (isActive: boolean) =>
-    cx(
-      'flex items-center rounded-full py-1.5 text-sm font-medium transition-colors',
-      collapsed ? 'justify-center px-0' : 'gap-2.5 px-2.5',
-      isActive ? 'bg-surface-2 text-ink' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
-    )
-
   return (
     /**
      * The frame, which is exactly one viewport tall and never scrolls.
@@ -278,73 +283,16 @@ export function Layout({ children }: { children: ReactNode }) {
        here instead of the initial containing block lands in exactly the same
        place. */
     <div className="app-frame relative flex flex-col overflow-hidden md:flex-row">
-      {/* Desktop / iPad sidebar. An ordinary flex item in a frame that does not
-          scroll, so it needs nothing to hold it in place — `main` simply fills
-          whatever width it leaves, at any viewport. */}
-      <aside
-        className={cx(
-          'z-40 hidden h-full shrink-0 flex-col gap-0.5 border-r border-hairline bg-surface p-2.5 md:flex',
-          // The status bar sits over the app on an installed iPad, where the
-          // phone header that normally absorbs it is hidden (`md:hidden`) and
-          // there is nothing else between the clock and the first nav item.
-          // `env()` is its own media query — it resolves to 0 in a desktop
-          // browser and in Safari's tabs, so this needs no breakpoint of its own.
-          'pt-[calc(0.625rem_+_env(safe-area-inset-top))]',
-          'transition-[width] duration-200 ease-out motion-reduce:transition-none',
-          collapsed ? 'w-[3.75rem] items-stretch' : 'w-52 xl:w-56',
-        )}
-      >
-        <div className={cx('mb-4 mt-1 flex items-center', collapsed ? 'flex-col gap-2' : 'justify-between gap-1 px-2')}>
-          <div className="flex min-w-0 items-center gap-2.5">
-            <BrandMark size={30} className="shrink-0 drop-shadow-sm" />
-            {!collapsed && <span className="truncate text-lg font-bold tracking-tight">Hearth</span>}
-          </div>
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
-          >
-            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setAddOpen(true)}
-          title={collapsed ? 'Add transaction' : undefined}
-          aria-label="Add transaction"
-          className={cx(
-            'mb-2.5 inline-flex h-9 items-center justify-center rounded-full bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110',
-            !collapsed && 'gap-2',
-          )}
-        >
-          <Plus size={16} />
-          {!collapsed && 'Add transaction'}
-        </button>
-
-        {NAV.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) => navItem(isActive)}
-          >
-            <Icon size={17} strokeWidth={2} className="shrink-0" />
-            {!collapsed && label}
-          </NavLink>
-        ))}
-
-        <div className="flex-1" />
-
-        <NavLink to="/settings" title={collapsed ? 'Settings' : undefined} className={({ isActive }) => navItem(isActive)}>
-          <Settings size={17} className="shrink-0" />
-          {!collapsed && 'Settings'}
-        </NavLink>
-      </aside>
+      {/* Desktop / iPad sidebar — a floating rail rather than a wall.
+          Still an ordinary flex item in a frame that does not scroll, so it
+          needs nothing to hold it in place and `main` fills whatever width it
+          leaves. What changed is that it no longer reaches any edge of the
+          screen: it is inset on all four sides with the page showing round it,
+          rounded like a sheet, and wearing the same frost as the phone's tab
+          bar. Those two are the same object at two ends of the same app — the
+          thing that says where you are and lets you go somewhere else — and
+          they now say so in the same voice. */}
+      <Rail ref={railRef} collapsed={collapsed} onToggle={toggleSidebar} onAdd={() => setAddOpen(true)} pathname={pathname} />
 
       {/*
         Mobile top controls — a layer over the scroller, not a bar.
@@ -380,6 +328,11 @@ export function Layout({ children }: { children: ReactNode }) {
         and they still sit exactly where they did, now just under the discs
         rather than under a bar.
       */}
+      {/* Anything the app has to say about ITSELF — a version waiting to be
+          taken, writes that could not be sent — floating over the page rather
+          than pushing it down. See `Notices`. */}
+      <Notices />
+
       <header
         ref={headerRef}
         className={cx(
@@ -548,9 +501,6 @@ export function Layout({ children }: { children: ReactNode }) {
         id={APP_SCROLLER_ID}
         className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] pb-[var(--tabbar-h,0px)] md:pt-[env(safe-area-inset-top)]"
       >
-        <SyncBanner />
-        <UpdateBanner />
-
         {/* Content — fills every pixel the sidebar leaves, at any viewport width.
             Pages decide their own column counts from there. */}
         {/* `max-md:overflow-x-clip` catches the sideways travel of a page change.
@@ -680,6 +630,204 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
+  )
+}
+
+/**
+ * The desktop rail: the tab bar's opposite number, standing up.
+ *
+ * It used to be a full-height wall with a hairline down its right edge and the
+ * page butted against it. Floating it costs a gutter of white space and buys
+ * three things the phone already had: the page reads as one object with the
+ * chrome laid over it rather than as two panes stitched together, the frost
+ * lets the page's own colour through so light and dark themes need no separate
+ * treatment, and the current page is marked by a PILL that travels rather than
+ * by a background that blinks on wherever you clicked.
+ *
+ * That pill is the same idea as `BottomTabs`', simplified by the axis: the rows
+ * here are a fixed height in a fixed order, so where it is going can be read
+ * straight off the active row without having to settle any labels first. It
+ * still starts from live geometry — clicking a third row while the second is
+ * travelling has to pick the journey up from where it actually got to — and it
+ * still writes the resting position first and animates over the top of it, with
+ * no `fill`, because a finish event is never delivered while the app is in the
+ * background and an animation holding the final value would strand the pill.
+ */
+function Rail({
+  ref,
+  collapsed,
+  onToggle,
+  onAdd,
+  pathname,
+}: {
+  ref: Ref<HTMLElement>
+  collapsed: boolean
+  onToggle: () => void
+  onAdd: () => void
+  pathname: string
+}) {
+  const listRef = useRef<HTMLDivElement>(null)
+  const pillRef = useRef<HTMLSpanElement>(null)
+  const placed = useRef(false)
+
+  const place = (animate: boolean) => {
+    const list = listRef.current
+    const pill = pillRef.current
+    if (!list || !pill) return
+    const active = list.querySelector<HTMLElement>('[data-rail="active"]')
+    // Nothing to measure while the rail is `display: none` on a phone.
+    if (!active || !active.offsetHeight) {
+      pill.style.opacity = '0'
+      placed.current = false
+      return
+    }
+
+    const pillNow = pill.getBoundingClientRect()
+    const listNow = list.getBoundingClientRect()
+    const from = placed.current && pillNow.height ? { top: pillNow.top - listNow.top, height: pillNow.height } : null
+    pill.getAnimations().forEach((a) => a.cancel())
+
+    const to = { top: active.offsetTop, height: active.offsetHeight }
+    pill.style.top = `${to.top}px`
+    pill.style.height = `${to.height}px`
+    pill.style.opacity = '1'
+    placed.current = true
+
+    if (!animate || !from || !motionOk()) return
+    pill.animate(
+      [
+        { top: `${from.top}px`, height: `${from.height}px` },
+        { top: `${to.top}px`, height: `${to.height}px` },
+      ],
+      { duration: PILL_MS, easing: PILL_SPRING },
+    )
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => place(true), [pathname])
+
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const ro = new ResizeObserver(() => {
+      // Re-measuring mid-flight would fight the animation for the same values.
+      if (pillRef.current?.getAnimations().length) return
+      place(false)
+    })
+    // The list covers the window resizing and the rail appearing at all when
+    // one widens past the breakpoint; each row covers a label arriving late or
+    // the rail collapsing, neither of which changes the list's own height.
+    ro.observe(list)
+    list.querySelectorAll('[data-rail]').forEach((el) => ro.observe(el))
+    return () => ro.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const row = (isActive: boolean) =>
+    cx(
+      'relative z-10 flex items-center rounded-full py-2 text-sm font-medium transition-colors',
+      collapsed ? 'justify-center px-0' : 'gap-2.5 px-2.5',
+      // No background of its own: the travelling pill is what marks the page,
+      // exactly as in the tab bar. A row that also filled would leave two marks
+      // on screen for the length of the journey.
+      isActive ? 'text-accent' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
+    )
+
+  return (
+    <aside
+      ref={ref}
+      className={cx(
+        'z-40 hidden shrink-0 flex-col gap-0.5 rounded-[1.75rem] p-2.5 md:flex',
+        // Inset on all four sides, so the page shows round it. `my-2.5` rather
+        // than a height: the frame stretches its flex items, and a margin is
+        // what turns "as tall as the frame" into "as tall as the frame, less
+        // the gutter" without any arithmetic to keep in step.
+        'my-2.5 ml-2.5',
+        // The status bar sits over the app on an installed iPad, where the
+        // phone header that normally absorbs it is hidden (`md:hidden`). The
+        // rail's own top margin covers part of that now, so this is the rest.
+        'pt-[calc(0.625rem_+_env(safe-area-inset-top))]',
+        // The same four properties the tab bar wears, stated once in `ui.tsx`.
+        CHROME_FROST,
+        // Bouncy, like the pill: the width is the one thing about this rail
+        // that moves on purpose, and `ease-out` made a 200ms slide that read as
+        // a panel being dragged. Overshooting slightly and settling reads as
+        // the rail snapping open.
+        'transition-[width] motion-reduce:transition-none',
+        collapsed ? 'w-[3.75rem] items-stretch' : 'w-52 xl:w-56',
+      )}
+      style={{ transitionDuration: `${PILL_MS}ms`, transitionTimingFunction: PILL_SPRING }}
+    >
+      <div className={cx('mb-4 mt-1 flex items-center', collapsed ? 'flex-col gap-2' : 'justify-between gap-1 px-2')}>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <BrandMark size={30} className="shrink-0 drop-shadow-sm" />
+          {!collapsed && <span className="truncate text-lg font-bold tracking-tight">Hearth</span>}
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+        >
+          {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={onAdd}
+        title={collapsed ? 'Add transaction' : undefined}
+        aria-label="Add transaction"
+        className={cx(
+          'mb-2.5 inline-flex h-9 items-center justify-center rounded-full bg-accent text-sm font-medium text-accent-ink transition hover:brightness-110',
+          !collapsed && 'gap-2',
+        )}
+      >
+        <Plus size={16} />
+        {!collapsed && 'Add transaction'}
+      </button>
+
+      {/* Every row the pill can travel between, in one positioned box —
+          including Settings, which is why the spacer between them is inside
+          here rather than around it. `offsetTop` is read against this element,
+          so anything the pill can land on has to be a child of it. */}
+      <div ref={listRef} className="relative flex min-h-0 flex-1 flex-col gap-0.5">
+        <span
+          ref={pillRef}
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 rounded-full bg-accent/12 opacity-0"
+        />
+        {NAV.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            title={collapsed ? label : undefined}
+            data-rail={
+              (to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`)) ? 'active' : 'idle'
+            }
+            className={({ isActive }) => row(isActive)}
+          >
+            <Icon size={17} strokeWidth={2} className="shrink-0" />
+            {!collapsed && label}
+          </NavLink>
+        ))}
+
+        <div className="flex-1" />
+
+        <NavLink
+          to="/settings"
+          title={collapsed ? 'Settings' : undefined}
+          data-rail={pathname.startsWith('/settings') ? 'active' : 'idle'}
+          className={({ isActive }) => row(isActive)}
+        >
+          <Settings size={17} className="shrink-0" />
+          {!collapsed && 'Settings'}
+        </NavLink>
+      </div>
+    </aside>
   )
 }
 
@@ -890,35 +1038,119 @@ function BottomTabs({ pathname }: { pathname: string }) {
   )
 }
 
+/* ---------- What the app has to say for itself ---------- */
+
 /**
- * Says out loud when the app is not in step with the server.
+ * The two standing notices, floating over the top of the page.
  *
- * Deliberately a persistent strip rather than a toast: a write usually fails
- * while offline, minutes after the phone was put down, and a message that
- * disappears after three seconds is a message nobody sees. Silence here is what
- * "my change vanished" feels like from the inside.
+ * They were full-width strips at the top of the scroller, in flow, which had
+ * two faults. They pushed every page down by 37px the moment they appeared and
+ * let it back up when they went, so the thing you were reading moved twice for
+ * a message that was not about it; and being in flow they scrolled away, which
+ * for "eleven changes could not be saved" is exactly backwards — the one
+ * message worth keeping on screen was the one that left it.
+ *
+ * So: a card, over the page, at the top, dismissible. Everything else in the
+ * app that floats is a capsule wearing `CHROME_FROST`; these are cards, because
+ * they carry a sentence and an action rather than a control, and a frosted
+ * capsule with two lines of text in it reads as a button that has gone wrong.
+ *
+ * Positioned against the FRAME, like the header and the dock, and for the same
+ * reason — `fixed` resolves against a viewport iOS moves out from under it
+ * during a rubber band, and a notice that slides with the bounce is exactly the
+ * fault the frame arrangement exists to remove. `Toaster` stays `fixed` because
+ * a toast appears in response to something you just did, by which time the
+ * viewport has long settled; these two appear on their own.
+ *
+ * `--rail-w` is where the content starts on a desktop, so the stack is centred
+ * over the PAGE rather than over the whole window with the sidebar counted in.
+ * It is zero on a phone. `--header-h` is the phone's floating discs, so a
+ * notice sits under them rather than over them.
  */
+function Notices() {
+  return (
+    <div
+      className={cx(
+        'pointer-events-none absolute right-0 z-[45] flex flex-col items-center gap-2 px-4',
+        'left-[var(--rail-w,0px)]',
+        'top-[calc(var(--header-h,0px)_+_0.5rem)] md:top-[calc(env(safe-area-inset-top)_+_0.75rem)]',
+      )}
+    >
+      <UpdateNotice />
+      <SyncNotice />
+    </div>
+  )
+}
+
+/**
+ * One floating notice.
+ *
+ * `signature` is what makes the dismissal honest. A cross that hides a standing
+ * condition for ever is a cross that loses the news: the sync notice would be
+ * dismissed while three writes were queued and stay dismissed when the count
+ * reached fifty, or when queued turned into failed. So the cross remembers the
+ * state it was pressed against, and the notice comes back the moment that
+ * state says something new. Nothing is persisted — a reload is a fresh look at
+ * the world, and both of these are conditions the app can re-derive in a frame.
+ */
+function Notice({
+  tone = 'neutral',
+  icon,
+  signature,
+  children,
+}: {
+  tone?: 'neutral' | 'accent' | 'critical'
+  icon: ReactNode
+  signature: string
+  children: ReactNode
+}) {
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  if (dismissed === signature) return null
+  return (
+    <div
+      role={tone === 'critical' ? 'alert' : 'status'}
+      className={cx(
+        'animate-sheet pointer-events-auto flex w-full max-w-md items-center gap-2.5 rounded-2xl px-3.5 py-2.5 text-sm',
+        'bg-surface shadow-[var(--elev-2)] ring-1',
+        tone === 'critical' ? 'text-critical-text ring-critical/25' : 'text-ink-2 ring-hairline',
+      )}
+    >
+      <span className={cx('shrink-0', tone === 'accent' && 'text-accent')}>{icon}</span>
+      {children}
+      <button
+        type="button"
+        onClick={() => setDismissed(signature)}
+        aria-label="Dismiss"
+        className="grid size-6 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-2 hover:text-ink"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  )
+}
+
 /**
  * A new version is downloaded and waiting.
  *
- * Above the page rather than in Settings, because the whole problem was that
+ * Over the page rather than in Settings, because the whole problem was that
  * nothing ever said so: the app would sit on an old bundle for days with no way
- * to know. One tap takes it, and the bar is gone for good — it only ever
- * appears when there is genuinely something newer already on the device.
+ * to know. One press takes it, and it is gone for good — it only ever appears
+ * when there is genuinely something newer already on the device.
  *
  * It reloads, which is why it asks rather than doing it: queued changes are
- * safe in IndexedDB, but a half-typed transaction is not.
+ * safe in IndexedDB, but a half-typed transaction is not. Dismissing it is
+ * therefore a real answer — "not now, I am in the middle of something" — and
+ * the Settings version card is where it can be taken later.
  */
-function UpdateBanner() {
+function UpdateNotice() {
   const { status } = useUpdateState()
   const [taking, setTaking] = useState(false)
   // `stale` is the same news — a newer version exists — and differs only in
   // what taking it costs. See `installUpdate`.
   if (status !== 'ready' && status !== 'stale') return null
   return (
-    <div className="flex items-center gap-2 bg-accent/10 px-4 py-2 text-sm text-ink-2 md:px-5">
-      <ArrowDownToLine size={15} className="shrink-0 text-accent" />
-      <span className="min-w-0 flex-1 truncate">A new version of Hearth is ready</span>
+    <Notice tone="accent" icon={<ArrowDownToLine size={15} />} signature={status}>
+      <span className="min-w-0 flex-1">A new version of Hearth is ready</span>
       <button
         type="button"
         onClick={() => {
@@ -930,33 +1162,41 @@ function UpdateBanner() {
       >
         {taking ? 'Updating\u2026' : 'Update now'}
       </button>
-    </div>
+    </Notice>
   )
 }
 
-function SyncBanner() {
+/**
+ * Says out loud when the app is not in step with the server.
+ *
+ * Deliberately not a toast: a write usually fails while offline, minutes after
+ * the phone was put down, and a message that disappears after three seconds is
+ * a message nobody sees. Silence here is what "my change vanished" feels like
+ * from the inside. It stays until it is either resolved or dismissed — and a
+ * dismissal only covers the state it was pressed against, so a fourth failure
+ * after three were waved away says so again.
+ */
+function SyncNotice() {
   const { online, pending, deadLetters } = useSyncState()
   if (deadLetters === 0 && (online || pending === 0)) return null
 
   const failed = deadLetters > 0
   return (
-    <div
-      className={cx(
-        'flex items-center gap-2 px-4 py-2 text-sm md:px-5',
-        failed ? 'bg-critical/10 text-critical-text' : 'bg-surface-2 text-ink-2',
-      )}
+    <Notice
+      tone={failed ? 'critical' : 'neutral'}
+      icon={failed ? <AlertTriangle size={15} /> : <CloudOff size={15} />}
+      signature={failed ? `failed:${deadLetters}` : `offline:${pending}`}
     >
-      {failed ? <AlertTriangle size={15} className="shrink-0" /> : <CloudOff size={15} className="shrink-0" />}
-      <span className="min-w-0 flex-1 truncate">
+      <span className="min-w-0 flex-1">
         {failed
           ? `${deadLetters} change${deadLetters === 1 ? '' : 's'} couldn\u2019t be saved`
-          : `Offline — ${pending} change${pending === 1 ? '' : 's'} will go up when you reconnect`}
+          : `Offline \u2014 ${pending} change${pending === 1 ? '' : 's'} will go up when you reconnect`}
       </span>
       {failed && (
         <NavLink to="/settings" className="shrink-0 font-medium underline underline-offset-2">
           Review
         </NavLink>
       )}
-    </div>
+    </Notice>
   )
 }

@@ -13,7 +13,7 @@ import {
   type SelectHTMLAttributes,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, ChevronDown, Info, type LucideIcon } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, ChevronDown, Info, Search, type LucideIcon } from 'lucide-react'
 import type { Account, Category } from '../lib/db'
 import { accountFace } from '../lib/accounts'
 import { slotVar } from '../lib/palette'
@@ -658,6 +658,75 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
+/**
+ * A search box, which is a capsule everywhere it appears.
+ *
+ * It exists so that it is: there were five of these built by hand out of a
+ * `TextInput`, an absolutely positioned magnifier and a hand-counted left
+ * padding, and they had drifted to three different paddings and two icon
+ * sizes. A search box is a control you press and type in, and the app's shape
+ * for that is `rounded-full` — the same one the buttons, the chips, the tab
+ * pill and `Segmented` wear.
+ *
+ * Deliberately not a variant of `TextInput`. A field in a form is a rectangle
+ * with soft corners on purpose: a form is a list of things to fill in, and a
+ * capsule there reads as a row of buttons. This is the exception because it is
+ * not in a form — it is a control sitting in a toolbar among other capsules.
+ *
+ * The clear button appears once there is something to clear, so a filter can be
+ * undone without selecting the text and deleting it. It is a real button and in
+ * the tab order: undoing a search is exactly the sort of thing done from the
+ * keyboard.
+ */
+export function SearchInput({
+  value,
+  onValueChange,
+  className,
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & {
+  value: string
+  onValueChange: (v: string) => void
+  /** React 19 hands a function component `ref` as an ordinary prop; this passes it on. */
+  ref?: Ref<HTMLInputElement>
+}) {
+  return (
+    <div className={cx('relative min-w-0', className)}>
+      <Search
+        size={15}
+        aria-hidden
+        className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3 desktop:left-3"
+      />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
+        className={cx(
+          CONTROL_H,
+          // A capsule, so the padding has to clear the corner's own curve as
+          // well as the icon: at `rounded-full` on a 44px control the corner
+          // eats the first 10px of a square inset.
+          'w-full rounded-full bg-surface-2 pl-9 pr-9 text-ink placeholder:text-ink-3 desktop:pl-8.5 desktop:pr-8.5 md:text-sm',
+          'ring-1 ring-transparent outline-none transition-shadow focus:ring-2 focus:ring-accent/60',
+          // Safari draws its own clear button inside a `type=search`, which
+          // would sit beside ours.
+          '[&::-webkit-search-cancel-button]:appearance-none',
+        )}
+        {...rest}
+      />
+      {value !== '' && (
+        <button
+          type="button"
+          aria-label="Clear search"
+          onClick={() => onValueChange('')}
+          className="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface hover:text-ink"
+        >
+          <X size={13} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   const { className, ...rest } = props
   return (
@@ -752,7 +821,13 @@ export function Segmented<T extends string>({
         // sitting in it as a smaller, differently-shaped box. Every toggle in
         // the app is this control, so the language is stated once here rather
         // than at eleven call sites.
-        'relative flex rounded-full bg-surface-2 p-1 [--seg-pad:0.25rem] md:p-0.5 md:[--seg-pad:0.125rem]',
+        // 5px of padding at EVERY width, which is the tab bar's number rather
+        // than a second one invented here: the bar, the lens and this control
+        // are meant to read as one family of capsules, and a desktop toggle
+        // wearing 2px read as a thumb filling its track edge to edge. See
+        // `BottomTabs` for why five is the number — below it the thumb becomes
+        // the track's own edge, above about eight the track becomes a tray.
+        'relative flex rounded-full bg-surface-2 p-[5px] [--seg-pad:5px]',
         className,
       )}
       // A RADIOGROUP, not a tablist. It was announced as "tab 2 of 3" and then
@@ -781,7 +856,13 @@ export function Segmented<T extends string>({
           // switch lying on a grey track; `bg-accent/12` is what the travelling
           // pill in the tab bar is, and it says "this is the one you chose" in
           // the same voice at both ends of the app.
-          'absolute inset-y-1 rounded-full bg-accent/12 md:inset-y-0.5',
+          // The same 5px the track pads by. Stated rather than inherited,
+          // because an absolutely positioned child resolves against its
+          // ancestor's PADDING box — `inset-y-0` here would be the full height
+          // of the track and the thumb would spill over the rim it is supposed
+          // to nest inside. (The tab bar's pill can say `inset-y-0` because it
+          // sits inside the un-padded row, one level further in.)
+          'absolute inset-y-[5px] rounded-full bg-accent/12',
           thumb && 'transition-[left,width] duration-200 ease-out motion-reduce:transition-none',
         )}
         style={
@@ -1649,15 +1730,169 @@ export function Empty({ icon: Icon, title, hint, action }: { icon: LucideIcon; t
   )
 }
 
+/* ---------- One scrolling row of controls ---------- */
+/**
+ * A row that never wraps, scrolls sideways when it has to, and says so.
+ *
+ * Both `Toolbar` and `FilterBar` are this now. A wrapping toolbar looks tidy
+ * with four controls and becomes three stacked rows with seven — on Activity
+ * that was most of a laptop's first screenful spent before the first
+ * transaction, and the rows re-flowed as you filtered, so the control you were
+ * about to press moved. One row that scrolls is the same trade `FilterBar`
+ * already made on a phone, taken to every width.
+ *
+ * The affordance is the part worth stating. A scroller with nothing at its
+ * edges reads as a row that simply stops, so each end that has more behind it
+ * gets a fade out to the page's own colour with a round button sitting on it:
+ * the fade is what says there is more, the button is how a cursor gets there,
+ * and a finger still swipes. Both are `aria-hidden` and unreachable by keyboard
+ * — every control they scroll to is in the tab order already, and focusing one
+ * scrolls it into view, so an arrow key stop here would be a second way to do
+ * something the browser is already doing.
+ *
+ * `overflow-x-auto` clips absolutely positioned descendants on both axes, which
+ * is why `Popover` portals its panel. Anything else dropped in here that opens
+ * a panel has to do the same.
+ */
+function ScrollRow({
+  children,
+  className,
+  gap,
+  bleed,
+  rowClassName,
+}: {
+  children: ReactNode
+  className?: string
+  gap: string
+  /** Negative margin on the wrapper, so the row can reach past the page's padding. */
+  bleed: string
+  /** Extra classes for the scrolling element itself — its padding, its alignment. */
+  rowClassName?: string
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ left: false, right: false })
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const read = () => {
+      // A pixel of slack either end: sub-pixel widths and a browser's own
+      // rounding leave `scrollLeft` a fraction short of the end, which would
+      // otherwise leave an arrow pointing at nothing to scroll to.
+      const max = el.scrollWidth - el.clientWidth
+      setEdges({ left: el.scrollLeft > 1, right: el.scrollLeft < max - 1 })
+    }
+    read()
+    el.addEventListener('scroll', read, { passive: true })
+    // The row's own size covers a window resize; the children's covers a
+    // control appearing, a label changing, or a font arriving after first
+    // paint — any of which changes what overflows without touching the row.
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    for (const child of el.children) ro.observe(child)
+    return () => {
+      el.removeEventListener('scroll', read)
+      ro.disconnect()
+    }
+    // Re-observed when the set of children changes: filters appear and vanish
+    // with the page's state, and a new one is a new box to watch.
+  }, [children])
+
+  const nudge = (dir: 1 | -1) => {
+    const el = ref.current
+    if (!el) return
+    // Not a whole width: leaving a little of what you were looking at on
+    // screen is what makes a press read as "further along the same row"
+    // rather than as a page change.
+    el.scrollBy({ left: dir * el.clientWidth * 0.7, behavior: motionOk() ? 'smooth' : 'auto' })
+  }
+
+  return (
+    <div className={cx('relative', bleed, className)}>
+      <div ref={ref} className={cx('no-scrollbar flex items-center overflow-x-auto py-1', gap, rowClassName)}>
+        {children}
+      </div>
+      <ScrollEdge side="left" show={edges.left} onClick={() => nudge(-1)} />
+      <ScrollEdge side="right" show={edges.right} onClick={() => nudge(1)} />
+    </div>
+  )
+}
+
+/**
+ * The fade at one end of a `ScrollRow`, and the button on it.
+ *
+ * Always mounted and faded in and out, rather than added and removed: it
+ * appears the moment a row starts scrolling, and a button that pops into
+ * existence under a cursor that is already moving towards it gets missed.
+ * `pointer-events-none` while it is out, so it cannot take a press it is not
+ * showing.
+ */
+function ScrollEdge({ side, show, onClick }: { side: 'left' | 'right'; show: boolean; onClick: () => void }) {
+  const Icon = side === 'left' ? ChevronLeft : ChevronRight
+  return (
+    <div
+      aria-hidden
+      className={cx(
+        'absolute inset-y-0 flex w-14 items-center transition-opacity duration-200 motion-reduce:transition-none',
+        // The fade is the page's own colour, so the controls dissolve into the
+        // background rather than under a grey plate.
+        side === 'left'
+          ? 'left-0 justify-start bg-gradient-to-r from-page from-40% to-transparent'
+          : 'right-0 justify-end bg-gradient-to-l from-page from-40% to-transparent',
+        show ? 'opacity-100' : 'pointer-events-none opacity-0',
+      )}
+    >
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={onClick}
+        className={cx(
+          'grid size-7 place-items-center rounded-full bg-surface text-ink-2 shadow-sm ring-1 ring-hairline',
+          'transition-colors hover:text-ink',
+        )}
+      >
+        <Icon size={15} />
+      </button>
+    </div>
+  )
+}
+
 /* ---------- Toolbar ---------- */
 /**
- * The row of controls that sits above a page's content. Centred and roomy on a
- * phone, left-aligned and compact under a cursor — every page uses this so the
- * two form factors stay consistent with each other.
+ * The row of controls that sits above a page's content. Roomy on a phone,
+ * compact under a cursor — every page uses this so the two form factors stay
+ * consistent with each other.
+ *
+ * It scrolls rather than wraps. See `ScrollRow`.
  */
-export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
+export function Toolbar({
+  children,
+  className,
+  /**
+   * Push the last control to the far end while the row still fits.
+   *
+   * `justify-between` has to go on the scrolling element rather than on the
+   * wrapper, and it does nothing once the row overflows — which is correct:
+   * there is no space left to spread.
+   */
+  spread,
+}: {
+  children: ReactNode
+  className?: string
+  spread?: boolean
+}) {
   return (
-    <div className={cx('mb-3 flex flex-wrap items-center gap-2 md:mb-2.5 md:gap-1.5', className)}>{children}</div>
+    <ScrollRow
+      gap="gap-2 md:gap-1.5"
+      // The page's own padding, given back on the wrapper and re-applied inside
+      // the scroller, so the row reaches both edges of the screen while the
+      // controls still line up with the content at rest.
+      bleed="-mx-4 md:-mx-5 xl:-mx-6"
+      rowClassName={cx('px-4 md:px-5 xl:px-6', spread && 'justify-between')}
+      className={cx('mb-3 md:mb-2.5', className)}
+    >
+      {children}
+    </ScrollRow>
   )
 }
 
@@ -1665,25 +1900,22 @@ export function Toolbar({ children, className }: { children: ReactNode; classNam
 /**
  * What a phone gets instead of a toolbar: one scrolling row of chips.
  *
- * A `Toolbar` shares out `CONTROL_H` controls across the width and wraps what
- * does not fit, which is right under a cursor and ruinous on a 375px screen —
- * Activity spent about 290px, roughly two fifths of what was visible, before
- * the first transaction. Four wrapped rows became one that scrolls.
+ * A wrapping toolbar shares out `CONTROL_H` controls across the width and wraps
+ * what does not fit, which is right under a cursor and ruinous on a 375px
+ * screen — Activity spent about 290px, roughly two fifths of what was visible,
+ * before the first transaction. Four wrapped rows became one that scrolls.
  *
  * The bar is the state, which is the reason it is chips and not a single
  * "Filters (2)" button: an active filter fills dark and carries a cross, so
  * what is narrowing the list can be read and undone without opening anything.
  * That is the whole trade against the tidier pattern, and it is the right one
  * on a page you re-filter constantly.
- *
- * The negative margin lets the row scroll edge to edge while the chips still
- * line up with the page's padding at rest.
  */
 export function FilterBar({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cx('no-scrollbar -mx-4 mb-3 flex items-center gap-1.5 overflow-x-auto px-4 py-1 md:hidden', className)}>
+    <ScrollRow gap="gap-1.5" bleed="-mx-4" rowClassName="px-4" className={cx('mb-3 md:hidden', className)}>
       {children}
-    </div>
+    </ScrollRow>
   )
 }
 

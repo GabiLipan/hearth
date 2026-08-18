@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Check, Search } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { CategoryIcon, ICON_GROUPS, searchIcons } from './CategoryIcon'
 import { SLOT_NAMES, SLOTS, slotVar } from '../lib/palette'
-import { TextInput, cx } from './ui'
+import { SearchInput, cx } from './ui'
 
 /**
  * The twelve palette slots as a row of swatches.
@@ -107,16 +107,13 @@ export function IconPicker({
         )}
       </div>
 
-      <div className="relative mb-2">
-        <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-        <TextInput
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search icons"
-          aria-label="Search icons"
-          className="pl-9! md:pl-8!"
-        />
-      </div>
+      <SearchInput
+        value={query}
+        onValueChange={setQuery}
+        placeholder="Search icons"
+        aria-label="Search icons"
+        className="mb-2"
+      />
 
       <div className="max-h-64 overflow-y-auto rounded-xl bg-surface-2/50 p-2 md:max-h-56">
         {sections.length === 0 ? (
