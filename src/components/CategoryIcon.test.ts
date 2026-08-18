@@ -42,6 +42,46 @@ describe('the icon registry', () => {
   })
 })
 
+/**
+ * The bank and card marks. They are ours rather than Lucide's, so two things
+ * that come free everywhere else have to be asserted here: that they are in the
+ * registry at all, and that each one carries a `displayName` — the search terms
+ * are derived from it, so a mark without one can be found by typing its key and
+ * by nothing else, which for a brand is the same as being unfindable.
+ */
+const BRAND_KEYS = [
+  'visa', 'mastercard', 'amex', 'paypal', 'contactless', 'chipCard', 'atm', 'cheque',
+  'lloyds', 'halifax', 'bankOfScotland', 'natwest', 'rbs', 'hsbc', 'barclays', 'santander',
+  'nationwide', 'chase', 'monzo', 'starling',
+]
+
+describe('the bank and card marks', () => {
+  it('are all in the registry', () => {
+    expect(BRAND_KEYS.filter((k) => !CATEGORY_ICONS[k])).toEqual([])
+  })
+
+  it('each say what they are, so the search can find them', () => {
+    const unnamed = BRAND_KEYS.filter(
+      (k) => !(CATEGORY_ICONS[k] as { displayName?: string }).displayName,
+    )
+    expect(unnamed).toEqual([])
+  })
+
+  it('are findable by the name somebody would type rather than by their key', () => {
+    // None of these words is the key.
+    expect(searchIcons('american express')).toContain('amex')
+    expect(searchIcons('royal bank')).toContain('rbs')
+    expect(searchIcons('national westminster')).toContain('natwest')
+    expect(searchIcons('building society')).toContain('nationwide')
+    expect(searchIcons('tap')).toContain('contactless')
+  })
+
+  it('are a group you can pull up whole', () => {
+    const hits = searchIcons('banks')
+    for (const key of BRAND_KEYS) expect(hits).toContain(key)
+  })
+})
+
 describe('searchIcons', () => {
   it('returns everything for an empty query', () => {
     expect(searchIcons('')).toEqual(CATEGORY_ICON_KEYS)

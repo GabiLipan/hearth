@@ -993,6 +993,30 @@ the single place a level comes from.
   picker offering one picture twice looks broken and nobody can tell which they
   chose. And an icon whose Lucide name is a JS global (`Map`, `Infinity`) has to
   be imported under an alias, or it shadows the global for the whole module.
+
+  One group is not Lucide. `BrandIcons.tsx` is the banks and the card networks,
+  hand-drawn as simplified line marks in the same 24×24, 2px, round-capped
+  stroke — the shape each brand is known by (Mastercard's two circles, NatWest's
+  three cubes, the Halifax X), never a traced logo, a wordmark or a brand
+  colour. That is a design decision rather than a shortcut: `Face` paints an
+  icon in the category or account's own palette slot, so a flat full-colour logo
+  would be the one thing in the grid that could not take a colour, and it keeps
+  the app clear of anybody's trade dress. Their `displayName` is load-bearing —
+  `TERMS` derives the search words from it, so it is the only thing that makes
+  "american express" find `amex` — and `CategoryIcon.test.ts` asserts every one
+  of them has it. `IconComponent`, not `LucideIcon`, is what the registry holds
+  now; both kinds satisfy it and no call site knows which it has.
+- **A goal wears the same face as a category, and now gets to choose it.**
+  `goals.slot` and `goals.icon` have existed since the table did and the cards
+  have always painted them, but the form offered the first twenty-four keys of
+  the registry and no colour at all, hard-coding `slot: 9` at the point of
+  saving — so every pot in a household was the same blue, and after the icon set
+  grew to two hundred those twenty-four were simply "Money and Home". It is
+  `SlotPicker` + `IconPicker` now, the same two controls the category and
+  account forms use, and a new goal takes `nextFreeSlot` over the goals that
+  already exist so pots are distinct from each other rather than from
+  categories.
+
 - **An account's colour and icon are derived when unset.** `accountFace` maps
   `kind` to a slot and an icon key, so the Activity table reads properly before
   anybody opens a form and nothing has to be backfilled. Read `accountFace(a)`,

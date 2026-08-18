@@ -1,5 +1,10 @@
 /**
- * The icon set, for categories and for accounts.
+ * The icon set, for categories, for accounts and for goals.
+ *
+ * Mostly Lucide, plus one group that is not: `BrandIcons.tsx` draws the banks
+ * and the card networks in the same stroke, because Lucide has no brands in it
+ * and an account list where every bank is the same generic building is a list
+ * you have to read rather than recognise.
  *
  * Grouped rather than one long strip, and searchable, because a flat run of
  * forty was already hard to choose from and this is two hundred. The groups are
@@ -40,8 +45,13 @@ import {
   TramFront, Trash2, TreePalm, TreePine, TrendingDown, TrendingUp, Triangle, TriangleAlert,
   Trophy, Truck, Tv, Umbrella, User, UserPlus, Users, UsersRound, UtensilsCrossed, Vault,
   Wallet, WalletCards, WashingMachine, Watch, Waves, Weight, Wifi, Wind, Wine, Wrench, X, Zap,
-  type LucideIcon,
 } from 'lucide-react'
+import {
+  AmexMark, AtmMark, BankOfScotlandMark, BarclaysMark, ChaseMark, ChequeMark, ChipCardMark,
+  ContactlessMark, HalifaxMark, HsbcMark, LloydsMark, MastercardMark, MonzoMark, NationwideMark,
+  NatwestMark, PaypalMark, RbsMark, SantanderMark, StarlingMark, VisaMark,
+  type IconComponent,
+} from './BrandIcons'
 
 /*
  * `Map` and `Infinity` are imported under other names on purpose: Lucide
@@ -53,7 +63,13 @@ import {
 
 export interface IconGroup {
   name: string
-  icons: Record<string, LucideIcon>
+  /**
+   * Lucide's components and the hand-drawn brand marks in `BrandIcons.tsx`
+   * sit in one record: `IconComponent` is the shape both satisfy, so nothing
+   * downstream — the picker, `Face`, `CategoryIcon` — has to know which kind
+   * of icon it is holding.
+   */
+  icons: Record<string, IconComponent>
 }
 
 export const ICON_GROUPS: IconGroup[] = [
@@ -65,6 +81,25 @@ export const ICON_GROUPS: IconGroup[] = [
       calculator: Calculator, vault: Vault, handCoins: HandCoins, pound: PoundSterling,
       percent: Percent, scales: Scale, bank: Landmark, transfer: ArrowLeftRight,
       bill: ReceiptText, chart: ChartLine, wallet2: WalletCards,
+    },
+  },
+  {
+    /*
+     * Not Lucide — see `BrandIcons.tsx`. They are simplified line drawings of
+     * the shape each brand is known by, in the set's own stroke, rather than
+     * logos: an account list where the Amex is an Amex and the Halifax is the
+     * Halifax is the whole reason the group exists, and a traced full-colour
+     * logo would be the one thing in a grid of two hundred strokes that could
+     * not take a palette colour.
+     */
+    name: "Banks & cards",
+    icons: {
+      visa: VisaMark, mastercard: MastercardMark, amex: AmexMark, paypal: PaypalMark,
+      contactless: ContactlessMark, chipCard: ChipCardMark, atm: AtmMark, cheque: ChequeMark,
+      lloyds: LloydsMark, halifax: HalifaxMark, bankOfScotland: BankOfScotlandMark,
+      natwest: NatwestMark, rbs: RbsMark, hsbc: HsbcMark, barclays: BarclaysMark,
+      santander: SantanderMark, nationwide: NationwideMark, chase: ChaseMark, monzo: MonzoMark,
+      starling: StarlingMark,
     },
   },
   {
@@ -165,7 +200,7 @@ export const ICON_GROUPS: IconGroup[] = [
 ]
 
 /** Every icon, flattened. The order is the groups' order. */
-export const CATEGORY_ICONS: Record<string, LucideIcon> = Object.fromEntries(
+export const CATEGORY_ICONS: Record<string, IconComponent> = Object.fromEntries(
   ICON_GROUPS.flatMap((g) => Object.entries(g.icons)),
 )
 

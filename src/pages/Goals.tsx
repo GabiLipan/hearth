@@ -15,7 +15,8 @@ import {
 } from '../components/ui'
 import { confirmAction } from '../components/confirm'
 import { toast } from '../components/toast'
-import { CategoryIcon, CATEGORY_ICON_KEYS } from '../components/CategoryIcon'
+import { IconPicker, SlotPicker } from '../components/IconPicker'
+import { nextFreeSlot, slotVar } from '../lib/palette'
 import { BookSwitcher } from '../components/BookSwitcher'
 
 /**
@@ -198,12 +199,23 @@ function GoalForm({
   // compiler to have caught, so it is written out here deliberately.
   const allAccounts = useAccounts()
   const levels = useMyLevels()
+  /** Only so a new pot takes a colour the others have not, the way a new category does. */
+  const existingGoals = useGoals()
   const accounts = useMemo(
     () => allAccounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
     [allAccounts, levels],
   )
   const [name, setName] = useState(goal?.name ?? '')
   const [icon, setIcon] = useState(goal?.icon ?? 'piggy')
+  /**
+   * A goal has always had a `slot` — `Face` paints it and the cards on this
+   * page have been showing it all along — and nothing could ever choose it. A
+   * new pot was hard-coded to 9 at the point of saving, so every goal in a
+   * household was the same colour and the badge said nothing at all.
+   */
+  const [slot, setSlot] = useState(
+    () => goal?.slot ?? nextFreeSlot(existingGoals.map((g) => g.slot)),
+  )
   const [target, setTarget] = useState(goal ? String(goal.targetMinor / 100) : '')
   const [targetDate, setTargetDate] = useState(goal?.targetDate ?? '')
   const [accountId, setAccountId] = useState<string | undefined>(goal?.accountId)
@@ -217,13 +229,14 @@ function GoalForm({
     const data = {
       name: name.trim(),
       icon,
+      slot,
       targetMinor: minor!,
       targetDate: targetDate || undefined,
       accountId,
       ownerId: personal ? userId : undefined,
     }
     if (goal) await update('goals', goal.id, data)
-    else await create('goals', { ...data, slot: 9, sortOrder: 0 })
+    else await create('goals', { ...data, sortOrder: 0 })
     onClose()
   }
 
@@ -262,9 +275,17 @@ function GoalForm({
       }
     >
       <div className="space-y-4">
-        <Field label="What are you saving for?">
-          <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Holiday" autoFocus={!goal} />
-        </Field>
+        {/* The badge beside the name rather than above the picker, which is
+            how the category form reads: what you are choosing is the face this
+            pot wears in the list, and the list puts it left of the name. */}
+        <div className="flex items-center gap-3">
+          <Face slot={slot} icon={icon} size={44} />
+          <div className="min-w-0 flex-1">
+            <Field label="What are you saving for?">
+              <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Holiday" autoFocus={!goal} />
+            </Field>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label={`Target (${currencySymbol(currency)})`}>
             <TextInput value={target} onChange={(e) => setTarget(e.target.value)} inputMode="decimal" placeholder="2400" />
@@ -283,25 +304,14 @@ function GoalForm({
             ))}
           </Select>
         </Field>
-        <Field label="Icon">
-          <div className="flex flex-wrap gap-1.5">
-            {CATEGORY_ICON_KEYS.slice(0, 24).map((key) => (
-              <button
-                type="button"
-                key={key}
-                onClick={() => setIcon(key)}
-                aria-label={key}
-                aria-pressed={icon === key}
-                className={cx(
-                  'grid size-9 place-items-center rounded-lg ring-1 transition',
-                  icon === key ? 'bg-accent/10 ring-accent' : 'bg-surface-2 ring-transparent hover:ring-hairline',
-                )}
-              >
-                <CategoryIcon icon={key} size={17} />
-              </button>
-            ))}
-          </div>
-        </Field>
+        {/* The same two controls a category and an account get, rather than a
+            third hand-rolled strip. This one offered the first twenty-four keys
+            of the registry and no colour at all, so a goal could not be a
+            holiday or a car unless the icon for it happened to fall in the
+            first two rows — and after the set grew to two hundred those
+            twenty-four were simply the Money and Home groups. */}
+        <SlotPicker value={slot} onChange={setSlot} />
+        <IconPicker value={icon} onChange={setIcon} colour={slotVar(slot)} />
         {userId && (
           <label className="flex items-start gap-3 rounded-xl bg-surface-2 px-4 py-3">
             <input
