@@ -1231,7 +1231,11 @@ export default function Reports() {
         {book === 'household' && totals.contributions > 0 && (
           <div className="mt-3 border-t border-hairline pt-3">
             <p className="mb-1.5 text-xs text-ink-3">Who paid in</p>
-            <div className="flex h-2 overflow-hidden rounded-full bg-surface-2">
+            {/* A stack, so the segments are held apart and each is a rounded
+                object of its own — colour alone is what fails first on the
+                thinnest band, which is the one a split exists to show. The
+                items shrink to pay for the gaps rather than overflowing. */}
+            <div className="flex h-2 gap-0.5 overflow-hidden rounded-full bg-surface-2">
               {[
                 { key: 'mine', value: split.mineMinor, color: 'var(--series-2)' },
                 { key: 'theirs', value: split.theirsMinor, color: 'var(--series-5)' },
@@ -1241,6 +1245,7 @@ export default function Reports() {
                 .map((s) => (
                   <span
                     key={s.key}
+                    className="rounded-full"
                     style={{ width: `${(s.value / Math.max(1, totals.income)) * 100}%`, background: s.color }}
                   />
                 ))}

@@ -17,6 +17,8 @@
  * direction, every category drew the same downward ramp.
  */
 
+import { barRadius } from './charts'
+
 /**
  * The deviation that fills half the chart; beyond this a bar is clamped.
  *
@@ -104,7 +106,15 @@ export function BudgetBars({
       }
     >
       {values.map((_, i) => (
-        <rect key={`t${i}`} x={i * (barWidth + gap)} y={0} width={barWidth} height={height} rx={3} fill="var(--surface-2)" />
+        <rect
+          key={`t${i}`}
+          x={i * (barWidth + gap)}
+          y={0}
+          width={barWidth}
+          height={height}
+          rx={barRadius(barWidth, height)}
+          fill="var(--surface-2)"
+        />
       ))}
       <line x1={0} y1={mid} x2={width} y2={mid} stroke="var(--ink-3)" strokeWidth={1} opacity={0.35} />
       {bars.map((bar, i) =>
@@ -115,7 +125,10 @@ export function BudgetBars({
             y={bar.off > 0 ? mid - bar.height : mid}
             width={barWidth}
             height={bar.height}
-            rx={1.5}
+            // The same radius rule as every other bar in the app, which for a
+            // column this narrow — and for the 1.5px stub a bang-on-budget
+            // month draws — means fully rounded, every time.
+            rx={barRadius(barWidth, bar.height)}
             fill={bar.off > 0 ? overColour(bar.off) : 'var(--good)'}
             opacity={bar.faded ? 0.4 : 0.9}
           >

@@ -27,6 +27,7 @@ import type {
   WaterfallStep,
 } from '../lib/insights'
 import { CategoryIcon } from './CategoryIcon'
+import { roundedBar, stackedBar } from './charts'
 import { cx } from './ui'
 
 /**
@@ -197,7 +198,7 @@ export function Waterfall({ steps, height = 260 }: { steps: WaterfallStep[]; hei
         {/* The lift. Transparent rather than surface-coloured, so the grid lines
             behind it are not chopped into segments. */}
         <Bar dataKey="base" stackId="w" fill="transparent" isAnimationActive={false} />
-        <Bar dataKey="size" stackId="w" radius={[4, 4, 0, 0]} maxBarSize={56}>
+        <Bar dataKey="size" stackId="w" shape={roundedBar} maxBarSize={56}>
           {data.map((s) => (
             <Cell key={s.key} fill={colourOf(s)} />
           ))}
@@ -262,7 +263,7 @@ export function SalaryStack({ data, height = 240 }: { data: SalaryBar[]; height?
             }}
           />
           {parts.map((p) => (
-            <Bar key={p.key} dataKey={p.key} stackId="s" fill={p.colour} maxBarSize={40}>
+            <Bar key={p.key} dataKey={p.key} stackId="s" fill={p.colour} shape={stackedBar} maxBarSize={40}>
               {data.map((d) => (
                 <Cell key={d.key} fill={p.colour} fillOpacity={d.partial ? PARTIAL_OPACITY : 1} />
               ))}
@@ -332,7 +333,7 @@ export function FixedVariableBars({ data, height = 240 }: { data: FixedVariable[
             }}
           />
           {parts.map((p) => (
-            <Bar key={p.key} dataKey={p.key} stackId="f" fill={p.colour} maxBarSize={40}>
+            <Bar key={p.key} dataKey={p.key} stackId="f" fill={p.colour} shape={stackedBar} maxBarSize={40}>
               {data.map((d) => (
                 <Cell key={d.key} fill={p.colour} fillOpacity={d.partial ? PARTIAL_OPACITY : 1} />
               ))}
@@ -479,7 +480,12 @@ export function TopPayees({
               two-column version leaves the names in a narrow gutter. */}
           <span
             aria-hidden
-            className="absolute inset-y-0 left-0 rounded-lg"
+            // Fully rounded rather than the row's own `rounded-lg`: a payee
+            // near the floor of this list is a 2% sliver, and a radius that
+            // cannot exceed its width leaves a slab with the corners shaved
+            // off. Everything else that draws a bar in the app clamps to half
+            // the short side, and a stadium is what that means in CSS.
+            className="absolute inset-y-0 left-0 rounded-full"
             style={{
               width: `${peak > 0 ? Math.max(2, (r.totalMinor / peak) * 100) : 0}%`,
               background: `color-mix(in oklab, ${paintOf(r.slot, r.color)} 20%, transparent)`,

@@ -156,6 +156,92 @@ const bars = (data: MonthPoint[], fill: string, keyPrefix: string) =>
     <Cell key={`${keyPrefix}-${i}`} fill={fill} fillOpacity={d.partial ? PARTIAL_OPACITY : 1} />
   ))
 
+/* ---------- The shape every bar in the app is drawn as ---------- */
+
+/**
+ * The corner radius a bar wears, and the floor under it.
+ *
+ * Stated here because it is not only Recharts that draws bars: `BudgetBars`
+ * lays out its own rectangles and the two have to agree, or the same month
+ * looks like two different kinds of thing on two cards.
+ *
+ * The radius is always clamped to HALF THE SHORT SIDE, which is the whole of
+ * "a low one is fully rounded": a bar four pixels tall takes a 2px radius and
+ * comes out a lozenge, where a fixed 6 would have drawn a shape whose corners
+ * overlap — the thing that made small months look like rendering faults. It
+ * falls out of the clamp rather than being a second rule, so there is no
+ * threshold anywhere to get wrong.
+ */
+export const BAR_RADIUS = 6
+
+/** The clamp itself, so an SVG rect drawn by hand obeys the same rule. */
+export const barRadius = (width: number, height: number, radius = BAR_RADIUS) =>
+  Math.max(0, Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2))
+
+/**
+ * The gap between the segments of a stack.
+ *
+ * A stack drawn as one unbroken column relies on colour alone to say where one
+ * band ends, which is exactly the reading that fails on the two smallest bands
+ * — and those are the ones a stack exists to show. Held apart, each segment is
+ * its own rounded object and the boundaries are visible before any colour is.
+ */
+const STACK_GAP = 2
+
+/**
+ * The least a segment may be squeezed to.
+ *
+ * The gap is taken out of the segment's own height, so a band thinner than the
+ * gap would be erased by it — a real figure disappearing because it was small
+ * is the one failure a stack must not have. Below this the segment keeps its
+ * height and simply loses the gap.
+ */
+const MIN_SEGMENT = 2
+
+type BarPieceProps = {
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  fill?: string
+  // Recharts types this as a string OR a number: a `<Cell>` may hand over
+  // either, and SVG takes both spellings.
+  fillOpacity?: number | string
+}
+
+/**
+ * One bar, or one segment of a stack, as a rounded rectangle.
+ *
+ * A `shape` rather than Recharts' own `radius` prop for the sake of the second
+ * argument: `radius` cannot inset a segment, so a stack has no way to hold its
+ * bands apart. One function draws both, which is what keeps a stacked chart and
+ * a plain one looking like the same drawing.
+ */
+const barPiece =
+  (gap: number) =>
+  ({ x = 0, y = 0, width = 0, height = 0, fill, fillOpacity }: BarPieceProps): ReactElement => {
+    const inset = Math.min(gap, Math.max(0, height - MIN_SEGMENT))
+    const h = height - inset
+    if (width <= 0 || h <= 0) return <g />
+    return (
+      <rect
+        x={x}
+        y={y + inset / 2}
+        width={width}
+        height={h}
+        rx={barRadius(width, h)}
+        ry={barRadius(width, h)}
+        fill={fill}
+        fillOpacity={fillOpacity}
+      />
+    )
+  }
+
+/** A bar standing on its own. */
+export const roundedBar = barPiece(0)
+/** A bar that is one band of a stack, held clear of the bands either side. */
+export const stackedBar = barPiece(STACK_GAP)
+
 /* ---------- A chart that shows six months and holds thirty ---------- */
 
 /**
@@ -653,7 +739,7 @@ export function SpendBars({
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           {tip(portal, shown, coarse)}
-          <Bar dataKey="spend" fill={c.series[0]} radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false}>
+          <Bar dataKey="spend" fill={c.series[0]} shape={roundedBar} maxBarSize={36} isAnimationActive={false}>
             {bars(data, c.series[0], 'spend')}
           </Bar>
         </BarChart>
@@ -750,10 +836,10 @@ export function IncomeSpendBars({
           <XAxis {...a.x} />
           <YAxis {...a.y} />
           {tip(portal, shown, coarse)}
-          <Bar dataKey="income" fill={income} radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false}>
+          <Bar dataKey="income" fill={income} shape={roundedBar} maxBarSize={22} isAnimationActive={false}>
             {bars(data, income, 'income')}
           </Bar>
-          <Bar dataKey="spend" fill={spend} radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false}>
+          <Bar dataKey="spend" fill={spend} shape={roundedBar} maxBarSize={22} isAnimationActive={false}>
             {bars(data, spend, 'spend')}
           </Bar>
         </BarChart>
@@ -873,7 +959,7 @@ export function NetLine({
           {/* A month that went the other way is not a small good month, so it
               is not the good colour. The bars have to be coloured one at a time
               for that — a single fill cannot say which side of zero it is on. */}
-          <Bar dataKey="net" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false}>
+          <Bar dataKey="net" shape={roundedBar} maxBarSize={36} isAnimationActive={false}>
             {data.map((d, i) => (
               <Cell
                 key={i}

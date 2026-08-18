@@ -1662,12 +1662,11 @@ export function Progress({
       style={panel ? { background: 'var(--panel-track)' } : undefined}
     >
       <div
-        // Rounded on the left always; on the right only when nothing follows
-        // it, or the cap would butt into the excess block as a notch.
-        className={cx(
-          'absolute inset-y-0 left-0 transition-[width] duration-500',
-          over ? 'rounded-l-full' : 'rounded-full',
-        )}
+        // Rounded at both ends whatever follows it. The two blocks used to butt
+        // together with the join squared off, which left the pair reading as
+        // one bar that changed colour half way; a segment of a stack is its own
+        // object, and the gap below is what says so.
+        className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500"
         style={{
           width: `${budgetPct}%`,
           background: over
@@ -1683,8 +1682,15 @@ export function Progress({
       />
       {over && (
         <div
-          className="absolute inset-y-0 right-0 transition-[width] duration-500"
-          style={{ width: `${100 - budgetPct}%`, background: panel ? 'var(--panel-ink)' : 'var(--critical)' }}
+          className="absolute inset-y-0 right-0 rounded-full transition-[width] duration-500"
+          // The gap comes out of the excess rather than out of the budget's
+          // share: the length of the first block is the claim being made — how
+          // much of this bar was the budget — and the overspend beyond it is
+          // already told by the colour.
+          style={{
+            width: `calc(${100 - budgetPct}% - 2px)`,
+            background: panel ? 'var(--panel-ink)' : 'var(--critical)',
+          }}
         />
       )}
       {marker != null && marker > 0 && marker < 1 && (

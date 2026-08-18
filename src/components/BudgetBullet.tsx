@@ -50,7 +50,7 @@ export function BudgetBullet({
     >
       {typical && (
         <div
-          className="absolute inset-y-0 rounded-sm bg-ink-3/40"
+          className="absolute inset-y-0 rounded-full bg-ink-3/40"
           style={{ left: pct(typical[0]), width: pct(Math.max(0, typical[1] - typical[0])) }}
         />
       )}
