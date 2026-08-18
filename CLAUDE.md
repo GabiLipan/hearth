@@ -1014,23 +1014,36 @@ the single place a level comes from.
   chose. And an icon whose Lucide name is a JS global (`Map`, `Infinity`) has to
   be imported under an alias, or it shadows the global for the whole module.
 
-  One group is not Lucide. `BrandIcons.tsx` is the banks and the card networks,
-  hand-drawn as simplified line marks in the same 24×24, 2px, round-capped
-  stroke — the shape each brand is known by (Mastercard's two circles, NatWest's
-  three cubes, the Halifax X), never a traced logo, a wordmark or a brand
-  colour. That is a design decision rather than a shortcut: `Face` paints an
-  icon in the category or account's own palette slot, so a flat full-colour logo
-  would be the one thing in the grid that could not take a colour, and it keeps
-  the app clear of anybody's trade dress. Their `displayName` is load-bearing —
-  `TERMS` derives the search words from it, so it is the only thing that makes
-  "american express" find `amex` — and `CategoryIcon.test.ts` asserts every one
-  of them has it. **Check a new one against the real mark at 19px**, which is
-  what `Face` renders at: Simple Icons (CC0) carries nine of these and is the
-  reference, and comparing at badge size rather than at 56 is what caught four
-  of them being wrong. It is deliberately not a dependency — it has no Lloyds,
-  Halifax, Bank of Scotland, NatWest, RBS, Santander or Nationwide, and its
-  Visa, Amex and Discover are wordmarks, which at 19px are a smudge. `IconComponent`, not `LucideIcon`, is what the registry holds
-  now; both kinds satisfy it and no call site knows which it has.
+  One group is not Lucide, and it does not work like Lucide.
+  `BrandIcons.tsx` is the twenty banks and card networks, and each is a single
+  FILLED path — outlines traced from artwork, with the counters knocked out by
+  `fill-rule="evenodd"` — where every other icon in the app is `fill: none` and
+  a 2px stroke. Three things follow, and the first is silent:
+
+  - **`strokeWidth` must be accepted and ignored.** `CategoryIcon` renders every
+    icon as `<Ic size={size} strokeWidth={2} />`, which is right for the two
+    hundred Lucide ones and ruinous here: 2px laid around outlines this fine
+    closes every counter, and the Amex, the Halifax H and the Visa all become
+    solid black rectangles. `Trace` swallows the prop.
+  - **The 0.5px `HAIRLINE` is not a border and is tuned, not guessed.** A trace
+    carries the weight of whatever it was traced from, and these came out finer
+    than the Lucide icons beside them — at 19px, the size `Face` actually
+    renders, several read as grey rather than as drawn. Half a pixel of
+    `currentColor` around the fill fattens them optically. At 0.7 the counters
+    begin to close; by 0.9 the Santander flame is a blob.
+  - **Fill and stroke are both `currentColor`**, because `Face` paints the icon
+    in the row's palette slot. Nothing here may carry a second colour.
+
+  Their `displayName` is load-bearing — `TERMS` derives the search words from
+  it, so it is the only thing that makes "american express" find `amex` — and
+  `CategoryIcon.test.ts` asserts every one of them has it. **Judge a new one at
+  19px, never at 56**: a contact sheet at 56 flatters everything, and every
+  drawing error found here so far was invisible there and obvious at badge size.
+  Simple Icons (CC0) is the reference for checking a shape and is deliberately
+  not a dependency — it has no Lloyds, Halifax, Bank of Scotland, NatWest, RBS,
+  Santander or Nationwide, the whole British high street, and its Visa, Amex and
+  Discover are wordmarks. `IconComponent`, not `LucideIcon`, is what the
+  registry holds now; both kinds satisfy it and no call site knows which it has.
 - **A goal wears the same face as a category, and now gets to choose it.**
   `goals.slot` and `goals.icon` have existed since the table did and the cards
   have always painted them, but the form offered the first twenty-four keys of

@@ -1,10 +1,12 @@
 /**
  * The icon set, for categories, for accounts and for goals.
  *
- * Mostly Lucide, plus one group that is not: `BrandIcons.tsx` draws the banks
- * and the card networks in the same stroke, because Lucide has no brands in it
- * and an account list where every bank is the same generic building is a list
- * you have to read rather than recognise.
+ * Mostly Lucide, plus one group that is not: `BrandIcons.tsx` holds the banks
+ * and the card networks, because Lucide has no brands in it and an account list
+ * where every bank is the same generic building is a list you have to read
+ * rather than recognise. Those are FILLED outlines where everything else here
+ * is a 2px stroke, and the file says at length why that difference is load-
+ * bearing — chiefly that they must not be handed a `strokeWidth`.
  *
  * Grouped rather than one long strip, and searchable, because a flat run of
  * forty was already hard to choose from and this is two hundred. The groups are
@@ -85,12 +87,11 @@ export const ICON_GROUPS: IconGroup[] = [
   },
   {
     /*
-     * Not Lucide — see `BrandIcons.tsx`. They are simplified line drawings of
-     * the shape each brand is known by, in the set's own stroke, rather than
-     * logos: an account list where the Amex is an Amex and the Halifax is the
-     * Halifax is the whole reason the group exists, and a traced full-colour
-     * logo would be the one thing in a grid of two hundred strokes that could
-     * not take a palette colour.
+     * Not Lucide — see `BrandIcons.tsx`. An account list where the Amex is an
+     * Amex and the Halifax is the Halifax is the whole reason the group exists.
+     * They are single-colour outlines rather than full-colour logos, because
+     * `Face` paints an icon in the row's own palette slot and a flat logo would
+     * be the one thing in a grid of two hundred that could not take a colour.
      */
     name: "Banks & cards",
     icons: {

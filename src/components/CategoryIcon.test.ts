@@ -76,6 +76,40 @@ describe('the bank and card marks', () => {
     expect(searchIcons('tap')).toContain('contactless')
   })
 
+  /**
+   * The trap that has no other alarm on it. `CategoryIcon` renders every icon as
+   * `<Ic size={size} strokeWidth={2} />`, which is correct for the two hundred
+   * Lucide ones and ruinous for these: they are filled outlines, and 2px laid
+   * around lines that fine closes every counter — the Amex, the Halifax H and
+   * the Visa all turn into solid rectangles. Nothing throws; the icons just
+   * quietly become blobs, at the one size the app renders them.
+   *
+   * React elements are plain objects, so the component can be called and its
+   * output inspected without a DOM.
+   */
+  it('never lets a brand mark honour the strokeWidth every icon is handed', () => {
+    type El = { type: (p: object) => El; props: Record<string, unknown> }
+    for (const key of BRAND_KEYS) {
+      const Mark = CATEGORY_ICONS[key] as unknown as (p: object) => El
+      const rendered = Mark({ size: 19, strokeWidth: 2 })
+      const svg = rendered.type(rendered.props)
+      expect(svg.props.strokeWidth, key).toBe(0.5)
+      // Both, because `Face` paints the icon in the row's palette slot.
+      expect(svg.props.fill, key).toBe('currentColor')
+      expect(svg.props.stroke, key).toBe('currentColor')
+    }
+  })
+
+  it('cuts its counters out rather than filling them in', () => {
+    type El = { type: (p: object) => El; props: Record<string, unknown> & { children?: El } }
+    for (const key of BRAND_KEYS) {
+      const Mark = CATEGORY_ICONS[key] as unknown as (p: object) => El
+      const rendered = Mark({})
+      const svg = rendered.type(rendered.props)
+      expect(svg.props.children?.props.fillRule, key).toBe('evenodd')
+    }
+  })
+
   it('are a group you can pull up whole', () => {
     const hits = searchIcons('banks')
     for (const key of BRAND_KEYS) expect(hits).toContain(key)
