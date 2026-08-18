@@ -936,7 +936,7 @@ function useSliceColours(slices: CategorySlice[]) {
   const colours = useMemo(
     () =>
       distinctShades(slices, (s) =>
-        s.categoryId === OTHER_SLICE_ID ? otherColor : c.slot(s.slot),
+        s.categoryId === OTHER_SLICE_ID ? otherColor : (s.color ?? c.slot(s.slot)),
       ),
     [slices, c, otherColor],
   )

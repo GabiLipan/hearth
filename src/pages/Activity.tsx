@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, HandCoins, HelpCircle, Layers, Shapes, MoreHorizontal } from 'lucide-react'
-import type { Category, Transaction } from '../lib/db'
+import type { Account, Category, Transaction } from '../lib/db'
+import { paintOf } from '../lib/palette'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
 import { canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn } from '../lib/accounts'
 import { appScrollerTopInset, onAppScroll, scrollAppTo, scrollAppToElement } from '../lib/scroll'
@@ -893,7 +894,7 @@ export default function Activity() {
                                 <>
                                   <span
                                     className="shrink-0"
-                                    style={{ color: cat ? `var(--series-${parent?.slot ?? cat.slot})` : 'var(--ink-3)' }}
+                                    style={{ color: cat ? paintOf(parent?.slot ?? cat.slot, parent?.color ?? cat.color) : 'var(--ink-3)' }}
                                   >
                                     <CategoryIcon icon={cat?.icon ?? parent?.icon} size={14} />
                                   </span>
@@ -1619,7 +1620,7 @@ function CategoryFilter({
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
               >
                 <Check size={15} className={cx('shrink-0', on ? 'text-accent' : 'opacity-0')} />
-                <span className="shrink-0" style={{ color: `var(--series-${c.slot})` }}>
+                <span className="shrink-0" style={{ color: paintOf(c.slot, c.color) }}>
                   <CategoryIcon icon={c.icon} size={15} />
                 </span>
                 <span className="min-w-0 flex-1 truncate">{c.name}</span>
@@ -1676,7 +1677,7 @@ function AccountFilter({
   onChange,
   variant = 'control',
 }: {
-  accounts: { id: string; name: string }[]
+  accounts: Account[]
   value: Set<string> | null
   onChange: (next: Set<string> | null) => void
   variant?: Variant
@@ -1686,17 +1687,22 @@ function AccountFilter({
       ? variant === 'chip'
         ? 'Accounts'
         : 'All accounts'
-      : value.size === 1
-        ? (accounts.find((a) => value.has(a.id))?.name ?? '1 account')
-        : `${value.size} accounts`
+      : // Not the same as `null`, and it must not read as it — see `catLabel`.
+        value.size === 0
+        ? 'No accounts'
+        : value.size === 1
+          ? (accounts.find((a) => value.has(a.id))?.name ?? '1 account')
+          : `${value.size} accounts`
 
   function toggle(id: string) {
     const next = new Set(value ?? accounts.map((a) => a.id))
     if (next.has(id)) next.delete(id)
     else next.add(id)
-    // Back to "all" at both ends: everything ticked means the same thing, and
-    // nothing ticked is a list of no transactions nobody asked for.
-    onChange(next.size === 0 || next.size === accounts.length ? null : next)
+    // Everything ticked folds back to `null`, so an account shared with you
+    // tomorrow is included rather than being excluded by a set written before
+    // it existed. Nothing ticked does NOT fold: it is a state you can mean, and
+    // it is what "All accounts" clears to on the way to picking one.
+    onChange(next.size === accounts.length ? null : next)
   }
 
   return (
@@ -1719,13 +1725,19 @@ function AccountFilter({
     >
       {() => (
         <div className="max-h-72 overflow-y-auto">
+          {/* The same select-all-that-also-deselects the category filter has,
+              and it is here for the same reason: with four or five accounts,
+              reaching ONE of them meant unticking all the others. Ticking one
+              from a standing start is a single press; getting to a standing
+              start was as many presses as you have accounts. */}
           <button
             type="button"
-            onClick={() => onChange(null)}
+            onClick={() => onChange(value === null ? new Set() : null)}
             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
           >
             <Check size={15} className={cx('shrink-0', value === null ? 'text-accent' : 'opacity-0')} />
             <span className="font-medium">All accounts</span>
+            <span className="ml-auto shrink-0 text-xs text-ink-3">{value === null ? 'Clear' : 'Select all'}</span>
           </button>
           <div className="my-1 border-t border-hairline" />
           {accounts.map((a) => {
@@ -1738,6 +1750,10 @@ function AccountFilter({
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
               >
                 <Check size={15} className={cx('shrink-0', on ? 'text-accent' : 'opacity-0')} />
+                {/* The account's own face, so this list reads the way the
+                    category list beside it does — a colour to aim at before the
+                    name is read. */}
+                <AccountDot account={a} size={20} />
                 <span className="min-w-0 flex-1 truncate">{a.name}</span>
               </button>
             )

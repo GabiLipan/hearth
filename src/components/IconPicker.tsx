@@ -1,52 +1,165 @@
 import { useMemo, useState } from 'react'
-import { Check } from 'lucide-react'
+import { Check, Pipette } from 'lucide-react'
 import { CategoryIcon, ICON_GROUPS, searchIcons } from './CategoryIcon'
-import { SLOT_NAMES, SLOTS, slotVar } from '../lib/palette'
-import { SearchInput, cx } from './ui'
+import { SLOT_NAMES, SWATCH_ORDER, isHexColour, slotVar } from '../lib/palette'
+import { SearchInput, TextInput, cx } from './ui'
+
+/** The colour a fresh custom swatch opens on, when there is nothing to edit yet. */
+const CUSTOM_SEED = '#7c6cf0'
 
 /**
- * The twelve palette slots as a row of swatches.
+ * The twelve palette slots as a row of swatches, and a colour of your own.
  *
  * Lifted out of the category form when accounts gained a colour too. Both need
  * exactly this and there is nothing to configure between them — a second copy
  * would be a second place for the ring, the offset and the tick to drift.
+ *
+ * The swatches are in `SWATCH_ORDER`, not slot order: slot numbers are on rows
+ * in the database and were arranged so that consecutive CHART SERIES differ,
+ * which as a grid of colours is a scrambled wheel. Six per row then reads warm
+ * on the top row and cool on the bottom.
+ *
+ * ## The custom one
+ *
+ * Offered only when `onColorChange` is passed, and it is a thirteenth swatch
+ * rather than a second control: "the colour of this category" has one answer,
+ * and two controls would let a form show a slot ringed and a custom colour set
+ * at the same time with no way to tell which is winning. Choosing a slot clears
+ * the custom colour, which is what makes the twelve the way BACK.
+ *
+ * It is a disclosure that pushes the fields in below it, never a popover: this
+ * lives inside a `Sheet`, and a `Popover` portals at `z-40` under the sheet's
+ * `z-50` — it would open behind the form it belongs to. The sheet's body is
+ * already animating between the shapes its contents take, so growing costs
+ * nothing.
+ *
+ * Both halves of the disclosure are wanted. The native `<input type="color">`
+ * is the platform's own picker — a wheel on a phone, an eyedropper on a desktop
+ * — and it is the only one here that can sample a colour off the screen. The
+ * hex field is for the case that picker cannot serve: a brand colour someone
+ * has been given as six characters, which is most of why anybody wants this at
+ * all. It commits only on a value that parses, so a half-typed `#7c6` never
+ * paints the badge black on the way through.
  */
 export function SlotPicker({
   value,
   onChange,
+  color,
+  onColorChange,
   label = 'Colour',
   hint,
 }: {
   value: number
   onChange: (slot: number) => void
+  /** A colour of its own, overriding the slot. */
+  color?: string
+  /** Passing this offers the custom swatch. Omit it for slots alone. */
+  onColorChange?: (color: string | undefined) => void
   label?: string
   hint?: string
 }) {
+  const custom = color !== undefined
+  const [open, setOpen] = useState(false)
+  // What the hex field is showing, which is not what is saved: it holds
+  // half-typed values the swatch must not be painted with.
+  const [draft, setDraft] = useState(color ?? CUSTOM_SEED)
+  const swatch = custom ? color : draft
+
+  const pick = (next: string) => {
+    setDraft(next)
+    onColorChange?.(next)
+  }
+
   return (
     <div>
       <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">
         {label}
         {hint && <span className="ml-1.5 font-normal text-ink-3">· {hint}</span>}
       </span>
-      <div className="flex flex-wrap gap-2">
-        {SLOTS.map((s) => (
+      {/* Six per row, deterministically: the wheel is only readable as a wheel
+          if it breaks in the same place every time, and a `flex-wrap` row
+          breaks wherever the sheet happens to be wide. Warm above, cool below,
+          with the custom swatch landing under the first column — beside the
+          twelve rather than among them. */}
+      <div className="grid w-fit grid-cols-6 gap-2">
+        {SWATCH_ORDER.map((s) => {
+          const chosen = !custom && value === s
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => {
+                onChange(s)
+                onColorChange?.(undefined)
+                setOpen(false)
+              }}
+              title={SLOT_NAMES[s]}
+              aria-label={SLOT_NAMES[s]}
+              aria-pressed={chosen}
+              className={cx(
+                'grid size-8 place-items-center rounded-full transition desktop:size-7',
+                chosen ? 'ring-2 ring-ink ring-offset-2 ring-offset-surface' : 'hover:scale-110',
+              )}
+              style={{ background: slotVar(s) }}
+            >
+              {chosen && <Check size={15} className="text-white drop-shadow" />}
+            </button>
+          )
+        })}
+
+        {onColorChange && (
           <button
-            key={s}
             type="button"
-            onClick={() => onChange(s)}
-            title={SLOT_NAMES[s]}
-            aria-label={SLOT_NAMES[s]}
-            aria-pressed={value === s}
+            onClick={() => {
+              setOpen((o) => (custom ? !o : true))
+              if (!custom) onColorChange(draft)
+            }}
+            title="A colour of your own"
+            aria-label="A colour of your own"
+            aria-pressed={custom}
+            aria-expanded={open}
             className={cx(
               'grid size-8 place-items-center rounded-full transition desktop:size-7',
-              value === s ? 'ring-2 ring-ink ring-offset-2 ring-offset-surface' : 'hover:scale-110',
+              custom
+                ? 'ring-2 ring-ink ring-offset-2 ring-offset-surface'
+                : 'ring-1 ring-hairline hover:scale-110',
             )}
-            style={{ background: slotVar(s) }}
+            style={{ background: custom ? swatch : 'var(--surface-2)' }}
           >
-            {value === s && <Check size={15} className="text-white drop-shadow" />}
+            {custom ? (
+              <Check size={15} className="text-white drop-shadow" />
+            ) : (
+              <Pipette size={15} className="text-ink-3" />
+            )}
           </button>
-        ))}
+        )}
       </div>
+
+      {onColorChange && custom && open && (
+        <div className="mt-2.5 flex items-center gap-2">
+          <input
+            type="color"
+            value={isHexColour(swatch ?? '') ? (swatch as string) : CUSTOM_SEED}
+            onChange={(e) => pick(e.target.value.toLowerCase())}
+            aria-label="Pick a colour"
+            className="size-10 shrink-0 cursor-pointer rounded-xl bg-surface-2 p-1 md:size-9 md:rounded-lg"
+          />
+          <TextInput
+            value={draft}
+            onChange={(e) => {
+              const next = e.target.value
+              setDraft(next)
+              if (isHexColour(next)) onColorChange(next.trim().toLowerCase())
+            }}
+            onBlur={() => setDraft(color ?? CUSTOM_SEED)}
+            spellCheck={false}
+            autoCapitalize="none"
+            aria-label="Colour, as a hex code"
+            placeholder="#7c6cf0"
+            className="font-mono"
+          />
+        </div>
+      )}
     </div>
   )
 }

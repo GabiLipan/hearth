@@ -15,6 +15,8 @@ import type { Category } from './db'
 export interface CategoryStyle {
   icon: string
   slot: number
+  /** A colour of its own, overriding the slot. Inherited by a subcategory. */
+  color?: string
 }
 
 const FALLBACK: CategoryStyle = { icon: 'tag', slot: 1 }
@@ -22,13 +24,14 @@ const FALLBACK: CategoryStyle = { icon: 'tag', slot: 1 }
 /** The icon and colour to draw a category with, resolved through its parent. */
 export function styleOf(category: Category | undefined, byId: Map<string, Category>): CategoryStyle {
   if (!category) return FALLBACK
-  if (category.icon != null && category.slot != null) {
-    return { icon: category.icon, slot: category.slot }
-  }
   const parent = category.parentId ? byId.get(category.parentId) : undefined
   return {
     icon: category.icon ?? parent?.icon ?? FALLBACK.icon,
     slot: category.slot ?? parent?.slot ?? FALLBACK.slot,
+    // A custom colour inherits the same way, and for the same reason: a parent
+    // recoloured by hand takes its children with it rather than leaving them on
+    // the palette slot underneath.
+    color: category.color ?? (category.slot == null ? parent?.color : undefined),
   }
 }
 

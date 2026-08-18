@@ -15,6 +15,14 @@ export interface CategorySlice {
   name: string
   icon: string
   slot: number
+  /**
+   * The category's own colour, where it has been given one. Carried on the
+   * slice rather than looked up again by the chart: a chart resolves a slot
+   * through `useChartColors`, which knows about the twelve tokens and nothing
+   * about a row — so a colour that did not travel with the figure would show on
+   * the badge and not in the ring beside it.
+   */
+  color?: string
   totalMinor: number // positive spend
   fraction: number
 }
@@ -39,7 +47,15 @@ export function spendByCategory(txns: Transaction[], categories: Category[], mon
     .map(([categoryId, totalMinor]) => {
       const c = catMap.get(categoryId)!
       const style = styleOf(c, catMap)
-      return { categoryId, name: c.name, icon: style.icon, slot: style.slot, totalMinor, fraction: totalMinor / grand }
+      return {
+        categoryId,
+        name: c.name,
+        icon: style.icon,
+        slot: style.slot,
+        color: style.color,
+        totalMinor,
+        fraction: totalMinor / grand,
+      }
     })
     .sort((a, b) => b.totalMinor - a.totalMinor)
   if (slices.length <= maxSlices) return slices

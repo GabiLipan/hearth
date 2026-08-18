@@ -29,21 +29,40 @@
   --hairline: rgba(11, 11, 11, 0.1);
   --grid: #e1e0d9;
   --baseline: #c3c2b7;
-  /* brand + series (validated categorical palette, light steps) */
+  /* brand + series.
+   *
+   * Twelve slots, cut in OKLCH at ONE lightness (0.615 here, 0.685 in the dark
+   * block) with hues about 30 degrees apart, so hue is the only thing that
+   * tells two categories apart and the row of swatches reads as one family.
+   * Uniform lightness is what makes `inkOn` answer "dark" for all twelve in
+   * both themes — a label written straight onto a fill no longer flips colour
+   * between neighbouring tiles — and it is why the worst ink contrast rose from
+   * 4.76:1 to 5.17:1. The cost is at the other end: on the light page a swatch
+   * sits at 3.4-4.0:1 against `--surface` where the old Forest sat at 5.9, so
+   * the selected ring in `SlotPicker` carries more of the work than it did.
+   *
+   * Slot 12 is the same wheel position as slot 8 at a third of the chroma: a
+   * muted brown reads as its own thing beside an orange, where a thirteenth hue
+   * would not. Retuning any of these means re-running `ink.test.ts`, which pins
+   * the floor rather than the individual values.
+   *
+   * `--accent` is the brand blue and is deliberately NOT `--series-1` any more:
+   * the uniform lightness moved slot 1 lighter than the blue the app is built
+   * around. They are two declarations that used to hold one value. */
   --accent: #2a78d6;
   --accent-ink: #ffffff;
-  --series-1: #2a78d6;
-  --series-2: #1baf7a;
-  --series-3: #eda100;
-  --series-4: #008300;
-  --series-5: #4a3aa7;
-  --series-6: #e34948;
-  --series-7: #e87ba4;
-  --series-8: #eb6834;
-  --series-9: #0b8ba3;
-  --series-10: #a344c4;
-  --series-11: #6b8a15;
-  --series-12: #8a6244;
+  --series-1: #3984e4;
+  --series-2: #169f4b;
+  --series-3: #a77d00;
+  --series-4: #0093b3;
+  --series-5: #8270df;
+  --series-6: #d55550;
+  --series-7: #c95492;
+  --series-8: #c86600;
+  --series-9: #019993;
+  --series-10: #af5fc0;
+  --series-11: #838d00;
+  --series-12: #9d7e63;
   /* status (fixed, both modes) */
   --good: #0ca30c;
   --good-text: #006300;
@@ -116,18 +135,18 @@
   --grid: #2c2c2a;
   --baseline: #383835;
   --accent: #3987e5;
-  --series-1: #3987e5;
-  --series-2: #199e70;
-  --series-3: #c98500;
-  --series-4: #008300;
-  --series-5: #9085e9;
-  --series-6: #e66767;
-  --series-7: #d55181;
-  --series-8: #d95926;
-  --series-9: #29a8c4;
-  --series-10: #b866d8;
-  --series-11: #8fae2e;
-  --series-12: #a8794f;
+  --series-1: #529af9;
+  --series-2: #3fb462;
+  --series-3: #c19100;
+  --series-4: #00abcf;
+  --series-5: #9787f5;
+  --series-6: #eb6d67;
+  --series-7: #e06ca7;
+  --series-8: #e27b21;
+  --series-9: #02b1aa;
+  --series-10: #c476d6;
+  --series-11: #98a401;
+  --series-12: #b39377;
   --good-text: #0ca30c;
   --critical-text: #e66767;
   /* Deeper again on a #0d0d0d page: the light theme's stops are a bright object
@@ -554,9 +573,10 @@ select,
  * because there the row is on the INCOME side of a book it also spends from.
  * One row, one meaning per book, and the tag beside the tint says which.
  *
- * `--series-2` and not `--series-4`, which is the greener green: 4 is the one
- * entry in the palette with no dark step of its own, so a tint built on it goes
- * muddy on a dark screen and the label sitting in it loses its contrast.
+ * `--series-2` is the palette's only green now — slot 4 was a second one and is
+ * cyan since the wheel was evened out, which is also what gave it a dark step
+ * of its own. A tint wants a hue nothing else in the row is using, so that the
+ * mark reads as a mark rather than as one more category's colour.
  *
  * Both are slightly stronger than the transfer tint at every step: these hues
  * are quieter than `--accent`, and matching its percentages made them read as

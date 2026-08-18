@@ -13,7 +13,7 @@ export const SLOT_NAMES: Record<number, string> = {
   1: 'Blue',
   2: 'Green',
   3: 'Amber',
-  4: 'Forest',
+  4: 'Cyan',
   5: 'Indigo',
   6: 'Red',
   7: 'Pink',
@@ -25,6 +25,34 @@ export const SLOT_NAMES: Record<number, string> = {
 }
 
 export const slotVar = (slot: number) => `var(--series-${((slot - 1) % SLOT_COUNT) + 1})`
+
+/**
+ * The order the twelve are OFFERED in, which is not the order they are stored
+ * in. Slot numbers are on rows in the database and cannot move; slot order was
+ * chosen so that consecutive chart series differ, which is the right question
+ * for a legend and the wrong one for a grid of swatches — as a row it is a
+ * scrambled colour wheel. This is the wheel put back together, warm to cool, so
+ * that six per row gives reds through greens above and teals through pinks
+ * below. `SlotPicker` maps over this; everything else still counts 1..12.
+ */
+export const SWATCH_ORDER = [6, 8, 12, 3, 11, 2, 9, 4, 1, 5, 10, 7]
+
+/**
+ * The colour to paint something with: its own if it has been given one, else
+ * its palette slot.
+ *
+ * A custom colour is a single hex for BOTH themes, where a slot resolves to a
+ * token with a light and a dark step — so the palette is still the answer for
+ * anything that has not been deliberately overridden, and the twelve stay the
+ * thing most rows are drawn from. Everything that paints a face goes through
+ * here rather than through `slotVar` directly, or a custom colour would appear
+ * on the badge and not in the chart beside it.
+ */
+export const paintOf = (slot: number | undefined, color?: string) =>
+  color ?? slotVar(slot ?? 1)
+
+/** Whether a string is a colour we are willing to store. */
+export const isHexColour = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value.trim())
 
 /**
  * The slot to give a new category: the least-used one, so a fresh category is

@@ -111,6 +111,12 @@ export interface Category {
    */
   icon?: string // key into CATEGORY_ICONS
   slot?: number // 1..12 -> --series-N colour
+  /**
+   * A colour of its own, `#rrggbb`, overriding the slot. Undefined is the
+   * ordinary case. One value for both themes, where a slot has a step for each
+   * — which is the whole reason the slot stays required underneath it.
+   */
+  color?: string
   kind: 'expense' | 'income'
   sortOrder: number
   /** Set on a subcategory. Nesting stops at one level. */
@@ -144,6 +150,8 @@ export interface Goal {
   name: string
   icon: string
   slot: number
+  /** A colour of its own, `#rrggbb`, overriding the slot. See `Category.color`. */
+  color?: string
   targetMinor: number
   targetDate?: string // yyyy-MM-dd
   /** null = the household's; set = that person's own. */
@@ -239,6 +247,8 @@ export interface Account {
    */
   slot?: number
   icon?: string
+  /** A colour of its own, `#rrggbb`, overriding the slot. See `Category.color`. */
+  color?: string
   /**
    * Which book this account is in, when deriving it from grants gets it wrong.
    * Undefined — the normal case — means derive. See `classifyAccounts`.

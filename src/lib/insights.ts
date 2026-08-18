@@ -246,6 +246,8 @@ export interface PayeeTotal {
   count: number
   /** The category most of it was filed under, for the colour. */
   slot: number
+  /** That category's own colour, where it has one. Overrides `slot`. */
+  color?: string
   icon: string
 }
 
@@ -346,6 +348,8 @@ export interface HeatmapRow {
   categoryId: string
   name: string
   slot: number
+  /** The category's own colour, where it has one. Overrides `slot`. */
+  color?: string
   icon: string
   /** One per month, in the order asked for. */
   cells: number[]

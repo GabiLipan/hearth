@@ -43,7 +43,7 @@ import { checkForUpdate, installUpdate, useUpdateState } from '../lib/updates'
 import { discardAllDeadLetters, discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
-import { slotVar, nextFreeSlot } from '../lib/palette'
+import { paintOf, nextFreeSlot } from '../lib/palette'
 import { seedDemoData } from '../lib/demo'
 import {
   getTransferMode,
@@ -61,7 +61,7 @@ import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { alertAction, confirmAction } from '../components/confirm'
 import { toast } from '../components/toast'
-import { Card, CheckRow, Chip, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useInfoNote, useWide, cx } from '../components/ui'
+import { AccountDot, Card, CheckRow, Chip, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useInfoNote, useWide, cx } from '../components/ui'
 import {
   claimAccount,
   deletedAccounts,
@@ -1808,6 +1808,14 @@ function AccountsSection() {
                     editable ? 'hover:bg-surface-2/50' : 'cursor-default',
                   )}
                 >
+                  {/* The account's own face, the same badge the Activity table
+                      and the home widget draw — this list was the one place
+                      accounts were named without being shown, so the row you
+                      come here to recolour was the row that never showed the
+                      colour. `AccountDot` goes through `accountFace`, so an
+                      account nobody has styled wears the one its kind implies
+                      rather than a grey hole. */}
+                  <AccountDot account={a} size={32} className="desktop:[--dot:28px]" />
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-1.5 font-medium">
                       <span className="truncate">{a.name}</span>
@@ -2106,6 +2114,8 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
   const stored = { slot: account?.slot, icon: account?.icon }
   const [slot, setSlot] = useState(() => accountFace({ kind: account?.kind ?? 'current', ...stored }).slot)
   const [icon, setIcon] = useState(() => accountFace({ kind: account?.kind ?? 'current', ...stored }).icon)
+  /** A colour of its own, overriding the slot. Undefined is the normal case. */
+  const [color, setColor] = useState(account?.color)
   /**
    * Whether the face is still the one `kind` implies.
    *
@@ -2114,7 +2124,9 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
    * form ignored you. Once they have picked, `kind` stops touching it, because
    * their choice is the newer answer.
    */
-  const [facePicked, setFacePicked] = useState(account?.slot != null || account?.icon != null)
+  const [facePicked, setFacePicked] = useState(
+    account?.slot != null || account?.icon != null || account?.color != null,
+  )
   useEffect(() => {
     if (facePicked) return
     const next = accountFace({ kind })
@@ -2199,6 +2211,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         bookOverride: book || undefined,
         slot,
         icon,
+        color,
         publishesHouseholdRows: publishes,
       })
     } else {
@@ -2221,6 +2234,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         sortOrder: 0,
         slot,
         icon,
+        color,
         createdBy: userId,
       })
     }
@@ -2304,6 +2318,11 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
             setFacePicked(true)
             setSlot(next)
           }}
+          color={color}
+          onColorChange={(next) => {
+            setFacePicked(true)
+            setColor(next)
+          }}
           hint={facePicked ? undefined : 'from the type'}
         />
         <IconPicker
@@ -2312,7 +2331,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
             setFacePicked(true)
             setIcon(next)
           }}
-          colour={slotVar(slot)}
+          colour={paintOf(slot, color)}
           hint={facePicked ? undefined : 'from the type'}
         />
         {/* Only when editing. A brand new account has no grants yet, so there is
@@ -2394,6 +2413,8 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
   const [icon, setIcon] = useState<string | undefined>(category?.icon)
   const [kind, setKind] = useState<'expense' | 'income'>(category?.kind ?? 'expense')
   const [slot, setSlot] = useState<number | null>(category?.slot ?? null)
+  /** A colour of its own, overriding the slot. Inherited from a parent when null. */
+  const [color, setColor] = useState<string | undefined>(category?.color)
   const [parentId, setParentId] = useState<string | undefined>(category?.parentId)
   const [personal, setPersonal] = useState(!!category?.ownerId)
   const canSave = name.trim().length > 0
@@ -2415,13 +2436,21 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
   const inherited = parent ? styleOf(parent, catMap) : undefined
   const effectiveSlot = slot ?? inherited?.slot ?? autoSlot
   const effectiveIcon = icon ?? inherited?.icon ?? 'tag'
-  const overriding = parentId != null && (icon != null || slot != null)
+  const effectiveColor = color ?? (slot == null ? inherited?.color : undefined)
+  const overriding = parentId != null && (icon != null || slot != null || color != null)
 
   async function save() {
     if (!canSave) return
     // Null icon and slot mean "inherit"; only send values when this is a
     // top-level category or the user has deliberately overridden them.
-    const style = parentId && !overriding ? { icon: undefined, slot: undefined } : { icon: effectiveIcon, slot: effectiveSlot }
+    // Null icon, slot and colour all mean "inherit". A custom colour is stored
+    // BESIDE the slot rather than instead of it: `categories_top_level_has_style`
+    // demands a slot on every top-level row, and a client that has not learned
+    // about `color` yet still has something to paint with.
+    const style =
+      parentId && !overriding
+        ? { icon: undefined, slot: undefined, color: undefined }
+        : { icon: effectiveIcon, slot: effectiveSlot, color: effectiveColor }
     if (category?.id) {
       await update('categories', category.id, {
         name: name.trim(),
@@ -2525,13 +2554,15 @@ function CategoryForm({ category, open, onClose }: { category?: Category; open: 
         <SlotPicker
           value={effectiveSlot}
           onChange={setSlot}
+          color={effectiveColor}
+          onColorChange={setColor}
           hint={parentId && !overriding ? 'inherited' : undefined}
         />
 
         <IconPicker
           value={icon}
           onChange={setIcon}
-          colour={slotVar(effectiveSlot)}
+          colour={paintOf(effectiveSlot, effectiveColor)}
           hint={parentId && !overriding ? 'inherited' : undefined}
         />
 

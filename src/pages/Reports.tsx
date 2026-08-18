@@ -13,6 +13,7 @@ import {
   useMyLevels,
 } from '../lib/cache'
 import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { paintOf } from '../lib/palette'
 import { csvAmount, downloadCSV, toCSV } from '../lib/csv'
 import { unexplainedLegs, unexplainedTotals } from '../lib/unexplained'
 import { useSyncState } from '../hooks/useSync'
@@ -767,7 +768,7 @@ export default function Reports() {
                 >
                   <td className={cx(table.cell, table.pinned)}>
                     <span className="inline-flex items-center gap-2">
-                      <span style={{ color: `var(--series-${s.slot})` }}>
+                      <span style={{ color: paintOf(s.slot, s.color) }}>
                         <CategoryIcon icon={s.icon} size={15} />
                       </span>
                       {s.name}

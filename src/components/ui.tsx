@@ -1526,6 +1526,7 @@ export function Sheet({
  */
 export function Face({
   slot,
+  color,
   icon,
   shape = 'circle',
   size = 36,
@@ -1533,12 +1534,15 @@ export function Face({
 }: {
   /** A palette slot, or undefined for the unstyled grey. */
   slot?: number
+  /** A colour of its own, overriding the slot. See `paintOf`. */
+  color?: string
   icon?: string
   shape?: 'circle' | 'square'
   size?: number
   className?: string
 }) {
-  const colour = slot ? slotVar(slot) : 'var(--ink-3)'
+  const painted = color ?? (slot ? slotVar(slot) : undefined)
+  const colour = painted ?? 'var(--ink-3)'
   return (
     <span
       className={cx(
@@ -1549,7 +1553,7 @@ export function Face({
       )}
       style={{
         ['--dot' as string]: `${size}px`,
-        background: slot ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))` : 'var(--surface-2)',
+        background: painted ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))` : 'var(--surface-2)',
         color: colour,
       }}
       aria-hidden
@@ -1560,7 +1564,7 @@ export function Face({
 }
 
 export function CategoryDot({ category, size = 36, className }: { category?: Category; size?: number; className?: string }) {
-  return <Face slot={category?.slot} icon={category?.icon} size={size} className={className} />
+  return <Face slot={category?.slot} color={category?.color} icon={category?.icon} size={size} className={className} />
 }
 
 /**
@@ -1577,7 +1581,7 @@ export function CategoryDot({ category, size = 36, className }: { category?: Cat
  */
 export function AccountDot({ account, size = 36, className }: { account?: Account; size?: number; className?: string }) {
   const face = account ? accountFace(account) : undefined
-  return <Face slot={face?.slot} icon={face?.icon} shape="square" size={size} className={className} />
+  return <Face slot={face?.slot} color={face?.color} icon={face?.icon} shape="square" size={size} className={className} />
 }
 
 /* ---------- Progress bar (budgets, goals) ---------- */

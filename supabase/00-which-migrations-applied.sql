@@ -240,6 +240,16 @@ select '22-rule-edits.sql',
        'upsert_rule edits an existing rule in place instead of re-inserting it'
 
 union all
+-- Until this reads true the colour picker offers the twelve slots and nothing
+-- else: a custom colour is written into the outbox, refused by PostgREST as an
+-- unknown column, and surfaces as a dead letter minutes later in Settings.
+select '23-custom-colours.sql',
+       (select count(*) from information_schema.columns
+         where table_schema = 'public' and column_name = 'color'
+           and table_name in ('categories', 'accounts', 'goals')) = 3,
+       'categories.color + accounts.color + goals.color exist'
+
+union all
 -- Not a migration: 21 replaces the uniqueness rule on `rules`, because two
 -- rules for one payee at two amounts is the whole point of it. If the old index
 -- is still here the second one is refused outright, with a duplicate-key dead

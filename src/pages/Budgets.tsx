@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Target, Copy, Check } from 'lucide-react'
 import type { Budget, Category } from '../lib/db'
+import { paintOf } from '../lib/palette'
 import { create, update, remove } from '../lib/data'
 import { rpc } from '../lib/api'
 import { syncNow } from '../lib/session'
@@ -421,7 +422,7 @@ function BudgetRow({
             spent={row.spent}
             budget={budget}
             typical={row.typical}
-            color={`var(--series-${style.slot})`}
+            color={paintOf(style.slot, style.color)}
             label={`${money(row.spent)} spent of a ${money(budget)} budget`}
           />
         )}
@@ -496,7 +497,7 @@ function BudgetCard({
               spent={row.spent}
               budget={budget}
               typical={row.typical}
-              color={`var(--series-${style.slot})`}
+              color={paintOf(style.slot, style.color)}
               label={`${money(row.spent)} spent of a ${money(budget)} budget`}
             />
           </div>

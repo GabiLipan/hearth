@@ -108,12 +108,14 @@ const KIND_FACE: Record<Account['kind'], { slot: number; icon: string }> = {
  * read gives `undefined` on the common case and paints the row grey, which is
  * the state this feature exists to remove.
  */
-export function accountFace(account: Pick<Account, 'kind' | 'slot' | 'icon'>): {
+export function accountFace(account: Pick<Account, 'kind' | 'slot' | 'icon' | 'color'>): {
   slot: number
   icon: string
+  /** A colour of its own, overriding the slot. Never derived from `kind`. */
+  color?: string
 } {
   const base = KIND_FACE[account.kind] ?? KIND_FACE.current
-  return { slot: account.slot ?? base.slot, icon: account.icon ?? base.icon }
+  return { slot: account.slot ?? base.slot, icon: account.icon ?? base.icon, color: account.color }
 }
 
 /* ---------- balances ---------- */

@@ -193,7 +193,9 @@ export function Sankey({
   )
 
   const colourOf = (n: FlowNode) =>
-    n.side === 'hub' ? c.ink2 : n.muted || n.slot === undefined || n.slot === 0 ? c.ink3 : c.slot(n.slot)
+    n.side === 'hub' ? c.ink2
+    : n.muted ? c.ink3
+    : (n.color ?? (n.slot === undefined || n.slot === 0 ? c.ink3 : c.slot(n.slot)))
 
   const boxOf = useMemo(() => new Map(layout.boxes.map((b) => [b.node.id, b])), [layout])
   const hoveredNode = hovered ? boxOf.get(hovered.id)?.node : undefined

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject 
 import { ChevronDown } from 'lucide-react'
 import type { Category } from '../lib/db'
 import { styleOf, type CategoryStyle } from '../lib/categories'
+import { paintOf } from '../lib/palette'
 import { CategoryIcon } from './CategoryIcon'
 import { cx } from './ui'
 
@@ -169,7 +170,7 @@ function Tile({
           : 'bg-surface-2 text-ink-2 ring-transparent hover:ring-hairline',
       )}
     >
-      <span style={selected ? undefined : { color: `var(--series-${style.slot})` }}>
+      <span style={selected ? undefined : { color: paintOf(style.slot, style.color) }}>
         <CategoryIcon icon={style.icon} size={18} />
       </span>
       {/* `w-full` so `truncate` has a width to truncate against — inside a

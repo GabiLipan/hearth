@@ -42,14 +42,14 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   // by a trigger. An empty allow-list makes patchToDb throw at the boundary
   // rather than posting something the server would refuse.
   household_members: [],
-  categories: ['id', 'name', 'icon', 'slot', 'kind', 'sortOrder', 'parentId', 'ownerId'],
+  categories: ['id', 'name', 'icon', 'slot', 'color', 'kind', 'sortOrder', 'parentId', 'ownerId'],
   // `visibility` and `ownerId` are deprecated by 07 and pinned inert on the
   // server. They stay writable for one release so a patch queued by an older
   // tab still matches a row and drains, instead of dead-lettering; 08 removes
   // them from here and from the table.
   accounts: [
     'id', 'name', 'kind', 'visibility', 'ownerId', 'openingBalanceMinor', 'sortOrder',
-    'bookOverride', 'slot', 'icon',
+    'bookOverride', 'slot', 'icon', 'color',
     // Consent, and an ordinary field on the account: `accounts_update` already
     // decides who may change one, and it needs `manage`. Writing it bumps the
     // visibility epoch server-side in BOTH directions — see migration 19 — so
@@ -59,7 +59,7 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   // Written by upsert_account_grant, so the whole row is the RPC's argument
   // list — see RPC_TABLES in outbox.ts.
   account_grants: ['id', 'accountId', 'userId', 'level'],
-  goals: ['id', 'name', 'icon', 'slot', 'targetMinor', 'targetDate', 'ownerId', 'accountId', 'sortOrder'],
+  goals: ['id', 'name', 'icon', 'slot', 'color', 'targetMinor', 'targetDate', 'ownerId', 'accountId', 'sortOrder'],
   bills: ['id', 'name', 'payee', 'amountMinor', 'categoryId', 'accountId', 'freq', 'nextDue', 'active', 'autoPost'],
   // transferId and goalId are set by create_transfer server-side, never posted
   // directly — a client that could write transferId could fabricate half a transfer.

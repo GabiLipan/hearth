@@ -8,7 +8,7 @@ the app.
 ## Applying it
 
 In the Supabase SQL editor, run the numbered files in order — `01-schema.sql`
-through to `20-transaction-titles.sql`. There is no migrations table, so if you are
+through to `23-custom-colours.sql`. There is no migrations table, so if you are
 unsure what a project has already had, run `00-which-migrations-applied.sql`
 first: it is read-only and reports a row per migration.
 
@@ -22,12 +22,20 @@ quietly loses whatever was paid from a personal account. Re-run `19`. And `20`
 replaces `03`'s three-argument `upsert_rule` with a four-argument one, so
 re-running `03` afterwards puts the old signature back beside the new and every
 rule the app learns dead-letters with "could not find the function … in the
-schema cache". Re-run `20`. The detector has a row for each.
+schema cache". Re-run `20`. `21` and `22` continue that thread — `21` widens
+`upsert_rule` again and `22` replaces `21`'s body under the SAME signature, so
+re-running `21` after `22` silently restores the broken one and no signature
+count can see it. Re-run the highest. The detector has a row for each.
+
+`23` sets no ordering trap and a DEPLOY-order one instead: the client's pull
+asks for `color` as soon as the app knows about it, so an app deployed ahead of
+this migration does not merely lack custom colours — every pull of categories,
+accounts and goals fails on an unknown column. Run it before deploying.
 
 Then, to prove it works, sign up two accounts and run `99-rls-tests.sql`. It
 runs inside a transaction and rolls back, so it is safe to re-run and leaves
 nothing behind. Every row of the output must read `ok = true`. The other test
-files (`99b` … `99l`) are the same shape.
+files (`99b` … `99p`) are the same shape.
 
 ## Running it locally
 
@@ -43,7 +51,7 @@ the `auth` schema, `auth.uid()`, the `anon`/`authenticated` roles, the
 `local/00-shim.sql` first and `local/98-grants.sql` last:
 
 ```
-local/00-shim.sql → 01 … 20 → local/98-grants.sql → 99*-tests.sql
+local/00-shim.sql → 01 … 23 → local/98-grants.sql → 99*-tests.sql
 ```
 
 `pgcrypto` needs an explicit import:

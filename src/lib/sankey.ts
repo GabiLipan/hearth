@@ -32,6 +32,8 @@ export interface FlowNode {
   side: 'in' | 'hub' | 'out'
   /** A palette slot, where the band stands for a category that has one. */
   slot?: number
+  /** The category's own colour, where it has one. Overrides `slot`. See `paintOf`. */
+  color?: string
   /** Drawn in ink rather than colour: a total, a residual, something unassigned. */
   muted?: boolean
   /**
@@ -162,7 +164,7 @@ export function spendFlow({ book, totals, slices, split, partner }: FlowInput): 
   /* ---- what it turned into ---- */
   const categorised = slices.reduce((s, x) => s + x.totalMinor, 0)
   for (const s of slices) {
-    outflow(`cat:${s.categoryId}`, s.name, s.totalMinor, { slot: s.slot })
+    outflow(`cat:${s.categoryId}`, s.name, s.totalMinor, { slot: s.slot, color: s.color })
   }
   // The slices only count rows that carry a category. Left out, the right-hand
   // side would be short by however much has not been filed yet, and nothing on

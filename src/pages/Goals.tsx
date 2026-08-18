@@ -16,7 +16,7 @@ import {
 import { confirmAction } from '../components/confirm'
 import { toast } from '../components/toast'
 import { IconPicker, SlotPicker } from '../components/IconPicker'
-import { nextFreeSlot, slotVar } from '../lib/palette'
+import { nextFreeSlot, paintOf } from '../lib/palette'
 import { BookSwitcher } from '../components/BookSwitcher'
 
 /**
@@ -117,7 +117,7 @@ export default function Goals() {
                 {/* The same badge a category and an account wear, rather than a
                     fourth hand-rolled copy of the recipe — this one had already
                     drifted to its own size and its own icon scale. */}
-                <Face slot={goal.slot} icon={goal.icon} size={36} />
+                <Face slot={goal.slot} color={goal.color} icon={goal.icon} size={36} />
                 <button type="button" onClick={() => openForm(goal)} className="min-w-0 flex-1 text-left">
                   <p className="flex items-center gap-1.5 truncate font-medium">
                     {goal.name}
@@ -216,6 +216,8 @@ function GoalForm({
   const [slot, setSlot] = useState(
     () => goal?.slot ?? nextFreeSlot(existingGoals.map((g) => g.slot)),
   )
+  /** A colour of its own, overriding the slot. Undefined is the normal case. */
+  const [color, setColor] = useState(goal?.color)
   const [target, setTarget] = useState(goal ? String(goal.targetMinor / 100) : '')
   const [targetDate, setTargetDate] = useState(goal?.targetDate ?? '')
   const [accountId, setAccountId] = useState<string | undefined>(goal?.accountId)
@@ -230,6 +232,7 @@ function GoalForm({
       name: name.trim(),
       icon,
       slot,
+      color,
       targetMinor: minor!,
       targetDate: targetDate || undefined,
       accountId,
@@ -279,7 +282,7 @@ function GoalForm({
             how the category form reads: what you are choosing is the face this
             pot wears in the list, and the list puts it left of the name. */}
         <div className="flex items-center gap-3">
-          <Face slot={slot} icon={icon} size={44} />
+          <Face slot={slot} color={color} icon={icon} size={44} />
           <div className="min-w-0 flex-1">
             <Field label="What are you saving for?">
               <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Holiday" autoFocus={!goal} />
@@ -310,8 +313,8 @@ function GoalForm({
             holiday or a car unless the icon for it happened to fall in the
             first two rows — and after the set grew to two hundred those
             twenty-four were simply the Money and Home groups. */}
-        <SlotPicker value={slot} onChange={setSlot} />
-        <IconPicker value={icon} onChange={setIcon} colour={slotVar(slot)} />
+        <SlotPicker value={slot} onChange={setSlot} color={color} onColorChange={setColor} />
+        <IconPicker value={icon} onChange={setIcon} colour={paintOf(slot, color)} />
         {userId && (
           <label className="flex items-start gap-3 rounded-xl bg-surface-2 px-4 py-3">
             <input

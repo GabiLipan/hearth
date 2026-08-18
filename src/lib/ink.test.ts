@@ -4,12 +4,12 @@ import { shade } from './shade'
 
 /** The twelve slots, both themes, exactly as `index.css` defines them. */
 const LIGHT = [
-  '#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948',
-  '#e87ba4', '#eb6834', '#0b8ba3', '#a344c4', '#6b8a15', '#8a6244',
+  '#3984e4', '#169f4b', '#a77d00', '#0093b3', '#8270df', '#d55550',
+  '#c95492', '#c86600', '#019993', '#af5fc0', '#838d00', '#9d7e63',
 ]
 const DARK = [
-  '#3987e5', '#199e70', '#c98500', '#008300', '#9085e9', '#e66767',
-  '#d55181', '#d95926', '#29a8c4', '#b866d8', '#8fae2e', '#a8794f',
+  '#529af9', '#3fb462', '#c19100', '#00abcf', '#9787f5', '#eb6d67',
+  '#e06ca7', '#e27b21', '#02b1aa', '#c476d6', '#98a401', '#b39377',
 ]
 
 describe('contrast', () => {
@@ -42,13 +42,22 @@ describe('inkOn', () => {
    * The whole reason this is computed rather than written down: white is the
    * wrong answer far more often than not, and how often depends on the theme.
    */
-  it('finds that most of the palette wants dark ink, and how many differs by theme', () => {
-    expect(LIGHT.filter((f) => inkOn(f).dark)).toHaveLength(8)
-    expect(DARK.filter((f) => inkOn(f).dark)).toHaveLength(11)
-    // The one that flips: forest green takes white on a light screen and black
-    // on a dark one. A written-down table would have to carry both.
-    expect(inkOn('#4a3aa7').dark).toBe(false)
-    expect(inkOn('#3987e5').dark).toBe(true)
+  it('wants dark ink on every slot, in both themes', () => {
+    expect(LIGHT.filter((f) => inkOn(f).dark)).toHaveLength(12)
+    expect(DARK.filter((f) => inkOn(f).dark)).toHaveLength(12)
+  })
+
+  /**
+   * Unanimity is the POINT of cutting the twelve at one lightness, and it is
+   * also the fragile part: a slot re-tuned darker flips its label to white
+   * while the eleven beside it stay black, and a row of tiles then reads as two
+   * kinds of thing. The old palette split 8/12 one way and 11/12 the other,
+   * which is why `inkOn` computes rather than looks up — that has not changed,
+   * and a custom colour still arrives here as an arbitrary hex.
+   */
+  it('still answers per fill, for a colour that was never in the palette', () => {
+    expect(inkOn('#0b0b0b').dark).toBe(false)
+    expect(inkOn('#f4f4f4').dark).toBe(true)
   })
 
   /**

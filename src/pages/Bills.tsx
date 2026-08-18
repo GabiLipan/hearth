@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Plus, Check, SkipForward, Wand2, CalendarClock, Link2 } from 'lucide-react'
 import type { Bill, BillFreq } from '../lib/db'
+import { paintOf } from '../lib/palette'
 import { create, update, remove as removeRow } from '../lib/data'
 import { useAccounts, useAllTransactions, useBills, useBook, useBooks, useCategories, useCategoryMap, useMyLevels, useCacheReady } from '../lib/cache'
 import { canAddTransactions, levelOn } from '../lib/accounts'
@@ -404,7 +405,7 @@ export default function Bills() {
                             <span className="flex items-center gap-1.5 truncate text-ink-2">
                               <span
                                 className="shrink-0"
-                                style={{ color: cat ? `var(--series-${cat.slot})` : 'var(--ink-3)' }}
+                                style={{ color: cat ? paintOf(cat.slot, cat.color) : 'var(--ink-3)' }}
                               >
                                 <CategoryIcon icon={cat?.icon} size={14} />
                               </span>

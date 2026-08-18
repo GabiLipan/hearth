@@ -26,7 +26,7 @@ import { Sankey } from './Sankey'
 import { settlement } from '../lib/reimbursements'
 import { typicalRange } from '../lib/budgetHistory'
 import { accountFace, balanceHistory, balanceOf, canAddTransactions, canSeeTransactionsAt, levelOn } from '../lib/accounts'
-import { slotVar } from '../lib/palette'
+import { paintOf } from '../lib/palette'
 import { transfer } from '../lib/goals'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { syncNow } from '../lib/session'
@@ -295,7 +295,7 @@ export function BudgetGlanceWidget({ data }: WidgetProps) {
           const over = catSpent > budget
           return (
             <li key={cat.id} className="flex items-center gap-2.5 md:gap-2">
-              <span className="grid w-5 shrink-0 place-items-center" style={{ color: `var(--series-${cat.slot})` }} aria-hidden>
+              <span className="grid w-5 shrink-0 place-items-center" style={{ color: paintOf(cat.slot, cat.color) }} aria-hidden>
                 <CategoryIcon icon={cat.icon} size={15} />
               </span>
               <span className="w-24 truncate text-sm text-ink-2 sm:w-32">{cat.name}</span>
@@ -305,7 +305,7 @@ export function BudgetGlanceWidget({ data }: WidgetProps) {
                 budget={budget}
                 typical={typical}
                 pace={paceFrac}
-                color={`var(--series-${cat.slot})`}
+                color={paintOf(cat.slot, cat.color)}
                 label={`${cat.name}: ${money(catSpent)} spent of a ${money(budget)} budget`}
               />
               <span className={cx('w-16 shrink-0 text-right text-xs font-medium tabular', over ? 'text-critical-text' : 'text-ink-2')}>
@@ -360,7 +360,7 @@ export function AccountsWidget({ data }: WidgetProps) {
               {spark && (
                 <Sparkline
                   values={spark}
-                  color={slotVar(face.slot)}
+                  color={paintOf(face.slot, face.color)}
                   className="h-5 w-12 shrink-0 opacity-70 sm:w-14"
                   label={`${a.name}: the last ${SPARK_DAYS} days`}
                 />

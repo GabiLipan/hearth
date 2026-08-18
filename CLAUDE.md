@@ -67,6 +67,7 @@ read-only detector that reports which are present — run it when unsure.
 | `20-transaction-titles.sql` | `transactions.title` + `rules.title` — what a row is CALLED, as opposed to what the bank wrote, learned back through the same rules that learn a category. `rules.category_id` becomes nullable, and `upsert_rule` gains a fourth argument |
 | `21-rule-conditions.sql` | `rules.amount_min_minor` / `amount_max_minor` / `account_id` — a rule may ask for more than the payee. Two subscriptions from one vendor at two prices become two rules, so the uniqueness rule moves from the payee to the whole condition set, and `upsert_rule` gains three more arguments |
 | `22-rule-edits.sql` | `upsert_rule` looks before it inserts, so a rule's CONDITIONS can be edited — its payee, an amount, an account. Same signature as 21's, body only |
+| `23-custom-colours.sql` | `categories.color` / `accounts.color` / `goals.color` — a `#rrggbb` of your own, laid OVER the slot rather than replacing it. Null is the ordinary case |
 
 All are re-runnable, with **five ordering traps**, and three of them are the
 same trap. The rule migrations stack: `20` drops the three-argument
@@ -99,6 +100,13 @@ the new. PostgREST then cannot resolve the call — supabase-js drops `undefined
 arguments — and every transfer link dead-letters with "could not find the
 function … in the schema cache". Re-run `10` to clear it;
 `00-which-migrations-applied.sql` has a row that detects exactly this.
+
+`23` sets no ordering trap and one DEPLOY trap instead, which is the other
+shape this has taken: `READABLE` in `mapping.ts` is derived from `WRITABLE`, so
+the moment `color` became writable every pull started asking PostgREST for it.
+An app shipped ahead of its migration therefore does not lose the colour
+feature, it loses SYNC — every pull of categories, accounts and goals fails on
+an unknown column. Run `23` before deploying, not after.
 
 `05` refuses to install if `04` is missing — necessary,
 because **plpgsql bodies are only syntax-checked at creation time**, so a
@@ -133,7 +141,9 @@ than on the way in to the next import),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
 `contributors.ts` (naming the person behind an arrival whose far leg does not
 exist, and remembering the name for next month),
-`categoryTree.ts` (what a drag on the category list means, and what it writes),
+`palette.ts` (the twelve slots, the order they are offered in, and a colour of
+your own over the top of one), `categoryTree.ts` (what a drag on the category
+list means, and what it writes),
 `layout.ts` (which sections a page shows, in what order, how wide, in which
 shape, and what else each one lets you decide — home and Reports share it),
 `drill.ts` (out of a figure and into the rows behind it, and the way back),
@@ -1103,6 +1113,38 @@ the single place a level comes from.
   Santander or Nationwide, the whole British high street, and its Visa, Amex and
   Discover are wordmarks. `IconComponent`, not `LucideIcon`, is what the
   registry holds now; both kinds satisfy it and no call site knows which it has.
+- **The palette is twelve slots cut at ONE lightness, and the order they are
+  OFFERED in is not the order they are stored in.** Slot numbers are on rows in
+  the database and cannot move, so `SWATCH_ORDER` is a second list — the wheel
+  put back together, warm to cool, six per row — and `SlotPicker` is the only
+  thing that reads it. Everything else still counts 1..12. The colours
+  themselves are OKLCH at L 0.615 (light) / 0.685 (dark) with hues about 30°
+  apart, which is what makes `inkOn` answer "dark" for all twenty-four: a label
+  on a fill no longer flips ink between neighbouring tiles, and the worst
+  contrast rose from 4.76:1 to 5.17:1. Two things that cost: a swatch now sits
+  at 3.4–4.0:1 against the light `--surface` where the old forest green sat at
+  5.9, so the selected ring is carrying more of the work; and `--accent` is no
+  longer the same value as `--series-1`, because uniform lightness moved slot 1
+  lighter than the brand blue. Slot 4 stopped being a second green and became
+  the cyan the wheel was missing, which is the one slot that changed family —
+  every category already on it repainted. `ink.test.ts` pins the floor rather
+  than the values; re-tune a slot and that is what says so.
+- **A custom colour is an override laid over a slot, never a replacement for
+  one.** `color` (migration 23) is a `#rrggbb` on a category, an account or a
+  goal, and `paintOf(slot, color)` is the only thing that should resolve the
+  pair — a caller reaching for `slotVar` directly paints the palette colour on a
+  row somebody deliberately recoloured. The slot stays REQUIRED underneath for
+  two reasons that have both already bitten in other forms:
+  `categories_top_level_has_style` demands one, so a row with a colour and no
+  slot dead-letters minutes later; and a client that has not learned about the
+  column yet still has something to paint with. It is one value for BOTH themes,
+  where a slot has a step for each, so a custom colour cannot promise the
+  contrast the palette does — which is why the twelve stay the default and the
+  thirteenth swatch is the way to it. A colour that does not travel with the
+  FIGURE shows on the badge and not in the chart beside it, so `CategorySlice`,
+  `FlowNode`, `PayeeTotal` and `HeatmapRow` all carry `color` next to `slot`.
+  `SlotPicker` offers it as a disclosure and not a `Popover`: it lives inside a
+  `Sheet`, and a popover portals underneath one.
 - **A goal wears the same face as a category, and now gets to choose it.**
   `goals.slot` and `goals.icon` have existed since the table did and the cards
   have always painted them, but the form offered the first twenty-four keys of
@@ -1187,15 +1229,18 @@ the single place a level comes from.
 - **Ink on a fill is measured, not looked up.** Writing a category's name onto
   its own colour is the one place in the app where the ground under a label
   differs per label, and the intuition — "white text on the colour" — is wrong
-  more often than right: white loses to black on eight of the twelve slots in the
-  light theme and on eleven in the dark one, and which slot flips is not the same
-  in both. A table beside the palette would therefore be two themes of
-  exceptions, and it could not cover `shade.ts` at all, which invents lightnesses
-  that were never in the palette. `useChartColors` has already resolved the
-  tokens to hex, so `inkOn` computes it. What that buys is pinned in
-  `ink.test.ts`: every palette colour and every shaded variant clears AA — worst
-  cases 4.76:1 and 4.68:1 — which is what makes a bare label on a bare fill
-  legitimate. Re-tune a slot and that test is what says so.
+  more often than right. The twelve are cut at one lightness now, so the answer
+  is currently "dark" on all twenty-four; that is a PROPERTY of this palette
+  rather than a fact about fills, and the old one split 8/12 in the light theme
+  and 11/12 in the dark, with a different slot flipping in each. So a table
+  beside the palette would be two themes of exceptions and would go stale the
+  first time a slot moved, it could not cover `shade.ts` at all — which invents
+  lightnesses that were never in the palette — and it could not cover a custom
+  colour, which is an arbitrary hex nobody reviewed. `useChartColors` has
+  already resolved the tokens to hex, so `inkOn` computes it. What that buys is
+  pinned in `ink.test.ts`: every palette colour and every shaded variant clears
+  AA — worst cases 5.17:1 and 4.73:1 — which is what makes a bare label on a
+  bare fill legitimate. Re-tune a slot and that test is what says so.
 - **The blocks view has to be measured before it can be laid out**, and the
   effect that measures it must depend on the thing it measures. A treemap
   squarifies against the box's ASPECT RATIO, so `CategoryMosaic` cannot work in

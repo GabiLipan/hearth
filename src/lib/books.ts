@@ -1133,6 +1133,7 @@ function toSlices(
       name: c.name,
       icon: style.icon,
       slot: style.slot,
+      color: style.color,
       totalMinor,
       fraction: totalMinor / grand,
     }

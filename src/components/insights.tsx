@@ -13,6 +13,7 @@ import {
   ReferenceLine,
 } from 'recharts'
 import { useChartColors } from '../hooks/useChartColors'
+import { paintOf } from '../lib/palette'
 import { useApp } from '../state/AppContext'
 import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
 import { monthLabel, thisMonthKey } from '../lib/dates'
@@ -481,11 +482,11 @@ export function TopPayees({
             className="absolute inset-y-0 left-0 rounded-lg"
             style={{
               width: `${peak > 0 ? Math.max(2, (r.totalMinor / peak) * 100) : 0}%`,
-              background: `color-mix(in oklab, var(--series-${r.slot}) 20%, transparent)`,
+              background: `color-mix(in oklab, ${paintOf(r.slot, r.color)} 20%, transparent)`,
             }}
           />
           <div className="relative flex items-center gap-2 px-2.5 py-1.5">
-            <span className="shrink-0" style={{ color: `var(--series-${r.slot})` }}>
+            <span className="shrink-0" style={{ color: paintOf(r.slot, r.color) }}>
               <CategoryIcon icon={r.icon} size={14} />
             </span>
             <span className="min-w-0 flex-1 truncate text-sm">{r.payee}</span>
@@ -556,7 +557,7 @@ export function CategoryHeatmap({
         {grid.rows.map((row) => (
           <Fragment key={row.categoryId}>
             <span className="flex items-center gap-1.5 truncate pr-2 text-ink-2">
-              <span className="shrink-0" style={{ color: `var(--series-${row.slot})` }}>
+              <span className="shrink-0" style={{ color: paintOf(row.slot, row.color) }}>
                 <CategoryIcon icon={row.icon} size={13} />
               </span>
               <span className="truncate">{row.name}</span>
@@ -582,7 +583,7 @@ export function CategoryHeatmap({
                 style={{
                   background:
                     value > 0 && grid.peakMinor > 0
-                      ? `color-mix(in oklab, var(--series-${row.slot}) ${Math.round(
+                      ? `color-mix(in oklab, ${paintOf(row.slot, row.color)} ${Math.round(
                           // A floor of 8%: a real but small figure must not be
                           // indistinguishable from an empty month.
                           8 + (value / grid.peakMinor) * 62,
