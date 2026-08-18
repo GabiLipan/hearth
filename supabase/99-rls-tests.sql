@@ -362,8 +362,9 @@ begin
   select id into other from public.categories where name = 'Transport';
 
   -- Re-learning a payee must update the rule, not fail on the unique index.
-  perform public.upsert_rule(null, 'tesco', groceries);
-  r := public.upsert_rule(null, 'tesco', other);
+  -- Four arguments since migration 20: the name a rule may also carry.
+  perform public.upsert_rule(null, 'tesco', groceries, null);
+  r := public.upsert_rule(null, 'tesco', other, null);
   select count(*) into n from public.rules where deleted_at is null;
   perform pg_temp.check('re-learning a payee updates its rule instead of duplicating', n = 1, n::text);
   perform pg_temp.check('re-learning a payee changes the category', r.category_id = other, '');

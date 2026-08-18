@@ -14,15 +14,20 @@ being read.
 Right now: **nothing waiting on us**, and **nothing left on this plan**. What
 comes next is whatever we find by using it.
 
-**Two migrations need applying by hand**, like the others:
+**Three migrations need applying by hand**, like the others:
 
 - `supabase/15-purge-account.sql` — until then the bin in Settings only fills
   up, and "Delete for good" fails with "could not find the function".
 - `supabase/16-explain-requests.sql` — until then "Ask about this" does the
   same.
+- `supabase/20-transaction-titles.sql` — until then "Call it" saves nothing:
+  rows keep whatever the bank wrote, and a name learned on one is forgotten by
+  the next. Note it DROPS the three-argument `upsert_rule`, so if
+  `03-rpc.sql` is ever re-run afterwards, run `20` again — otherwise every rule
+  the app learns dead-letters.
 
 Run `supabase/00-which-migrations-applied.sql` in the SQL editor when unsure
-what a project has had; it now covers 11 through 16 as well.
+what a project has had; it now covers 11 through 20 as well.
 
 ---
 

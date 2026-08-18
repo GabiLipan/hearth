@@ -20,6 +20,7 @@ import {
 import { spendFlow } from '../lib/sankey'
 import { openDrill, type Drill } from '../lib/drill'
 import { useMemberMap } from '../lib/cache'
+import { displayName } from '../lib/rules'
 import { nameOf } from './PersonDot'
 import { Sankey } from './Sankey'
 import { settlement } from '../lib/reimbursements'
@@ -674,7 +675,7 @@ export function ReimbursementWidget({ data }: WidgetProps) {
             {s.items.slice(0, 4).map(({ txn, owedMinor }) => (
               <li key={txn.id} className="flex items-center gap-2 py-2 md:py-1">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{txn.payee}</p>
+                  <p className="truncate text-sm font-medium">{displayName(txn)}</p>
                   <p className="text-xs text-ink-3">{fmtDay(txn.date)}</p>
                 </div>
                 <span className="text-sm font-semibold tabular">{money(owedMinor)}</span>
@@ -875,7 +876,7 @@ export function RecentWidget({ data, options }: WidgetProps) {
           <li key={t.id} className="flex items-center gap-2.5 py-2 md:gap-2 md:py-1">
             <CategoryDot category={t.categoryId ? catMap.get(t.categoryId) : undefined} size={30} className="md:[--dot:24px]" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{t.payee}</p>
+              <p className="truncate text-sm font-medium">{displayName(t)}</p>
               <p className="text-xs text-ink-3">{fmtDay(t.date)}</p>
             </div>
             <span className={cx('text-sm font-semibold tabular', t.amountMinor > 0 && 'text-good-text')}>

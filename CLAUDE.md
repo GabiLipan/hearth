@@ -64,8 +64,14 @@ read-only detector that reports which are present — run it when unsure.
 | `17-account-appearance.sql` | `accounts.slot` + `accounts.icon` — an account gets a colour and an icon, like a category |
 | `18-contributions.sql` | `transactions.contributor_id` — say who paid money in, where the far leg is in an account that will never be in the app |
 | `19-published-household-rows.sql` | `accounts.publishes_household_rows` — a row marked as the household's is readable by the household, wherever it was paid from. The one row-level rule in the schema |
+| `20-transaction-titles.sql` | `transactions.title` + `rules.title` — what a row is CALLED, as opposed to what the bank wrote, learned back through the same rules that learn a category. `rules.category_id` becomes nullable, and `upsert_rule` gains a fourth argument |
 
-All are re-runnable, with **two ordering traps**. The second: `19` replaces
+All are re-runnable, with **three ordering traps**. The third is the second one
+again, one file along: `20` drops the three-argument `upsert_rule` and replaces
+it with a four-argument one, and `03` is still re-runnable — running `03` after
+`20` puts the old signature back beside the new, PostgREST cannot resolve the
+call, and every rule the app learns dead-letters. Re-run `20`;
+`00-which-migrations-applied.sql` detects it. The second: `19` replaces
 `07`'s `transactions_select`, so re-running `07` afterwards silently puts the
 narrower policy back — nothing errors, published rows simply stop arriving, and
 the household book quietly loses everything paid from a personal account. Re-run
@@ -99,7 +105,8 @@ UI  →  data.ts (create/update/remove)  →  Dexie cache   (instant paint)
 ```
 
 Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
-`rules.ts` (payee matching, learning, bulk recategorisation), `bills.ts`
+`rules.ts` (payee matching, learning — where a payee is filed AND what it is
+called — and bulk recategorisation), `bills.ts`
 (suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
@@ -887,6 +894,26 @@ the single place a level comes from.
   quietly. `applyCategory` therefore takes a `canEdit` predicate with no default
   and reports what it skipped, so the screen can say "18 updated, 3 are Sam's"
   rather than silently doing less than the button promised.
+- **A name is not a payee, and only one of them is the identity.**
+  `transactions.title` (migration 20) is what a row is CALLED; `payee` stays
+  exactly as the bank wrote it, because `normalizePayee`, the duplicate check,
+  transfer pairing, contributor learning and every rule compare THAT. Display
+  goes through `displayName(t)` — a list reading `t.payee` shows the bank string
+  on a row somebody has named, and one reading `t.title` shows nothing on the
+  rows nobody has. Activity searches both, or a row hides from the word on
+  screen or from the string on the statement in your hand.
+- **A rule now answers two questions, and asking once gets one of them wrong.**
+  A rule may carry a category, a name, or both (`rules.category_id` is nullable
+  as of 20 — categories are only learned from spending, a name is worth learning
+  on income too). So there is no single "the matching rule": `categoryRule` and
+  `titleRule` each take the longest match that carries the field being asked
+  for. Reading both fields off one lookup lets a title-only rule for
+  "tesco petrol" shadow the category rule for "tesco", and the fuel silently
+  stops being filed. `coverageOf` asks the category question, so a name-only
+  rule covers nothing and offers no bulk apply — applying a rule rewrites
+  `category_id` and nothing else. Naming past rows is `applyTitle`, offered
+  separately because it is a different set: it includes income and transfer
+  legs, which is exactly where a bank string is least readable.
 - **A leg whose partner is invisible is a guess nobody may make.** My partner's
   contribution has its far leg in an account I am not on, so until they link it
   my screen counts money out of the joint account as household spending and

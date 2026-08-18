@@ -201,6 +201,30 @@ select 'transactions_select publishes',
        'transactions_select carries the published-row disjunct — re-run 19 if this is false'
 
 union all
+-- Until this reads true, the name field on a transaction saves nothing: rows
+-- keep showing whatever the bank wrote, and a name learned on one is forgotten
+-- by the next.
+select '20-transaction-titles.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'transactions' and column_name = 'title')
+   and exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'rules' and column_name = 'title')
+   and to_regprocedure('public.upsert_rule(uuid,text,uuid,text)') is not null,
+       'transactions.title + rules.title + four-argument upsert_rule exist'
+
+union all
+-- Not a migration: the same trap 09-after-10 sets, one file along. 20 drops the
+-- three-argument upsert_rule and replaces it with a four-argument one, and 03
+-- is still re-runnable — running 03 AFTER 20 puts the old signature back beside
+-- the new. supabase-js drops `undefined` arguments, so the call becomes
+-- ambiguous and every rule the app learns dead-letters with "could not find the
+-- function in the schema cache". Re-run 20 to clear it.
+select 'no duplicate upsert_rule',
+       (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.proname = 'upsert_rule') <= 1,
+       'exactly one upsert_rule signature — re-run 20 if this is false'
+
+union all
 -- Not a migration: a state you can only reach by re-running 09 AFTER 10, which
 -- re-creates the two-argument link_transfer beside the three-argument one.
 -- PostgREST cannot then resolve the call — supabase-js drops `undefined`

@@ -6,7 +6,7 @@ import { create, update, remove as removeRow } from '../lib/data'
 import { useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules, useCacheReady } from '../lib/cache'
 import { canEditTransaction, levelOn } from '../lib/accounts'
 import { fullName } from '../lib/categories'
-import { applyCategory, coverageOf, normalizePayee } from '../lib/rules'
+import { applyCategory, cleanTitle, coverageOf, displayName, normalizePayee, TITLE_MAX } from '../lib/rules'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import {
@@ -81,7 +81,8 @@ export default function RulesPage() {
     return rules.filter(
       (r) =>
         r.match.includes(q) ||
-        (catMap.get(r.categoryId)?.name ?? '').toLowerCase().includes(q),
+        (r.title ?? '').toLowerCase().includes(q) ||
+        (r.categoryId ? (catMap.get(r.categoryId)?.name ?? '') : '').toLowerCase().includes(q),
     )
   }, [rules, query, catMap])
 
@@ -89,7 +90,9 @@ export default function RulesPage() {
 
   async function apply(rule: Rule) {
     const list = coverage.get(rule.id)?.changed ?? []
-    if (list.length === 0) return
+    // A rule that only says what to call a payee has no coverage — see
+    // `coverageOf` — so there is nothing here to apply.
+    if (list.length === 0 || !rule.categoryId) return
     setBusy(rule.id)
     try {
       const { updated, skipped } = await applyCategory(list, rule.categoryId, canEdit)
@@ -111,7 +114,7 @@ export default function RulesPage() {
     try {
       for (const r of rules) {
         const list = coverage.get(r.id)?.changed ?? []
-        if (list.length === 0) continue
+        if (list.length === 0 || !r.categoryId) continue
         const res = await applyCategory(list, r.categoryId, canEdit)
         updated += res.updated
         skipped += res.skipped
@@ -150,10 +153,11 @@ export default function RulesPage() {
       </Toolbar>
 
       <p className="mb-3 max-w-2xl px-1 text-sm text-ink-2 md:mb-2.5">
-        Every time you categorise a payee, Hearth remembers it and applies it to future entries and
-        imports. Here you can point one somewhere else, apply it to what you have already recorded, or
-        write one yourself. Where two rules could match, the more specific one wins — “tesco petrol”
-        beats “tesco”.
+        Every time you categorise a payee — or give one a name of your own — Hearth remembers it and
+        applies it to future entries and imports. Here you can point one somewhere else, rename it,
+        apply it to what you have already recorded, or write one yourself. A rule can do either job or
+        both: a name alone is enough where the bank’s words are the only problem. Where two rules could
+        match, the more specific one wins — “tesco petrol” beats “tesco”.
       </p>
 
       {done && (
@@ -185,7 +189,7 @@ export default function RulesPage() {
           <Empty
             icon={Wand2}
             title="Nothing learned yet"
-            hint="Categorise a transaction and Hearth will remember the payee. You can also write a rule yourself."
+            hint="Categorise a transaction, or give one a name of your own, and Hearth will remember the payee. You can also write a rule yourself."
             action={
               <Button onClick={() => setAdding(true)}>
                 <Plus size={16} /> Write a rule
@@ -201,7 +205,7 @@ export default function RulesPage() {
             <ul className="divide-y divide-hairline">
               {filtered.map((r) => {
                 const cov = coverage.get(r.id)
-                const cat = catMap.get(r.categoryId)
+                const cat = r.categoryId ? catMap.get(r.categoryId) : undefined
                 return (
                   <li key={r.id} className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -209,7 +213,11 @@ export default function RulesPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium">“{r.match}”</p>
                         <p className="truncate text-sm text-ink-3">
-                          {cat ? fullName(cat, catMap) : 'Category deleted'}
+                          {/* Both halves of what a rule knows, and a rule may
+                              carry either alone. */}
+                          {r.title && <span className="text-ink-2">Call it “{r.title}”</span>}
+                          {r.title && r.categoryId && ' · '}
+                          {r.categoryId && (cat ? fullName(cat, catMap) : 'Category deleted')}
                         </p>
                       </div>
                       <button
@@ -240,10 +248,11 @@ export default function RulesPage() {
           {/* Desktop: the category becomes an editable control in its own column,
               so repointing a rule is one click rather than delete-and-relearn. */}
           <Card className="hidden overflow-hidden md:block">
-            <ScrollTable minWidth={720}>
+            <ScrollTable minWidth={880}>
               <thead>
                 <tr className={table.head}>
                   <th className={cx(table.th, 'min-w-48 pl-3', table.pinned)}>When the payee contains</th>
+                  <th className={cx(table.th, 'w-56')}>Call it</th>
                   <th className={cx(table.th, 'w-56')}>Categorise as</th>
                   <th className={cx(table.th, 'w-28 text-right')}>Matches</th>
                   <th className={cx(table.th, 'w-44 pr-3 text-right')}>
@@ -260,14 +269,27 @@ export default function RulesPage() {
                         <span className="truncate font-medium">{r.match}</span>
                       </td>
                       <td className={cx(table.cell, 'pr-3')}>
+                        <div className="max-w-52">
+                          <TitleCell rule={r} />
+                        </div>
+                      </td>
+                      <td className={cx(table.cell, 'pr-3')}>
                         {/* Select carries w-full, so the width has to live on a
                             wrapper or the base class wins. */}
                         <div className="max-w-52">
                           <Select
-                            value={r.categoryId}
+                            value={r.categoryId ?? ''}
                             aria-label={`Category for ${r.match}`}
-                            onChange={(e) => void update('rules', r.id, { categoryId: e.target.value })}
+                            onChange={(e) =>
+                              void update('rules', r.id, { categoryId: e.target.value || undefined })
+                            }
                           >
+                            {/* A rule may say only what a payee is called — but
+                                one that says neither is refused server-side, so
+                                this is offered only where the name can carry it. */}
+                            <option value="" disabled={!r.title}>
+                              {r.title ? 'Just the name' : 'No category'}
+                            </option>
                             {categories
                               .filter((c) => c.kind === 'expense')
                               .map((c) => (
@@ -337,7 +359,7 @@ export default function RulesPage() {
             <p className="text-sm text-ink-2">
               These are already recorded under something else. They will move to{' '}
               <span className="font-medium text-ink">
-                {catMap.get(preview.categoryId)
+                {preview.categoryId && catMap.get(preview.categoryId)
                   ? fullName(catMap.get(preview.categoryId)!, catMap)
                   : 'that category'}
               </span>
@@ -347,7 +369,7 @@ export default function RulesPage() {
               {(coverage.get(preview.id)?.changed ?? []).map((t) => (
                 <li key={t.id} className="flex items-center gap-2.5 rounded-xl bg-surface-2/50 px-2.5 py-1.5">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{t.payee}</p>
+                    <p className="truncate text-sm font-medium">{displayName(t)}</p>
                     <p className="truncate text-xs text-ink-3">
                       {t.date} · currently{' '}
                       {t.categoryId ? (catMap.get(t.categoryId)?.name ?? 'a deleted category') : 'uncategorised'}
@@ -367,23 +389,84 @@ export default function RulesPage() {
   )
 }
 
+/**
+ * The name a rule gives a payee, edited in place.
+ *
+ * Local state rather than writing on every keystroke: each write goes through
+ * `upsert_rule` with the whole row as its argument list, and one per letter of
+ * "Sainsbury's" is eleven RPCs. It commits on blur and on Enter, and it refuses
+ * to clear the last thing a rule says — a rule with neither a category nor a
+ * name is refused server-side, and a dead letter minutes later in Settings is a
+ * poor way to be told.
+ */
+function TitleCell({ rule }: { rule: Rule }) {
+  const [text, setText] = useState(rule.title ?? '')
+  const [focused, setFocused] = useState(false)
+  // While it is not being edited the row is the truth, so a name learned on the
+  // other device (or by saving a transaction) shows up here.
+  const value = focused ? text : (rule.title ?? '')
+
+  function commit() {
+    setFocused(false)
+    const next = cleanTitle(text)
+    if (next === (rule.title ?? undefined)) return
+    if (!next && !rule.categoryId) {
+      setText(rule.title ?? '')
+      return
+    }
+    void update('rules', rule.id, { title: next })
+  }
+
+  return (
+    <TextInput
+      value={value}
+      maxLength={TITLE_MAX}
+      aria-label={`Name for ${rule.match}`}
+      placeholder={rule.categoryId ? 'Leave the bank’s words' : ''}
+      onFocus={() => {
+        setText(rule.title ?? '')
+        setFocused(true)
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+        if (e.key === 'Escape') {
+          setText(rule.title ?? '')
+          e.currentTarget.blur()
+        }
+      }}
+    />
+  )
+}
+
 function NewRuleSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const categories = useCategories()
   const catMap = useCategoryMap()
   const expense = categories.filter((c) => c.kind === 'expense')
   const [match, setMatch] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  const [title, setTitle] = useState('')
 
-  // Stored normalised, because that is what `matchRule` compares against — a
+  // Stored normalised, because that is what the matcher compares against — a
   // rule saved as "Tesco Stores 3241" would match nothing at all.
   const normalised = normalizePayee(match)
-  const canSave = normalised.length >= 3 && categoryId !== ''
+  // Either half is enough, and neither is not: `rules_say_something` refuses a
+  // rule that says nothing, and a write refused server-side surfaces minutes
+  // later as a dead letter rather than as an error on this form.
+  const canSave = normalised.length >= 3 && (categoryId !== '' || cleanTitle(title) !== undefined)
 
   async function save() {
     if (!canSave) return
-    await create('rules', { match: normalised, categoryId, createdAt: new Date().toISOString() })
+    await create('rules', {
+      match: normalised,
+      categoryId: categoryId || undefined,
+      title: cleanTitle(title),
+      createdAt: new Date().toISOString(),
+    })
     setMatch('')
     setCategoryId('')
+    setTitle('')
     onClose()
   }
 
@@ -414,11 +497,21 @@ function NewRuleSheet({ open, onClose }: { open: boolean; onClose: () => void })
             autoComplete="off"
           />
         </Field>
-        <Field label="Categorise as">
+        <Field
+          label="Call it"
+          hint="Optional. What these show as, instead of whatever the bank wrote."
+        >
+          <TextInput
+            value={title}
+            maxLength={TITLE_MAX}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Vet insurance"
+            autoComplete="off"
+          />
+        </Field>
+        <Field label="Categorise as" hint="Optional, if you have given it a name.">
           <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="" disabled>
-              Choose…
-            </option>
+            <option value="">Don’t file it anywhere</option>
             {expense.map((c) => (
               <option key={c.id} value={c.id}>
                 {fullName(c, catMap)}

@@ -75,7 +75,22 @@ export interface Transaction {
   explainRequestedAt?: string
   explainRequestedBy?: string
   date: string // yyyy-MM-dd (server column `occurred_on`)
+  /** Exactly what the bank wrote. Everything that matches, pairs or de-duplicates reads this. */
   payee: string
+  /**
+   * What to call this row on screen, where the payee is a bank string nobody
+   * would say out loud ("SQ *THE GOOD FORK 3241" → "Dinner out").
+   *
+   * Display only, and never a replacement: `payee` stays as imported, because
+   * `normalizePayee`, the duplicate check, transfer pairing and every rule in
+   * the app are facts about what the bank sent. Read it through
+   * `displayName(t)` in lib/rules.ts rather than directly, so a row with no
+   * name of its own still shows something.
+   *
+   * Learned back through `Rule.title`, which is the same machinery that learns
+   * a category from a payee. Migration 20.
+   */
+  title?: string
   note?: string
   amountMinor: number
   /** `date|amount|payee` fingerprint feeding the import wizard's duplicate check. */
@@ -157,10 +172,25 @@ export interface Bill {
   updatedAt: string
 }
 
+/**
+ * What we know about a payee: where to file it, what to call it, or both.
+ *
+ * Both are optional and at least one must be set — `rules_say_something`
+ * server-side. A rule may carry a title alone because categories are only ever
+ * learned from spending, while a NAME is worth learning on any row: "FPI SMITH
+ * J LTD" is exactly the sort of thing that wants calling "Salary".
+ *
+ * Which is why "the rule that matches" is two questions rather than one — see
+ * `categoryRule` and `titleRule` in rules.ts. Asking once and reading both
+ * fields off the answer would let a title-only rule for "tesco petrol" shadow
+ * the category rule for "tesco", and the fuel would quietly stop being filed.
+ */
 export interface Rule {
   id: string
   match: string // normalised lowercase payee substring
-  categoryId: string
+  categoryId?: string
+  /** What to call a transaction from this payee. Undefined = this rule only files it. */
+  title?: string
   createdBy?: string
   createdAt: string
   updatedAt: string

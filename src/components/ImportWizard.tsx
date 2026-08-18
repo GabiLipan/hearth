@@ -17,7 +17,7 @@ import {
   type ImportRow,
 } from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
-import { matchRule, prettyPayee, learnRule, buildHistoryMatcher } from '../lib/rules'
+import { categoryRule, titleRule, prettyPayee, learnRule, buildHistoryMatcher, buildTitleMatcher, cleanTitle } from '../lib/rules'
 import { findLikelyDuplicate } from '../lib/dedupe'
 import { createMany } from '../lib/data'
 import { useSyncState } from '../hooks/useSync'
@@ -31,6 +31,8 @@ type Step = 'pick' | 'map' | 'review' | 'done'
 interface ReviewRow {
   date: string
   payee: string
+  /** What a rule, or the rows already imported, say this payee is called. */
+  title?: string
   amountMinor: number
   categoryId?: string
   duplicate: boolean // exact re-import of a previously imported row
@@ -146,6 +148,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     const fallbackExpense = cats.find((c) => c.kind === 'expense' && c.name === 'Other') ?? cats.find((c) => c.kind === 'expense')
     const fallbackIncome = cats.find((c) => c.kind === 'income') ?? fallbackExpense
     const fromHistory = buildHistoryMatcher(existing)
+    const fromTitles = buildTitleMatcher(existing)
     const seen = new Set<string>()
     const matchedIds = new Set<string>()
     const review: ReviewRow[] = extracted.map((r) => {
@@ -162,13 +165,19 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       }
       let categoryId: string | undefined
       if (r.amountMinor < 0) {
-        categoryId = matchRule(r.payee, rules)?.categoryId ?? fromHistory(r.payee) ?? fallbackExpense?.id
+        categoryId = categoryRule(r.payee, rules)?.categoryId ?? fromHistory(r.payee) ?? fallbackExpense?.id
       } else {
         categoryId = fallbackIncome?.id
       }
+      // The payoff for having learned a name: a statement full of bank strings
+      // arrives already reading in English. Asked of the rules first and of
+      // what past rows were called second, exactly as the category is — and on
+      // income too, where a category is not.
+      const title = cleanTitle(titleRule(r.payee, rules)?.title) ?? fromTitles(r.payee)
       return {
         date: r.date,
         payee: prettyPayee(r.payee),
+        title,
         amountMinor: r.amountMinor,
         categoryId,
         duplicate,
@@ -189,6 +198,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     await createMany('transactions', toImport.map((r) => ({
       date: r.date,
       payee: r.payee,
+      title: r.title,
       categoryId: r.categoryId,
       accountId,
       amountMinor: r.amountMinor,
@@ -198,7 +208,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     })))
     // Learn from every category the user corrected by hand.
     for (const r of toImport) {
-      if (r.userTouched && r.amountMinor < 0 && r.categoryId) await learnRule(r.payee, r.categoryId)
+      if (r.userTouched && r.amountMinor < 0 && r.categoryId) await learnRule(r.payee, { categoryId: r.categoryId })
     }
     setImportedCount(toImport.length)
     setStep('done')
@@ -403,11 +413,14 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
-                    {r.payee}
+                    {r.title ?? r.payee}
                     {r.duplicate && <span className="ml-1.5 text-xs text-ink-3">already imported</span>}
                   </p>
                   <p className="truncate text-xs text-ink-3 tabular">
                     {fmtFullDate(r.date)}
+                    {/* What the bank actually wrote, where a learned name has
+                        taken its place on the line above. */}
+                    {r.title && <span> · {r.payee}</span>}
                     {r.possibleDup && (
                       <span className="text-ink-2">
                         {' '}· looks like “{r.possibleDup.payee}” added {fmtDay(r.possibleDup.date)}

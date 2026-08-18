@@ -236,7 +236,16 @@ const RPC_WRITERS: Partial<Record<SyncedTable, (entry: OutboxEntry) => Promise<u
   rules: (e) =>
     e.op === 'delete'
       ? softDeleteRow('rules', e.rowId)
-      : rpc('upsert_rule', { p_id: e.rowId, p_match: e.payload.match, p_category_id: e.payload.categoryId }),
+      : rpc('upsert_rule', {
+          p_id: e.rowId,
+          p_match: e.payload.match,
+          // Both explicitly `?? null`: supabase-js DROPS an undefined argument,
+          // and a dropped one changes PostgREST's overload resolution — the
+          // call would fail with "could not find the function … in the schema
+          // cache" rather than storing a rule that only files or only names.
+          p_category_id: e.payload.categoryId ?? null,
+          p_title: e.payload.title ?? null,
+        }),
   // Revoking is the same call with 'none': the server tombstones rather than
   // deleting, so there is no separate delete path to keep in step.
   account_grants: (e) =>

@@ -15,6 +15,7 @@ import {
 import { syncNow } from '../lib/session'
 import { useSyncState } from '../hooks/useSync'
 import { fmtDay } from '../lib/dates'
+import { displayName } from '../lib/rules'
 import { FREQ_WORD } from '../lib/routes'
 import { useApp } from '../state/AppContext'
 import { Button, Card, Chip, cx } from './ui'
@@ -210,7 +211,7 @@ function Leg({ txn, name }: { txn: Transaction; name?: string }) {
     <span className="min-w-0 flex-1">
       <span className="block truncate text-sm font-medium">{name ?? 'Unknown account'}</span>
       <span className={cx('block truncate text-xs text-ink-3')}>
-        {txn.payee} · {fmtDay(txn.date)}
+        {displayName(txn)} · {fmtDay(txn.date)}
       </span>
     </span>
   )

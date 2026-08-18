@@ -8,18 +8,21 @@ the app.
 ## Applying it
 
 In the Supabase SQL editor, run the numbered files in order — `01-schema.sql`
-through to `19-published-household-rows.sql`. There is no migrations table, so if you are
+through to `20-transaction-titles.sql`. There is no migrations table, so if you are
 unsure what a project has already had, run `00-which-migrations-applied.sql`
 first: it is read-only and reports a row per migration.
 
-Every file is re-runnable, with two ordering traps. `10` replaces `09`'s
+Every file is re-runnable, with three ordering traps. `10` replaces `09`'s
 two-argument `link_transfer` with a three-argument one, so re-running `09`
 afterwards puts the old signature back beside the new and PostgREST can no
 longer resolve the call. Re-run `10` to clear it. And `19` replaces `07`'s
 `transactions_select`, so re-running `07` afterwards puts the narrower policy
 back — nothing fails, published rows simply stop arriving and the household book
-quietly loses whatever was paid from a personal account. Re-run `19`. The
-detector has a row for each.
+quietly loses whatever was paid from a personal account. Re-run `19`. And `20`
+replaces `03`'s three-argument `upsert_rule` with a four-argument one, so
+re-running `03` afterwards puts the old signature back beside the new and every
+rule the app learns dead-letters with "could not find the function … in the
+schema cache". Re-run `20`. The detector has a row for each.
 
 Then, to prove it works, sign up two accounts and run `99-rls-tests.sql`. It
 runs inside a transaction and rolls back, so it is safe to re-run and leaves
@@ -40,7 +43,7 @@ the `auth` schema, `auth.uid()`, the `anon`/`authenticated` roles, the
 `local/00-shim.sql` first and `local/98-grants.sql` last:
 
 ```
-local/00-shim.sql → 01 … 19 → local/98-grants.sql → 99*-tests.sql
+local/00-shim.sql → 01 … 20 → local/98-grants.sql → 99*-tests.sql
 ```
 
 `pgcrypto` needs an explicit import:

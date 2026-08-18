@@ -1,12 +1,25 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db, type Rule, type Transaction } from './db'
-import { applyCategory, coverageOf, similarTo } from './rules'
+import {
+  applyCategory,
+  applyTitle,
+  buildTitleMatcher,
+  categoryRule,
+  cleanTitle,
+  coverageOf,
+  displayName,
+  learnRule,
+  similarTo,
+  titleRule,
+  unnamedLike,
+} from './rules'
 
 let seq = 0
-const rule = (match: string, categoryId: string): Rule => ({
+const rule = (match: string, categoryId?: string, title?: string): Rule => ({
   id: `r${++seq}`,
   match,
   categoryId,
+  title,
   createdAt: 'x',
   updatedAt: 'x',
 })
@@ -121,5 +134,108 @@ describe('applying a category in bulk', () => {
     const queued = await db.outbox.toArray()
     expect(queued).toHaveLength(2)
     expect(queued.every((e) => e.table === 'transactions' && e.op === 'update')).toBe(true)
+  })
+})
+
+describe('what a payee is called', () => {
+  it('shows the name where there is one, and the bank’s words where there is not', () => {
+    expect(displayName({ payee: 'SQ *THE GOOD FORK 3241', title: 'Dinner out' })).toBe('Dinner out')
+    expect(displayName({ payee: 'SQ *THE GOOD FORK 3241' })).toBe('SQ *THE GOOD FORK 3241')
+    // A blank is not a name — otherwise a row renders with nothing on it.
+    expect(displayName({ payee: 'TESCO', title: '   ' })).toBe('TESCO')
+  })
+
+  it('stores a name as one trimmed line, or as nothing at all', () => {
+    expect(cleanTitle('  Dinner   out \n')).toBe('Dinner out')
+    expect(cleanTitle('')).toBeUndefined()
+    expect(cleanTitle(undefined)).toBeUndefined()
+    // The ceiling mirrors the server's check constraint, so a long name is
+    // shortened here rather than dead-lettering a minute later.
+    expect(cleanTitle('x'.repeat(200))).toHaveLength(80)
+  })
+
+  it('asks the category and the name as two separate questions', () => {
+    // The trap this exists for: a title-only rule for the more specific payee
+    // would otherwise win "the matching rule" outright and the fuel would
+    // silently stop being categorised.
+    const general = rule('tesco', 'groceries')
+    const specific = rule('tesco petrol', undefined, 'Petrol')
+    const rules = [general, specific]
+
+    expect(categoryRule('TESCO PETROL LEEDS', rules)?.id).toBe(general.id)
+    expect(titleRule('TESCO PETROL LEEDS', rules)?.id).toBe(specific.id)
+    // And a rule that only files does not claim to name anything.
+    expect(titleRule('TESCO STORES 3241', rules)).toBeUndefined()
+  })
+
+  it('gives a name-only rule no coverage, because applying one rewrites categories', () => {
+    const r = rule('the good fork', undefined, 'Dinner out')
+    const txns = [txn({ payee: 'SQ *THE GOOD FORK 3241', categoryId: 'other' })]
+
+    expect(coverageOf(r, txns, [r])).toEqual({ all: [], changed: [] })
+  })
+
+  it('learns a name from history, on income as well as spending', () => {
+    const matcher = buildTitleMatcher([
+      txn({ payee: 'FPI SMITH J LTD REF 88213', amountMinor: 250000, title: 'Salary' }),
+      txn({ payee: 'TESCO STORES 3241', categoryId: 'groceries' }),
+    ])
+
+    expect(matcher('FPI SMITH J LTD REF 90114')).toBe('Salary')
+    expect(matcher('TESCO STORES 3241')).toBeUndefined()
+  })
+
+  it('offers the rows from this payee that are not called this already', () => {
+    const txns = [
+      txn({ id: 'self', payee: 'SQ *THE GOOD FORK 3241', title: 'Dinner out' }),
+      txn({ payee: 'SQ *THE GOOD FORK 9902' }),
+      txn({ payee: 'SQ *THE GOOD FORK 1120', title: 'Dinner out' }),
+      // Income and transfer legs are included, unlike `similarTo`: a bank
+      // string is at its least readable exactly there.
+      txn({ payee: 'SQ *THE GOOD FORK 8891', amountMinor: 4520 }),
+      txn({ payee: 'Pizza Express' }),
+    ]
+
+    const found = unnamedLike('SQ *THE GOOD FORK 3241', 'Dinner out', txns, 'self')
+
+    expect(found.map((t) => t.payee)).toEqual(['SQ *THE GOOD FORK 9902', 'SQ *THE GOOD FORK 8891'])
+  })
+})
+
+describe('learning and applying a name', () => {
+  beforeEach(async () => {
+    await db.open()
+    await db.transactions.clear()
+    await db.rules.clear()
+    await db.outbox.clear()
+  })
+
+  it('learning a name does not forget a category, or the other way round', async () => {
+    await learnRule('TESCO STORES 3241', { categoryId: 'groceries' })
+    await learnRule('Tesco Stores', { title: 'Big shop' })
+
+    const rules = await db.rules.toArray()
+    expect(rules).toHaveLength(1)
+    expect(rules[0]).toMatchObject({ match: 'tesco stores', categoryId: 'groceries', title: 'Big shop' })
+  })
+
+  it('does not write a rule that says nothing', async () => {
+    await learnRule('TESCO STORES 3241', {})
+    await learnRule('TESCO STORES 3241', { title: '  ' })
+
+    expect(await db.rules.count()).toBe(0)
+  })
+
+  it('renames only what the caller may edit, and queues every change', async () => {
+    const mine = txn({ payee: 'SQ *THE GOOD FORK 3241', createdBy: 'me' })
+    const theirs = txn({ payee: 'SQ *THE GOOD FORK 9902', createdBy: 'them' })
+    await db.transactions.bulkPut([mine, theirs])
+
+    const res = await applyTitle([mine, theirs], 'Dinner out', (t) => t.createdBy === 'me')
+
+    expect(res).toEqual({ updated: 1, skipped: 1 })
+    expect((await db.transactions.get(mine.id))?.title).toBe('Dinner out')
+    expect((await db.transactions.get(theirs.id))?.title).toBeUndefined()
+    expect(await db.outbox.count()).toBe(1)
   })
 })

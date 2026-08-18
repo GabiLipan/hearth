@@ -66,12 +66,19 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   // `contributorId` sits with `paidForHousehold` rather than with `transferId`:
   // saying whose money arrived is an ordinary edit of the row, and anybody who
   // may not edit it has no business relabelling the household's income.
+  // `title` is the name shown instead of the payee, and it is an ordinary
+  // field: `transactions_update` already decides who may change a row, and this
+  // is one. Note it travels with a published household row like everything else
+  // on it — RLS has no column-level half.
   transactions: [
-    'id', 'accountId', 'categoryId', 'billId', 'date', 'payee', 'note', 'amountMinor', 'importHash',
+    'id', 'accountId', 'categoryId', 'billId', 'date', 'payee', 'title', 'note', 'amountMinor', 'importHash',
     'paidForHousehold', 'contributorId',
   ],
   budgets: ['id', 'categoryId', 'ownerId', 'amountMinor', 'month'],
-  rules: ['id', 'match', 'categoryId'],
+  // Written by upsert_rule, so the queued payload is the whole row — both
+  // `categoryId` and `title` are arguments the RPC needs on every call, and
+  // either may be null (a rule that only files, or one that only names).
+  rules: ['id', 'match', 'categoryId', 'title'],
 } as const
 
 /** Columns to request when pulling. Explicit, so adding a server column does not silently change payload size. */

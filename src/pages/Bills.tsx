@@ -19,6 +19,7 @@ import {
   type BillSuggestion,
 } from '../lib/bills'
 import { parseAmount, currencySymbol } from '../lib/money'
+import { displayName } from '../lib/rules'
 import { useApp } from '../state/AppContext'
 import { Card, CategoryDot, Sheet, Button, Field, TextInput, Select, Empty, Toolbar, table, ScrollTable, cx } from '../components/ui'
 import { confirmAction } from '../components/confirm'
@@ -248,7 +249,7 @@ export default function Bills() {
                 <div className="min-w-0 flex-1 basis-48">
                   <p className="truncate font-medium md:text-sm">{m.bill.name}</p>
                   <p className="truncate text-sm text-ink-3 md:text-xs">
-                    due {fmtFullDate(m.dueOn)} · paid {fmtDay(m.txn.date)} as “{m.txn.payee}”
+                    due {fmtFullDate(m.dueOn)} · paid {fmtDay(m.txn.date)} as “{displayName(m.txn)}”
                     {m.daysOff !== 0 && ` (${Math.abs(m.daysOff)}d ${m.daysOff < 0 ? 'early' : 'late'})`}
                   </p>
                 </div>

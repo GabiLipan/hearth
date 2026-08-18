@@ -15,7 +15,19 @@ import { grouped, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { dateWindow, todayISO } from '../lib/dates'
-import { learnRule, suggestCategory, prettyPayee, similarTo, applyCategory } from '../lib/rules'
+import {
+  learnRule,
+  suggestCategory,
+  suggestTitle,
+  prettyPayee,
+  displayName,
+  similarTo,
+  applyCategory,
+  applyTitle,
+  unnamedLike,
+  cleanTitle,
+  TITLE_MAX,
+} from '../lib/rules'
 import { applyContributor, learnContributors, similarArrivals, suggestContributor } from '../lib/contributors'
 import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
@@ -76,6 +88,7 @@ export function TransactionForm({
   const [kind, setKind] = useState<'expense' | 'income'>('expense')
   const [amount, setAmount] = useState('')
   const [payee, setPayee] = useState('')
+  const [title, setTitle] = useState('')
   const [categoryId, setCategoryId] = useState<string | undefined>()
   const [date, setDate] = useState(todayISO())
   const [accountId, setAccountId] = useState<string | undefined>()
@@ -86,7 +99,10 @@ export function TransactionForm({
   const [contributorGuessed, setContributorGuessed] = useState(false)
   const [tagSimilar, setTagSimilar] = useState(false)
   const [suggested, setSuggested] = useState(false)
+  /** Whether the name on screen was proposed rather than typed. */
+  const [titleSuggested, setTitleSuggested] = useState(false)
   const [applySimilar, setApplySimilar] = useState(false)
+  const [renameSimilar, setRenameSimilar] = useState(false)
   const [scanState, setScanState] = useState<string | null>(null)
   const amountRef = useRef<HTMLInputElement>(null)
   const receiptRef = useRef<HTMLInputElement>(null)
@@ -110,6 +126,7 @@ export function TransactionForm({
       setKind(editing.amountMinor < 0 ? 'expense' : 'income')
       setAmount((Math.abs(editing.amountMinor) / 100).toFixed(2).replace(/\.00$/, ''))
       setPayee(editing.payee)
+      setTitle(editing.title ?? '')
       setCategoryId(editing.categoryId)
       setDate(editing.date)
       setAccountId(editing.accountId)
@@ -120,6 +137,7 @@ export function TransactionForm({
       setKind('expense')
       setAmount('')
       setPayee('')
+      setTitle('')
       setCategoryId(undefined)
       setDate(todayISO())
       setAccountId(accounts[0]?.id)
@@ -129,7 +147,9 @@ export function TransactionForm({
       setTimeout(() => amountRef.current?.focus(), 60)
     }
     setSuggested(false)
+    setTitleSuggested(false)
     setApplySimilar(false)
+    setRenameSimilar(false)
     setContributorGuessed(false)
     setTagSimilar(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -144,6 +164,14 @@ export function TransactionForm({
       if (!cancelled && id && (categoryId === undefined || suggested)) {
         setCategoryId(id)
         setSuggested(true)
+      }
+      // The same offer for the name, and under the same rule: a suggestion may
+      // fill an empty field or replace one it filled itself, and must never
+      // overwrite something typed by hand.
+      const name = await suggestTitle(payee)
+      if (!cancelled && name && (title.trim() === '' || titleSuggested)) {
+        setTitle(name)
+        setTitleSuggested(true)
       }
     }, 250)
     return () => {
@@ -247,6 +275,28 @@ export function TransactionForm({
       // dependency — the query re-runs on the inputs that change the answer.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, settledPayee, categoryId, kind, editing?.id, userId]) ?? []
+
+  /**
+   * Other transactions from this payee that are not called this already.
+   *
+   * The name's half of "and the other nine", asked the same way and of the same
+   * table — see `similar` above for why this has to consider all of history and
+   * therefore waits for the typing to stop. Filtered to what this device may
+   * actually change, so the number offered is the number that will move.
+   */
+  const settledTitle = useDebounced(title, 250)
+
+  const unnamed =
+    useLiveQuery(async () => {
+      if (!open || !cleanTitle(settledTitle) || settledPayee.trim().length < 3) return []
+      const all = await db.transactions.toArray()
+      return unnamedLike(settledPayee, settledTitle, all, editing?.id).filter((t) =>
+        canEditTransaction(t, levelOn(t.accountId, levels), userId),
+      )
+      // `levels` is a fresh Map each render, so it is deliberately not a
+      // dependency — the query re-runs on the inputs that change the answer.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, settledPayee, settledTitle, editing?.id, userId]) ?? []
 
   /**
    * Whether "I paid for this, but it was the household's" is even a question.
@@ -417,7 +467,7 @@ export function TransactionForm({
         dup &&
         !(await confirmAction({
           title: 'This looks like a duplicate',
-          body: `There is already “${dup.payee}” for ${money(dup.amountMinor)} on ${fmtFullDate(dup.date)}.`,
+          body: `There is already “${displayName(dup)}” for ${money(dup.amountMinor)} on ${fmtFullDate(dup.date)}.`,
           confirmLabel: 'Add anyway',
           cancelLabel: 'Don’t add',
         }))
@@ -429,6 +479,9 @@ export function TransactionForm({
       await update('transactions', editing.id, {
         amountMinor: signed,
         payee: payee.trim(),
+        // Explicitly undefined rather than omitted: clearing the box takes the
+        // name off the row and puts the bank's own words back (see mapping.ts).
+        title: cleanTitle(title),
         categoryId,
         date,
         accountId: accountId!,
@@ -445,6 +498,7 @@ export function TransactionForm({
       await create('transactions', {
         amountMinor: signed,
         payee: payee.trim(),
+        title: cleanTitle(title),
         categoryId,
         date,
         accountId: accountId!,
@@ -458,9 +512,14 @@ export function TransactionForm({
         createdAt: new Date().toISOString(),
       })
     }
-    // The quiet automation: every save teaches the categoriser.
+    // The quiet automation: every save teaches the categoriser — and, since
+    // migration 20, the namer. A name is learned on income too: categories are
+    // only ever learned from spending, but "FPI SMITH J LTD" is precisely the
+    // sort of thing that wants calling "Salary".
+    const learntTitle = cleanTitle(title)
+    if (kind !== 'expense' && learntTitle) await learnRule(payee, { title: learntTitle })
     if (kind === 'expense') {
-      await learnRule(payee, categoryId!)
+      await learnRule(payee, { categoryId: categoryId!, title: learntTitle })
       // …and, if asked, applies what it just learned backwards. `similar` is
       // already filtered to what this device may change, so the predicate here
       // passes everything through.
@@ -479,6 +538,22 @@ export function TransactionForm({
             },
           })
         }
+      }
+    }
+    // …and the same offer for the name, asked separately because it is a
+    // different set of rows: a name is worth having on income and on transfer
+    // legs, which `similar` deliberately never touches.
+    if (learntTitle && renameSimilar && unnamed.length > 0) {
+      const before = unnamed.map((t) => ({ id: t.id, title: t.title }))
+      const { updated } = await applyTitle(unnamed, learntTitle, () => true)
+      if (updated > 0) {
+        toast(`${updated} other ${updated === 1 ? 'transaction' : 'transactions'} renamed too`, {
+          undo: async () => {
+            // `undefined` clears rather than leaving alone, which is exactly
+            // right for a row that had no name of its own before.
+            for (const row of before) await update('transactions', row.id, { title: row.title })
+          },
+        })
       }
     }
     // The same offer on the other side: this arrival is hers, and so are the
@@ -630,6 +705,47 @@ export function TransactionForm({
             ))}
           </datalist>
         </Field>
+
+        {/* What this is CALLED, as opposed to what the bank called it. The
+            payee above stays exactly as imported — it is what every rule,
+            duplicate check and transfer pairing in the app compares — and this
+            is what Activity, the widgets and the reports show. Learned back
+            through the same rules that learn a category, so the next
+            "SQ *THE GOOD FORK 3241" arrives already called "Dinner out". */}
+        <Field
+          label="Call it"
+          hint={
+            titleSuggested
+              ? 'Remembered from the last one from here — change it and Hearth will learn the new name.'
+              : 'Optional. Leave it blank to show whatever the bank wrote.'
+          }
+        >
+          <TextInput
+            value={title}
+            maxLength={TITLE_MAX}
+            onChange={(e) => {
+              setTitle(e.target.value)
+              setTitleSuggested(false)
+            }}
+            placeholder={payee.trim() ? prettyPayee(payee) : 'e.g. Dinner out'}
+            autoComplete="off"
+          />
+        </Field>
+
+        {unnamed.length > 0 && (
+          <CheckRow
+            tone="accent"
+            checked={renameSimilar}
+            onChange={setRenameSimilar}
+            label={`Rename ${unnamed.length} other ${unnamed.length === 1 ? 'transaction' : 'transactions'} too`}
+            info={
+              <p>
+                {unnamed.length === 1 ? 'One is' : `${unnamed.length} are`} from &ldquo;{prettyPayee(payee)}&rdquo;
+                and still show what the bank wrote. Their payees are left exactly as they are.
+              </p>
+            }
+          />
+        )}
 
         <div>
           <span className="mb-1.5 block text-sm font-medium text-ink-2">

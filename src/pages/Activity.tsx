@@ -21,6 +21,7 @@ import {
 import { accountsInBook, showsInBook, isHouseholdPaid, BOOK_LABEL, type BookId, type BookMap } from '../lib/books'
 import { applyContributor, learnContributors, suggestContributor, taggable } from '../lib/contributors'
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
+import { cleanTitle, displayName } from '../lib/rules'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
 import { useSticky, useStickyIds } from '../lib/sticky'
 import { useHeadline } from '../lib/headline'
@@ -221,7 +222,19 @@ export default function Activity() {
         const cat = t.categoryId ? catMap.get(t.categoryId) : undefined
         if (!cat || !(catFilter.has(cat.id) || (cat.parentId != null && catFilter.has(cat.parentId)))) return false
       }
-      if (q && !(t.payee.toLowerCase().includes(q) || (t.note ?? '').toLowerCase().includes(q))) return false
+      // Both names: what it is called and what the bank called it. Searching
+      // only the display name would hide a row from the string on the
+      // statement you are holding, and searching only the payee would hide it
+      // from the word on the screen in front of you.
+      if (
+        q &&
+        !(
+          t.payee.toLowerCase().includes(q) ||
+          (t.title ?? '').toLowerCase().includes(q) ||
+          (t.note ?? '').toLowerCase().includes(q)
+        )
+      )
+        return false
       return true
     })
     return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
@@ -681,7 +694,7 @@ export default function Activity() {
                                     )}
                                   </span>
                                   <div className="min-w-0 flex-1">
-                                    <p className="truncate font-medium">{t.payee}</p>
+                                    <p className="truncate font-medium">{displayName(t)}</p>
                                     <p className="flex items-center gap-1 truncate text-sm text-ink-3">
                                       {!transfer && (looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
                                       {forHousehold && <HouseholdMark book={book} payer={payerOf(t)} />}
@@ -805,11 +818,22 @@ export default function Activity() {
                             editable={editable}
                             onStart={() => setCell({ id: t.id, field: 'payee' })}
                             onCancel={() => setCell(null)}
+                            /* This column is what the row is CALLED, so editing
+                               it writes the name and not the payee. The payee is
+                               what the bank wrote — it is what every rule,
+                               duplicate check and transfer pairing compares, so
+                               it is left to the full form rather than being
+                               retyped by anyone tidying a list. Typing the
+                               bank's own words back clears the name, which is
+                               how you undo one without a second control. */
                             editor={
                               <TextEditor
-                                value={t.payee}
+                                value={displayName(t)}
                                 commit={(p, then) => commitCell(t, p, then)}
-                                parse={(raw) => (raw.trim() ? { payee: raw.trim() } : null)}
+                                parse={(raw) => {
+                                  const next = cleanTitle(raw)
+                                  return { title: next === t.payee ? undefined : next }
+                                }}
                               />
                             }
                           >
@@ -827,7 +851,11 @@ export default function Activity() {
                             {forHousehold && (
                               <HouseholdMark book={book} payer={payerOf(t)} className="mr-1.5 align-middle" />
                             )}
-                            <span className="font-medium">{t.payee}</span>
+                            <span className="font-medium">{displayName(t)}</span>
+                            {/* What the bank actually wrote, where a name has
+                                taken its place. Dimmed and after, so the column
+                                still reads as one thing. */}
+                            {t.title && <span className="ml-2 text-ink-3">{t.payee}</span>}
                             {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
                           </EditableCell>
                           {/* Both halves, with the parent dimmed: a row filed
@@ -940,7 +968,7 @@ export default function Activity() {
                           <td className={cx(table.cell, 'pr-2 text-right')}>
                             <button
                               type="button"
-                              aria-label={`Open ${t.payee}`}
+                              aria-label={`Open ${displayName(t)}`}
                               title="Open the full form"
                               onClick={(e) => {
                                 e.stopPropagation()
@@ -1183,7 +1211,7 @@ function AskedOfMe({ txns, onOpen }: { txns: Transaction[]; onOpen: (t: Transact
             >
               <HelpCircle size={16} className="shrink-0 text-ink-3" />
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium md:text-sm">{t.payee}</p>
+                <p className="truncate font-medium md:text-sm">{displayName(t)}</p>
                 <p className="truncate text-xs text-ink-3">
                   {fmtFullDate(t.date)} · {accMap.get(t.accountId)?.name ?? 'an account'} ·{' '}
                   {t.explainRequestedBy ? nameOf(members.get(t.explainRequestedBy)) : 'Somebody'} asked
@@ -1264,7 +1292,7 @@ function SuggestedContributions({ txns, books }: { txns: Transaction[]; books: B
           return (
             <li key={t.id} className="flex items-center gap-3 px-4 py-3 md:px-3 md:py-2.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium md:text-sm">{t.payee}</p>
+                <p className="truncate font-medium md:text-sm">{displayName(t)}</p>
                 <p className="truncate text-xs text-ink-3">
                   {fmtFullDate(t.date)} · {accMap.get(t.accountId)?.name ?? 'an account'} ·{' '}
                   <span className="tabular">{money(t.amountMinor, { sign: true })}</span>
