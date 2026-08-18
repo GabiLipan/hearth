@@ -61,7 +61,7 @@ import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { alertAction, confirmAction } from '../components/confirm'
 import { toast } from '../components/toast'
-import { Card, CheckRow, Chip, Columns, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useColumnCount, useWide, cx } from '../components/ui'
+import { Card, CheckRow, Chip, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useWide, cx } from '../components/ui'
 import {
   claimAccount,
   deletedAccounts,
@@ -183,8 +183,6 @@ function HouseholdCard() {
  * disappear quietly.
  */
 /** One column on a phone or laptop, two at xl, three on a wide monitor. */
-const COLUMN_STEPS: [number, number][] = [[1280, 2], [1536, 3]]
-
 /**
  * Accounts that can be got back: ones somebody deleted, and ones nobody owns.
  *
@@ -888,10 +886,14 @@ function SyncAndAccount() {
  * "Erase everything" was a long scroll below things nobody visits twice.
  *
  * So the same six groups serve both, in the same order, and only the shape
- * differs. A tablet or a desktop gets every group at once, which is the whole
- * point of having the width. A phone gets an index and walks into one, the way
- * Rules already works — and the summary line under each is live, so the index
- * answers "how many accounts do we have" without being opened.
+ * differs. A phone gets an index and walks into one, the way Rules already
+ * works — and the summary line under each is live, so the index answers "how
+ * many accounts do we have" without being opened. A wide screen keeps that
+ * index ON SCREEN, down the left, with one group open beside it: see
+ * `SettingsShell`. It used to get every group at once, flowed into masonry
+ * columns, which is what having the width suggests and is not what it wants —
+ * nine cards of unrelated business in one scroll, with "Erase everything" two
+ * inches under the theme picker.
  *
  * Two things deliberately sit outside the grouping. `UnsavedChanges` is an
  * alert rather than a place, so it is pinned above the index at both widths and
@@ -1039,8 +1041,11 @@ function VersionCard() {
                 ? `${built} · up to date as of ${fmtTime(checkedAt)}`
                 : built
 
+  // No margin of its own: it sits at the bottom of the phone's index, in a
+  // spaced stack in the desktop's "This device" pane, and a top margin baked in
+  // here would be a stray gap in one of the two.
   return (
-    <Card className="mt-6 p-4">
+    <Card className="p-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">Version</p>
@@ -1083,43 +1088,120 @@ function VersionCard() {
  */
 function Colophon() {
   return (
-    <>
+    <div className="mt-6 space-y-3">
       <VersionCard />
-      <p className="mt-3 px-1 text-xs text-ink-3">
+      <p className="px-1 text-xs text-ink-3">
         Hearth · a private family finance app. Install it from your browser's share / install menu for the full app
         experience.
       </p>
-    </>
+    </div>
+  )
+}
+
+/**
+ * The desktop shell: a list of compartments down the left, one of them open on
+ * the right.
+ *
+ * A wide screen used to get every group at once, flowed into masonry columns —
+ * on the reasoning that having the width, you may as well use it. What that
+ * actually produced was nine cards of unrelated business in one scroll, where
+ * "Erase everything" sat two inches under the theme picker and the only way to
+ * find anything was to read all of it. The phone's index is the better shape
+ * and always was; a wide screen can simply keep the index on screen while you
+ * are inside a compartment, which is the one thing a phone cannot.
+ *
+ * The routes are unchanged — each group is still `/settings/<slug>`, still a
+ * real page, still a valid deep link — so this is a second way of drawing the
+ * same navigation rather than a second navigation.
+ *
+ * The list is sticky against the scroller's own top, which `#app-scroll`'s
+ * padding has already cleared of the floating header: `top-0` is the line
+ * content starts at, not the top of the window.
+ */
+function SettingsShell({ active, children }: { active: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-5">
+      <nav aria-label="Settings sections" className="sticky top-0 w-52 shrink-0 xl:w-56">
+        <Card className="p-1.5">
+          <ul className="space-y-0.5">
+            {[OVERVIEW, ...GROUPS].map(({ slug, title, icon: Icon }) => {
+              const on = active === slug
+              return (
+                <li key={slug}>
+                  <Link
+                    to={slug === OVERVIEW.slug ? '/settings' : `/settings/${slug}`}
+                    aria-current={on ? 'page' : undefined}
+                    className={cx(
+                      // The rail's row, restated: a capsule that fills with the
+                      // accent at 12% when it is the one you are on. Two lists
+                      // of places at two depths of the same app should not need
+                      // reading twice.
+                      'flex items-center gap-2.5 rounded-full px-2.5 py-2 text-sm font-medium transition-colors',
+                      on ? 'bg-accent/12 text-accent' : 'text-ink-2 hover:bg-surface-2/60 hover:text-ink',
+                    )}
+                  >
+                    <Icon size={17} className="shrink-0" />
+                    <span className="truncate">{title}</span>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        </Card>
+      </nav>
+      {/* `min-w-0`, or a card holding a wide table grows this flex item to fit
+          it and the page ends up wider than the window. */}
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
+/**
+ * The one compartment that is not a group: this device, and this app.
+ *
+ * Everything in it — whether the writes have landed, who is signed in, which
+ * build this is — is about the copy of Hearth in front of you rather than about
+ * the household's data, which is why none of it belongs inside one of the six.
+ * On a phone the same three things sit at the bottom of the index, where the
+ * bottom of a single screen is a place; on a desktop the index never ends, so
+ * they need a room.
+ */
+const OVERVIEW = { slug: 'overview', title: 'This device', icon: Cloud }
+
+function OverviewBody() {
+  return (
+    <div className="space-y-4">
+      <Card>
+        <SyncAndAccount />
+      </Card>
+      <VersionCard />
+      <p className="px-1 text-xs text-ink-3">
+        Hearth · a private family finance app. Install it from your browser's share / install menu for the full app
+        experience.
+      </p>
+    </div>
   )
 }
 
 export default function SettingsPage() {
-  const columnCount = useColumnCount(COLUMN_STEPS)
   const wide = useWide()
 
-  // Settings are independent blocks, so on a wide screen they flow into columns
-  // rather than one long ribbon down the left edge. `Columns` rather than CSS
-  // `columns`, because Safari fragments cards across a column boundary there
-  // whatever `break-inside` says.
-  //
-  // The gap between sections lives here too. It used to come from a top margin
-  // on SectionTitle, which stopped working the day each section was wrapped in
-  // its own element — see SectionTitle.
+  // On a wide screen the index is the shell with nothing opened in it yet, and
+  // "this device" is what the pane opens on. Deliberately NOT the first group:
+  // an index that silently shows one compartment reads as that compartment
+  // being where you landed, and the list beside it as somewhere else to go.
   if (wide) {
     return (
-      <div className="max-w-2xl xl:max-w-none">
+      <div>
         {/* `empty:hidden` so the gap goes with it: UnsavedChanges renders
             nothing at all when there is nothing that failed to save, and a
             wrapper carrying a margin around nothing is a stray gap. */}
-        <div className="mb-6 empty:hidden md:mb-5">
+        <div className="mb-5 empty:hidden">
           <UnsavedChanges />
         </div>
-        <Columns count={columnCount} gap="gap-6 md:gap-5">
-          {GROUPS.map(({ slug, Body }) => (
-            <Body key={slug} />
-          ))}
-        </Columns>
-        <Colophon />
+        <SettingsShell active={OVERVIEW.slug}>
+          <OverviewBody />
+        </SettingsShell>
       </div>
     )
   }
@@ -1201,12 +1283,27 @@ export default function SettingsPage() {
  */
 export function SettingsGroupPage() {
   const { group } = useParams()
+  const wide = useWide()
   const found = GROUPS.find((g) => g.slug === group)
   if (!found) return <Navigate to="/settings" replace />
-  const { Body } = found
+  const { Body, title } = found
+
+  // On a wide screen the list of compartments is still on screen beside this
+  // one, so there is nothing to go back to and no back link. The heading is
+  // here instead of in the page title, which says "Settings" throughout — the
+  // shell is one page with rooms in it, not seven pages.
+  if (wide) {
+    return (
+      <SettingsShell active={found.slug}>
+        <h2 className="mb-3 text-lg font-semibold tracking-tight">{title}</h2>
+        <Body />
+      </SettingsShell>
+    )
+  }
+
   return (
     <div>
-      <div className="mb-3 flex items-center gap-2 md:mb-2.5">
+      <div className="mb-3 flex items-center gap-2">
         <Link to="/settings" className="flex shrink-0 items-center gap-1 text-sm font-medium text-ink-3 hover:text-ink">
           <ChevronLeft size={16} /> Settings
         </Link>
