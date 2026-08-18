@@ -45,6 +45,29 @@ describe('bar shapes', () => {
     expect(r.rx).toBe(0.5)
   })
 
+  it('draws a bar that hangs below the baseline', () => {
+    // Recharts measures `base - value`, so a negative month arrives as a
+    // negative height with `y` at the bar's LOWER edge. Read at face value that
+    // is a rect the browser refuses to draw, which is how every negative bar in
+    // "Kept each month" came to be missing.
+    const r = drew(roundedBar({ x: 10, y: 160, width: 30, height: -40 }))
+    expect(r.y).toBe(120)
+    expect(r.height).toBe(40)
+    expect(r.rx).toBe(BAR_RADIUS)
+  })
+
+  it('draws a bar measured leftwards, for a chart laid out the other way', () => {
+    const r = drew(roundedBar({ x: 90, y: 0, width: -30, height: 20 }))
+    expect(r.x).toBe(60)
+    expect(r.width).toBe(30)
+  })
+
+  it('holds a stacked segment below the baseline clear too', () => {
+    const r = drew(stackedBar({ x: 0, y: 150, width: 30, height: -100 }))
+    expect(r.y).toBe(51)
+    expect(r.height).toBe(98)
+  })
+
   it('draws nothing at all for a bar with no value', () => {
     expect(drew(roundedBar({ x: 0, y: 0, width: 30, height: 0 })).x).toBeUndefined()
   })

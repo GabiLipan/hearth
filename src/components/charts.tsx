@@ -220,17 +220,29 @@ type BarPieceProps = {
 const barPiece =
   (gap: number) =>
   ({ x = 0, y = 0, width = 0, height = 0, fill, fillOpacity }: BarPieceProps): ReactElement => {
-    const inset = Math.min(gap, Math.max(0, height - MIN_SEGMENT))
-    const h = height - inset
-    if (width <= 0 || h <= 0) return <g />
+    // A bar below the baseline arrives INSIDE OUT: Recharts measures a bar as
+    // `base - value`, so a negative month comes through as a negative height
+    // with `y` at its lower edge, and `<rect>` refuses a negative size outright.
+    // Reading that as "nothing to draw" is what made every negative bar in
+    // "Kept each month" disappear. Both axes, because a horizontal layout does
+    // the same thing to the width.
+    const box = {
+      x: width < 0 ? x + width : x,
+      y: height < 0 ? y + height : y,
+      width: Math.abs(width),
+      height: Math.abs(height),
+    }
+    const inset = Math.min(gap, Math.max(0, box.height - MIN_SEGMENT))
+    const h = box.height - inset
+    if (box.width <= 0 || h <= 0) return <g />
     return (
       <rect
-        x={x}
-        y={y + inset / 2}
-        width={width}
+        x={box.x}
+        y={box.y + inset / 2}
+        width={box.width}
         height={h}
-        rx={barRadius(width, h)}
-        ry={barRadius(width, h)}
+        rx={barRadius(box.width, h)}
+        ry={barRadius(box.width, h)}
         fill={fill}
         fillOpacity={fillOpacity}
       />
