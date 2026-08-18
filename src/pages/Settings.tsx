@@ -61,7 +61,7 @@ import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { alertAction, confirmAction } from '../components/confirm'
 import { toast } from '../components/toast'
-import { Card, CheckRow, Chip, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useWide, cx } from '../components/ui'
+import { Card, CheckRow, Chip, SectionTitle, Segmented, Select, Button, Sheet, Field, TextInput, CategoryDot, useInfoNote, useWide, cx } from '../components/ui'
 import {
   claimAccount,
   deletedAccounts,
@@ -399,6 +399,10 @@ function UnsavedChanges() {
  */
 function TransferModeRow() {
   const [mode, setMode] = useState<TransferMode | null>(null)
+  // What a transfer IS belongs behind the ⓘ; the line under the control says
+  // what this device is currently doing about them, which is the thing that
+  // changes and so cannot be learned once.
+  const note = useInfoNote('Transfers between your accounts', TRANSFERS_INFO)
 
   useEffect(() => {
     void getTransferMode().then(setMode)
@@ -417,12 +421,10 @@ function TransferModeRow() {
         </div>
         <div className="min-w-0 flex-1">
           <p className="font-medium md:text-sm">Transfers between your accounts</p>
-          <p className="text-sm text-ink-3 md:text-xs">
-            Money moved from one of your accounts to another is neither spending nor income, so both
-            sides are left out of your totals.
-          </p>
         </div>
+        {note.toggle}
       </div>
+      {note.body && <div className="mt-2 pl-12 md:pl-[42px]">{note.body}</div>}
       {mode && (
         <div className="mt-2.5 pl-12 md:pl-[42px]">
           <Segmented
@@ -441,6 +443,21 @@ function TransferModeRow() {
   )
 }
 
+const TRANSFERS_INFO = (
+  <p>
+    Money moved from one of your accounts to another is neither spending nor income, so both sides are left out
+    of your totals.
+  </p>
+)
+
+/** The distinction that matters, and the one a bill does not make. */
+const ROUTES_INFO = (
+  <p>
+    Nothing is recorded from these. They only help Hearth tell which pair of rows belongs together when more than
+    one reading fits.
+  </p>
+)
+
 /**
  * The habits the app has picked up, said out loud.
  *
@@ -455,6 +472,7 @@ function KnownRoutes() {
   const { money } = useApp()
   const accounts = useAccounts()
   const [routes, setRoutes] = useState<TransferRoute[]>([])
+  const note = useInfoNote('Movements it has learned', ROUTES_INFO)
 
   useEffect(() => {
     void knownRoutes().then(setRoutes)
@@ -465,7 +483,10 @@ function KnownRoutes() {
 
   return (
     <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2">
-      <p className="text-xs font-medium text-ink-2">Movements it has learned</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-ink-2">Movements it has learned</p>
+        {note.toggle}
+      </div>
       <ul className="mt-1 space-y-1">
         {routes.map((r) => (
           <li key={`${r.fromAccountId}>${r.toAccountId}`} className="text-xs text-ink-3">
@@ -475,11 +496,7 @@ function KnownRoutes() {
           </li>
         ))}
       </ul>
-      {/* The distinction that matters, and the one a bill does not make. */}
-      <p className="mt-1.5 text-xs text-ink-3">
-        Nothing is recorded from these. They only help Hearth tell which pair of rows belongs
-        together when more than one reading fits.
-      </p>
+      {note.body && <div className="mt-1.5">{note.body}</div>}
     </div>
   )
 }

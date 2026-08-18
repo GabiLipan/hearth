@@ -124,7 +124,9 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 `rules.ts` (payee matching, learning — where a payee is filed AND what it is
 called — the conditions beyond the payee that tell two charges from one vendor
 apart, and bulk recategorisation), `bills.ts`
-(suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
+(suggestions, posting, reconciliation), `imports.ts` (an import recognised
+after the fact, and the two ways of putting a wrong one right),
+`transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
 `contributors.ts` (naming the person behind an arrival whose far leg does not
@@ -968,6 +970,29 @@ the single place a level comes from.
   once per import. `readMapping` DEFAULTS a missing `invert` rather than
   rejecting the object, or every bank the app had already learned would fall
   back to guessing.
+- **An import is a batch nothing records, and it has to be recoverable anyway.**
+  There is no batch column and inventing one would be a migration for a fact the
+  rows already carry: an imported row has an `importHash`, an account and a
+  `createdAt`, and one press of Import writes them all at once. `importBatches`
+  groups a run of imported rows on one account whose stamps sit within two
+  minutes — derived rather than stored, which is the only reason it works on the
+  import somebody has ALREADY regretted, which is the one that matters. Two
+  things it must keep doing. A run of one row is never offered, because
+  completing a hand-typed entry from a statement writes an `importHash` onto a
+  row nobody imported and its stamp is when it was typed, so it sits alone
+  looking exactly like an import of one — undoing that would delete something
+  real. And moving an import needs the edit right on the destination as well as
+  the source: `transactions_update` has the same expression in `using` and
+  `with check`, so `moveImport`'s `canEdit` asks `canEditTransaction` twice, or
+  the writes come back minutes later as dead letters.
+
+  The prevention half is that the account is asked for BEFORE the file and
+  starts empty. It used to be a control at the foot of the review, defaulted to
+  `accounts[0]` — so an import done without noticing that one select went into
+  whichever account happened to be first. An empty control gating the file
+  picker cannot be answered by accident, and the account then travels with the
+  file in sight on every screen, including inside the label of the button that
+  writes the rows.
 - **An import keeps the bank's string exactly, and finishes the rows already
   here.** It used to store `prettyPayee(r.payee)`, which title-cases a
   stripped-down copy — throwing away the one string you can look up on your
@@ -1103,6 +1128,11 @@ the single place a level comes from.
   in `ui.tsx` is that, and `CheckRow`/`Field`'s `info` prop is the way to reach
   it: a hint that needs a comma is an `info`, and `status` (a `CheckRow`'s one
   short line) is for what is TRUE right now rather than what the setting means.
+  `useInfoNote` is the same ⓘ for a row neither control builds — a heading with
+  a button on its line and the paragraph underneath — and it is what the import
+  wizard's steps and the Settings automation rows use. **Nothing on a screen may
+  be more than a heading and one line of prose**; anything longer goes behind
+  one of these, wherever it is.
 - **Two categories of the same colour is the ORDINARY case.** Twelve slots, no
   limit on categories, and a subcategory inherits its parent's slot on purpose —
   so a donut routinely holds two identical arcs, and drilling in is where it

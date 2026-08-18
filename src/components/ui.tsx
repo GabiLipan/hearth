@@ -523,6 +523,24 @@ function useInfo(has: boolean) {
   return { id, open: has && open, toggle: () => setOpen((o) => !o) }
 }
 
+/**
+ * The same ⓘ, for a row `Field` and `CheckRow` do not build.
+ *
+ * Hands back the two halves separately because they belong in two places: the
+ * button goes on the heading line, and the paragraph goes under whatever the
+ * row is made of. Everything the app has to say that is longer than a line
+ * lives behind one of these — a settings row explaining what it does, a step of
+ * the import wizard explaining what it is about to do — so the gesture is the
+ * same wherever the prose is.
+ */
+export function useInfoNote(label: string, info?: ReactNode) {
+  const i = useInfo(!!info)
+  return {
+    toggle: info ? <InfoToggle open={i.open} controls={i.id} onClick={i.toggle} label={label} /> : null,
+    body: info && i.open ? <InfoBody id={i.id}>{info}</InfoBody> : null,
+  }
+}
+
 /* ---------- Inputs ---------- */
 /**
  * A labelled control, with two grades of explanation under it.
