@@ -72,6 +72,7 @@ import {
   type UnownedAccount,
 } from '../lib/accounts'
 import { CategoryTree } from '../components/CategoryTree'
+import { ImportsSection } from '../components/ImportHistory'
 import { IconPicker, SlotPicker } from '../components/IconPicker'
 import { PersonDot, nameOf } from '../components/PersonDot'
 
@@ -964,6 +965,9 @@ const GROUPS: Group[] = [
     Body: () => (
       <div className="space-y-6 md:space-y-5">
         <AccountsSection />
+        {/* Beside the accounts an import lands in, and above the two other
+            things on this screen that are about undoing something. */}
+        <ImportsSection />
         <CurrencySection />
         <OwedSection />
         <Recoverable />

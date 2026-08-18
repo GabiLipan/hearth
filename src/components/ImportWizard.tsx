@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FileUp, CheckCircle2, Undo2 } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { FileUp, CheckCircle2 } from 'lucide-react'
 import { db, getSetting, setSetting, type Transaction } from '../lib/db'
 import { useAccounts, useCategories, useMyLevels } from '../lib/cache'
 import { fullName } from '../lib/categories'
@@ -25,9 +25,9 @@ import { TxnName } from './TxnName'
 import { useSyncState } from '../hooks/useSync'
 import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { alertAction, confirmAction } from './confirm'
-import { toast } from './toast'
-import { importBatches, moveImport, undoImport, type ImportBatch } from '../lib/imports'
+import { alertAction } from './confirm'
+import { type ImportBatch } from '../lib/imports'
+import { ImportBatchRow } from './ImportHistory'
 import { Sheet, Button, Field, Select, Segmented, CheckRow, AccountDot, useInfoNote, cx } from './ui'
 
 type Step = 'pick' | 'map' | 'review' | 'done'
@@ -49,8 +49,8 @@ const ABOUT_ACCOUNT = (
   <>
     <p>Every row in the file goes into this account, and its balance moves by their total.</p>
     <p>
-      Put one in the wrong account and nothing is lost — the import is listed under Recent imports below, where
-      it can be moved across or taken back out.
+      Put one in the wrong account and nothing is lost: Settings › Accounts lists recent imports, where one can be
+      moved across or taken back out.
     </p>
   </>
 )
@@ -61,16 +61,6 @@ const ABOUT_FILE = (
     <p>
       Hearth works out the columns, skips anything already imported, and files each row from what it has learned
       about the payee.
-    </p>
-  </>
-)
-
-const ABOUT_RECENT = (
-  <>
-    <p>Imports made on this device in the last two months, while their rows are still here.</p>
-    <p>
-      Changing the account moves every row in that import. Undo deletes them — importing the statement again
-      brings them back.
     </p>
   </>
 )
@@ -144,14 +134,10 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   const [importedCount, setImportedCount] = useState(0)
   const [completedCount, setCompletedCount] = useState(0)
   const [reading, setReading] = useState(false)
-  /** Imports that can still be taken back — see `lib/imports.ts`. */
-  const [batches, setBatches] = useState<ImportBatch[]>([])
   /** The one just made, offered on the last screen while it is still in mind. */
   const [lastBatch, setLastBatch] = useState<ImportBatch | null>(null)
-  const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const fileNote = useInfoNote('Statement', ABOUT_FILE)
-  const recentNote = useInfoNote('Recent imports', ABOUT_RECENT)
   const reviewNote = useInfoNote('What was found', ABOUT_DUPLICATES)
 
   function reset() {
@@ -204,22 +190,6 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     setRemembered(saved !== undefined)
     setStep('map')
   }
-
-  /**
-   * What can still be undone.
-   *
-   * Read when the sheet opens rather than watched: the whole table is a
-   * heavier read than this screen needs on every keystroke elsewhere in the
-   * app, and an import made while this sheet is open is one this component
-   * made and refreshes itself.
-   */
-  const refreshBatches = useCallback(async () => {
-    setBatches(importBatches(await db.transactions.toArray()))
-  }, [])
-
-  useEffect(() => {
-    if (open) void refreshBatches()
-  }, [open, refreshBatches])
 
   const preview = useMemo(() => {
     if (!csv || !mapping) return []
@@ -386,112 +356,10 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
           }
         : null,
     )
-    void refreshBatches()
     setStep('done')
   }
 
-  /* ---------- putting an import right ---------- */
-
   const accountName = (id: string) => allAccounts.find((a) => a.id === id)?.name ?? 'an account'
-
-  /**
-   * `transactions_update`, asked twice.
-   *
-   * The policy checks the row's account on the way in AND on the way out, so a
-   * move needs the edit right on both. Asked here rather than discovered as a
-   * dead letter minutes later.
-   */
-  const mayMove = (to: string) => (t: Transaction) =>
-    canEditTransaction(t, levelOn(t.accountId, levels), userId) &&
-    canEditTransaction(t, levelOn(to, levels), userId)
-
-  const mayEdit = (t: Transaction) => canEditTransaction(t, levelOn(t.accountId, levels), userId)
-
-  /** What happened, including what did not — a bulk write that quietly did less
-      than the button promised is the one this app keeps having to apologise for. */
-  function said(sentence: string, skipped: number) {
-    toast(skipped === 0 ? sentence : `${sentence} · ${skipped} left alone, they are not yours to change`)
-  }
-
-  async function moveBatch(batch: ImportBatch, to: string) {
-    if (to === batch.accountId) return
-    const ok = await confirmAction({
-      title: `Move ${batch.count} transactions to ${accountName(to)}?`,
-      body: 'Only the account changes. Everything else about them stays as it is.',
-      confirmLabel: 'Move',
-    })
-    if (!ok) return
-    setBusy(true)
-    const { moved, skipped } = await moveImport(batch, to, mayMove(to))
-    setBusy(false)
-    said(`Moved ${moved} to ${accountName(to)}`, skipped)
-    setLastBatch((b) => (b && b.key === batch.key ? { ...b, accountId: to } : b))
-    await refreshBatches()
-  }
-
-  async function undoBatch(batch: ImportBatch) {
-    const ok = await confirmAction({
-      title: `Delete these ${batch.count} transactions?`,
-      body: `They leave ${accountName(batch.accountId)} for good. Importing the statement again brings them back.`,
-      confirmLabel: 'Delete',
-      tone: 'danger',
-    })
-    if (!ok) return
-    setBusy(true)
-    const { moved, skipped } = await undoImport(batch, mayEdit)
-    setBusy(false)
-    said(`Deleted ${moved} transactions`, skipped)
-    setLastBatch((b) => (b && b.key === batch.key ? null : b))
-    await refreshBatches()
-  }
-
-  /** One import, with the two ways of putting it right. */
-  function batchRow(batch: ImportBatch) {
-    const account = allAccounts.find((a) => a.id === batch.accountId)
-    return (
-      <div key={batch.key} className="flex items-center gap-2.5 rounded-xl bg-surface-2/60 px-2.5 py-2">
-        <AccountDot account={account} size={28} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">
-            {batch.count} transactions · {account?.name ?? 'an account'}
-          </p>
-          <p className="truncate text-xs text-ink-3 tabular">
-            {fmtDay(batch.at.slice(0, 10))} · {fmtFullDate(batch.from)} – {fmtFullDate(batch.to)}
-          </p>
-        </div>
-        {/* Direct manipulation: the account they went into IS the control that
-            moves them. A "move" button would only open a second screen asking
-            the question this picker already asks.
-
-            The width is on a wrapper, never on the `Select` — it carries
-            `w-full`, and Tailwind's generated order means a width passed to it
-            does nothing. */}
-        <div className="w-32 shrink-0">
-          <Select
-            value={batch.accountId}
-            disabled={busy}
-            aria-label="Account these went into"
-            onChange={(e) => void moveBatch(batch, e.target.value)}
-          >
-            {/* The account they are ON, even where it is not one you could
-                import into: a select with no option matching its value shows
-                blank, which would read as "nowhere". */}
-            {!accounts.some((a) => a.id === batch.accountId) && (
-              <option value={batch.accountId}>{account?.name ?? 'This account'}</option>
-            )}
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void undoBatch(batch)}>
-          <Undo2 size={15} /> Undo
-        </Button>
-      </div>
-    )
-  }
 
   /**
    * Where this file is going, said on every screen after the choice.
@@ -597,19 +465,6 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
               e.target.value = ''
             }}
           />
-
-          {/* The way back out of a mistake, where somebody who has just made one
-              would look for it. */}
-          {batches.length > 0 && (
-            <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <p className="text-sm font-medium text-ink-2 md:text-xs">Recent imports</p>
-                {recentNote.toggle}
-              </div>
-              {recentNote.body}
-              <div className="mt-1.5 space-y-1.5">{batches.map(batchRow)}</div>
-            </div>
-          )}
         </div>
       )}
 
@@ -904,7 +759,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
           {/* Wrong account is discovered a second after the press, not a week
               later, so the way to put it right is on this screen — the same
               row, with the same two controls, as under Recent imports. */}
-          {lastBatch && batchRow(lastBatch)}
+          {lastBatch && <ImportBatchRow batch={lastBatch} onChanged={setLastBatch} />}
           <Button className="w-full" onClick={close}>
             Done
           </Button>

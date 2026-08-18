@@ -125,7 +125,9 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 called — the conditions beyond the payee that tell two charges from one vendor
 apart, and bulk recategorisation), `bills.ts`
 (suggestions, posting, reconciliation), `imports.ts` (an import recognised
-after the fact, and the two ways of putting a wrong one right),
+after the fact, and the two ways of putting a wrong one right — the screen for
+it is `components/ImportHistory.tsx`, in Settings beside the accounts rather
+than on the way in to the next import),
 `transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
@@ -985,6 +987,14 @@ the single place a level comes from.
   the source: `transactions_update` has the same expression in `using` and
   `with check`, so `moveImport`'s `canEdit` asks `canEditTransaction` twice, or
   the writes come back minutes later as dead letters.
+
+  Where it is offered matters as much as that it exists. The list of past
+  imports is in Settings › Accounts, not in the wizard: a list of what you have
+  already done is not part of doing the next thing, and putting it on the way IN
+  makes the first screen of an import a history page. The one exception is the
+  single row on the wizard's LAST screen, which is the import just made — the
+  same component, one batch, no list — because a wrong account is noticed a
+  second after the press rather than a week later.
 
   The prevention half is that the account is asked for BEFORE the file and
   starts empty. It used to be a control at the foot of the review, defaulted to

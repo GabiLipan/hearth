@@ -104,7 +104,7 @@ export async function moveImport(
   batch: ImportBatch,
   toAccountId: string,
   canEdit: (t: Transaction) => boolean,
-): Promise<{ moved: number; skipped: number }> {
+): Promise<{ done: number; skipped: number }> {
   return each(batch, canEdit, async (t) => {
     await update('transactions', t.id, { accountId: toAccountId })
   })
@@ -114,7 +114,7 @@ export async function moveImport(
 export async function undoImport(
   batch: ImportBatch,
   canEdit: (t: Transaction) => boolean,
-): Promise<{ moved: number; skipped: number }> {
+): Promise<{ done: number; skipped: number }> {
   return each(batch, canEdit, async (t) => {
     await remove('transactions', t.id)
   })
@@ -126,7 +126,7 @@ async function each(
   act: (t: Transaction) => Promise<void>,
 ) {
   const rows = await db.transactions.bulkGet(batch.ids)
-  let moved = 0
+  let done = 0
   let skipped = 0
   for (const t of rows) {
     if (!t) continue
@@ -135,7 +135,7 @@ async function each(
       continue
     }
     await act(t)
-    moved++
+    done++
   }
-  return { moved, skipped }
+  return { done, skipped }
 }
