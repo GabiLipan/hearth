@@ -444,6 +444,29 @@ select,
 .scrim-down {
   --scrim-dir: to bottom;
 }
+/**
+ * The bottom edge, and only the bottom edge, ends OPAQUE: the last 20px are
+ * `--page` flat, so a row leaving the screen has arrived at the page's own
+ * colour before it reaches the frame's edge rather than being 68% of the way
+ * there and then cut off. The bar floats over that band, so what is behind it
+ * at the very bottom is the app's ground and nothing else.
+ *
+ * It is an override rather than a stop in the shared gradient because the two
+ * edges genuinely differ here. The top scrim's far end is the top of the
+ * screen, where the header discs float over the page and a solid band would
+ * read as a bar that had grown back — the thing floating them was meant to
+ * remove. Everything up to the tail is still the one shared set of numbers.
+ */
+.scrim-down > span:nth-child(5) {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in srgb, var(--page) 22%, transparent) 55%,
+    color-mix(in srgb, var(--page) 68%, transparent) calc(100% - 34px),
+    var(--page) calc(100% - 20px),
+    var(--page) 100%
+  );
+}
 .scrim-up {
   --scrim-dir: to top;
 }
