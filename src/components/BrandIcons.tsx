@@ -113,8 +113,8 @@ AmexMark.displayName = 'Amex American Express Card'
 /** One P behind another. */
 export const PaypalMark = (p: MarkProps) => (
   <Mark {...p}>
-    <path d="M5 20.5V3.5h4.6a4 4 0 0 1 0 8H5.6" />
-    <path d="M10.5 20.5V8.5h4a4 4 0 0 1 0 8h-3.4" />
+    <path d="M6.5 20l2-12h5.5a4 4 0 0 1 0 8H10l-.8 4H6.5z" />
+    <path d="M10 15h4a4 4 0 0 0 0-8h-4" />
   </Mark>
 )
 PaypalMark.displayName = 'Paypal Wallet Online Payment'
@@ -177,9 +177,7 @@ LloydsMark.displayName = 'Lloyds Bank Horse'
 /** The X. */
 export const HalifaxMark = (p: MarkProps) => (
   <Mark {...p}>
-    <rect x="2.5" y="2.5" width="19" height="19" rx="3" />
-    <path d="M8 8l8 8" />
-    <path d="M16 8l-8 8" />
+    <path d="M4 4h4l4 6 4-6h4l-6 8 6 8h-4l-4-6-4 6H4l6-8L4 4z" />
   </Mark>
 )
 HalifaxMark.displayName = 'Halifax Bank Cross'
@@ -241,8 +239,7 @@ BarclaysMark.displayName = 'Barclays Bank Eagle'
 /** The flame. */
 export const SantanderMark = (p: MarkProps) => (
   <Mark {...p}>
-    <path d="M12 2.5c3.1 4.2 4.6 7.3 4.6 9.5s-1.5 5.3-4.6 9.5c-3.1-4.2-4.6-7.3-4.6-9.5s1.5-5.3 4.6-9.5z" />
-    <path d="M12 2.5c-1.2 4.2-1.8 7.3-1.8 9.5s.6 5.3 1.8 9.5" />
+    <path d="M12 3c-2 4-5 6-5 10 0 3.3 2.7 6 6 6s6-2.7 6-6c0-2-1-4-2-5 0 2-1 3-2 3 0-3-1-6-3-8z" />
   </Mark>
 )
 SantanderMark.displayName = 'Santander Bank Flame'
