@@ -120,6 +120,69 @@ describe('working out how a statement is laid out', () => {
     ).toEqual([-125000, 100000])
   })
 
+  it('reads a card statement, where a purchase is a plus', () => {
+    // Amex: one Amount column, positive for a charge and negative for the
+    // payment that clears the card — a bank statement with every sign the
+    // other way round. Read at face value, every purchase became income.
+    const { mapping, rows } = importAll(
+      [
+        'Date,Description,Card Member,Account #,Amount',
+        '01/03/2026,TESCO STORES,A LIPAN,-71001,45.20',
+        '02/03/2026,ODEON CINEMAS,A LIPAN,-71001,15.00',
+        '03/03/2026,AMAZON UK,A LIPAN,-71001,32.99',
+        '15/03/2026,PAYMENT RECEIVED - THANK YOU,A LIPAN,-71001,-300.00',
+      ].join('\n'),
+    )
+
+    expect(mapping.layout).toBe('signed')
+    expect(mapping.invert).toBe(true)
+    expect(rows.map((r) => r.amountMinor)).toEqual([-4520, -1500, -3299, 30000])
+  })
+
+  it('leaves a bank statement alone, which is the half that matters', () => {
+    // Mostly negatives with a salary in the middle. A false positive here would
+    // invert a file that has always imported correctly.
+    const { mapping, rows } = importAll(
+      [
+        'Date,Description,Amount',
+        '01/03/2026,TESCO,-45.20',
+        '02/03/2026,RENT,-1250.00',
+        '03/03/2026,SALARY,2500.00',
+        '04/03/2026,COFFEE,-3.20',
+      ].join('\n'),
+    )
+
+    expect(mapping.invert).toBe(false)
+    expect(rows.map((r) => r.amountMinor)).toEqual([-4520, -125000, 250000, -320])
+  })
+
+  it('never asks the sign question of a split file, where the column has answered it', () => {
+    const { mapping } = importAll(
+      [
+        'Date,Description,Money Out,Money In',
+        '01/03/2026,TESCO,45.20,',
+        '02/03/2026,SALARY,,2500.00',
+      ].join('\n'),
+    )
+
+    expect(mapping.layout).toBe('split')
+    expect(mapping.invert).toBe(false)
+  })
+
+  it('does not call a column of pure income a card', () => {
+    // No negative at all is step 4's case — a direction living in some column
+    // we never matched — not a card statement.
+    const { mapping } = importAll(
+      [
+        'Date,Description,Amount',
+        '01/03/2026,SALARY,2500.00',
+        '02/03/2026,INTEREST,1.20',
+      ].join('\n'),
+    )
+
+    expect(mapping.invert).toBe(false)
+  })
+
   it('marks a row with no amount as invalid rather than importing a zero', () => {
     const { rows } = importAll(
       [
@@ -194,6 +257,35 @@ describe('remembering a layout', () => {
     expect(readMapping(JSON.stringify({ ...guessMapping(file), columns: 4, amount: 9 }), file)).toBeUndefined()
     expect(readMapping('not json', file)).toBeUndefined()
     expect(readMapping(undefined, file)).toBeUndefined()
+  })
+
+  it('accepts a mapping stored before the sign question existed', () => {
+    // The columns in it are still right, and rejecting it would send every bank
+    // the app has already learned back to guessing.
+    const card = parseCSV(['Date,Description,Amount', '01/03/2026,TESCO,45.20'].join('\n'))
+    const { invert: _dropped, ...old } = guessMapping(card)
+    const m = readMapping(JSON.stringify({ ...old, columns: 3 }), card)
+    expect(m?.invert).toBe(false)
+  })
+
+  it('remembers the sign question, so a card is answered once', () => {
+    const card = parseCSV(
+      [
+        'Date,Description,Amount',
+        '01/03/2026,TESCO,45.20',
+        '02/03/2026,ODEON,15.00',
+        '03/03/2026,AMAZON,32.99',
+        '15/03/2026,PAYMENT,-300.00',
+      ].join('\n'),
+    )
+    const m = guessMapping(card)
+    expect(m.invert).toBe(true)
+    expect(readMapping(writeMapping(m, card), card)?.invert).toBe(true)
+  })
+
+  it('drops a remembered sign question on a split file, where it means nothing', () => {
+    const stored = { ...guessMapping(file), invert: true, columns: 4 }
+    expect(readMapping(JSON.stringify(stored), file)?.invert).toBe(false)
   })
 
   it('refuses a split mapping with no money-in column', () => {

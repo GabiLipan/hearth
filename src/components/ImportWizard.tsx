@@ -26,7 +26,7 @@ import { useSyncState } from '../hooks/useSync'
 import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { alertAction } from './confirm'
-import { Sheet, Button, Field, Select, Segmented, cx } from './ui'
+import { Sheet, Button, Field, Select, Segmented, CheckRow, cx } from './ui'
 
 type Step = 'pick' | 'map' | 'review' | 'done'
 
@@ -360,6 +360,11 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                     layout === 'split' && mapping.moneyIn < 0
                       ? csv.headers.findIndex((_, i) => i !== mapping.amount && i !== mapping.date && i !== mapping.payee)
                       : mapping.moneyIn,
+                  // Under split the side says which way the money went, so the
+                  // sign question does not arise — cleared here as well as in
+                  // `guessMapping`, or it would be remembered on a file where
+                  // it means nothing and come back if the layout changed again.
+                  invert: layout === 'signed' && mapping.invert,
                 })
               }
               options={[
@@ -373,6 +378,20 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                 : 'One column, negative for money out.'}
             </span>
           </Field>
+
+          {/* Only under `signed`, because only there does the column carry the
+              direction. Detected from the rows — a column that is mostly
+              positive is a card rather than a bank account — and always shown,
+              because the preview below is the only thing that can tell you the
+              guess was wrong before the figures are in the app. */}
+          {mapping.layout === 'signed' && (
+            <CheckRow
+              checked={mapping.invert}
+              onChange={(invert) => setMapping({ ...mapping, invert })}
+              label="Money out is written as a positive"
+              info="Amex and most credit cards do this: a purchase is a plus, and the payment that clears the card is a minus. A bank account is the other way round."
+            />
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Date column">

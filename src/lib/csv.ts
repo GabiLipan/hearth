@@ -26,6 +26,17 @@ export interface ColumnMapping {
   /** Money in. Read only under `split`; -1 when unknown. */
   moneyIn: number
   layout: AmountLayout
+  /**
+   * Which sign in the amount column means money OUT. Read only under `signed`,
+   * where the column carries the direction and nothing else does; under `split`
+   * the SIDE decides, so it is forced false there the way `moneyIn` is -1.
+   *
+   * False is a bank account: negative for money out. True is a card statement —
+   * Amex and most credit cards — where a purchase is a plus and the payment
+   * that clears the card is a minus. The same shape of file, meaning the
+   * opposite thing.
+   */
+  invert: boolean
   dateFormat: string
 }
 
@@ -141,6 +152,39 @@ function looksComplementary(rows: string[][], a: number, b: number): boolean {
   return either > 0 && both / either < 0.2
 }
 
+/**
+ * Does this signed column write money OUT as a positive?
+ *
+ * The headers cannot answer it — a card export and a bank export both call the
+ * column "Amount" — so this is decided entirely by the shape of the data, and
+ * the shape is unambiguous: a statement is mostly spending. On a bank account
+ * that means mostly negatives with the occasional salary; on a card it means
+ * mostly positives with the occasional payment clearing the balance.
+ *
+ * Both halves of the test are load-bearing. The clear majority is what stops a
+ * quiet month on a current account flipping it, and requiring at least one
+ * NEGATIVE is what keeps it off a file that is genuinely all inflows — a column
+ * with no negative at all is step 4's case, not this one, which is why this
+ * runs after it.
+ *
+ * It can still be wrong, and it is the one setting in the import that can
+ * invert every figure in a statement, so the wizard always shows it as a
+ * control with the preview underneath rather than only applying it.
+ */
+function looksInverted(rows: string[][], col: number): boolean {
+  if (col < 0) return false
+  let positive = 0
+  let negative = 0
+  for (const r of rows) {
+    const v = parseMoney((r[col] ?? '').trim())
+    if (v === null || v === 0) continue
+    if (v > 0) positive++
+    else negative++
+  }
+  const signed = positive + negative
+  return negative > 0 && signed > 0 && positive / signed >= 0.7
+}
+
 /** Every column that is mostly numbers, in order. Used when the headers say nothing. */
 function numericColumns(rows: string[][], width: number, skip: number[]): number[] {
   const out: number[] = []
@@ -225,12 +269,19 @@ export function guessMapping(csv: ParsedCSV): ColumnMapping {
     }
   }
 
+  // 5. And which sign in that column means money out. A card statement is the
+  //    same file as a bank statement with every sign the other way round, so
+  //    this is asked of the rows once the column is settled — never before, and
+  //    never under `split`, where the column a value is in has already said.
+  const invert = layout === 'signed' && looksInverted(sample, out)
+
   return {
     date,
     payee,
     amount: out,
     moneyIn: layout === 'split' ? moneyIn : -1,
     layout,
+    invert,
     dateFormat: guessDateFormat(sample.slice(0, 20).map((r) => r[date] ?? '')),
   }
 }
@@ -261,7 +312,10 @@ export function extractRows(csv: ParsedCSV, m: ColumnMapping): ImportRow[] {
       if (out !== null && out !== 0) amountMinor = -Math.abs(out)
       else if (inn !== null && inn !== 0) amountMinor = Math.abs(inn)
     } else {
-      amountMinor = out
+      // The column carries the direction, and `invert` says which way round it
+      // is written. Applied AFTER parsing, so parentheses still mean a negative
+      // number and then get flipped like any other.
+      amountMinor = out === null ? null : m.invert ? -out : out
     }
 
     return {
@@ -352,6 +406,10 @@ export function readMapping(raw: string | undefined, csv: ParsedCSV): ColumnMapp
       amount: m.amount!,
       moneyIn: m.layout === 'split' ? m.moneyIn! : -1,
       layout: m.layout,
+      // Defaulted rather than required: a mapping stored before this field
+      // existed describes its columns perfectly well, and rejecting it would
+      // send every bank the app has already learned back to guessing.
+      invert: m.layout === 'signed' && m.invert === true,
       dateFormat: m.dateFormat,
     }
   } catch {

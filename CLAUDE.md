@@ -924,6 +924,26 @@ the single place a level comes from.
   next thing typed by hand. Anything grouping rows by payee has to use
   `matchKey` too, or every referenceless row of the month collects into one
   blank group — `topPayees` did exactly that.
+- **A statement's amounts carry three facts, not two.** Which columns they are
+  in, whether there are one or two of them — and, under a single signed column,
+  **which sign means money out**. An Amex export is a bank export with every
+  sign the other way round: a purchase is a plus and the payment that clears the
+  card is a minus. Read at face value that files every purchase as INCOME and
+  the payment as spending, silently, and nothing downstream can recover it —
+  the sign is what `classifyFlows`, `bookTotals`, every budget and every chart
+  read, and `learnRule` only learns a category from `amountMinor < 0`, so an
+  inverted import also teaches the rules nothing while inflating income.
+  `ColumnMapping.invert` is that third fact. The headers cannot answer it (both
+  kinds of file call the column "Amount"), so `looksInverted` asks the rows: a
+  statement is mostly spending, so a signed column that is mostly POSITIVE is a
+  card. It runs after step 4, which owns the different case of a column with no
+  negative at all, and it is forced false under `split`, where the column a
+  value sits in has already said. Being a heuristic that can invert every figure
+  in a file, it is always shown as a control with the preview under it — and it
+  is remembered by `mappingKey`, so a card is answered once per bank rather than
+  once per import. `readMapping` DEFAULTS a missing `invert` rather than
+  rejecting the object, or every bank the app had already learned would fall
+  back to guessing.
 - **An import keeps the bank's string exactly, and finishes the rows already
   here.** It used to store `prettyPayee(r.payee)`, which title-cases a
   stripped-down copy — throwing away the one string you can look up on your
@@ -1482,6 +1502,11 @@ the single place a level comes from.
 
 - `stats.ts` `monthlySeries` has an `else if`/`else` pair with identical bodies —
   the income branch is dead code, harmless but misleading.
+- The PDF import path does not ask which sign means money out. `pdfImport.ts`
+  derives a sign from balance deltas and credit markers rather than from a
+  column, and `ImportWizard.onFile` sends a PDF straight to `buildReview`,
+  skipping the mapping step — so there is nowhere to hang the control that the
+  CSV path has. A card statement as PDF may still import inverted.
 - Bill posting and reconciliation, transfers and their linking, account deletion
   and the wipe are **online-only** RPCs. Deliberate (they must be atomic), but
   there is no queued-offline story for them.
