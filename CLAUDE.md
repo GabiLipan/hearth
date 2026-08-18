@@ -66,17 +66,27 @@ read-only detector that reports which are present — run it when unsure.
 | `19-published-household-rows.sql` | `accounts.publishes_household_rows` — a row marked as the household's is readable by the household, wherever it was paid from. The one row-level rule in the schema |
 | `20-transaction-titles.sql` | `transactions.title` + `rules.title` — what a row is CALLED, as opposed to what the bank wrote, learned back through the same rules that learn a category. `rules.category_id` becomes nullable, and `upsert_rule` gains a fourth argument |
 | `21-rule-conditions.sql` | `rules.amount_min_minor` / `amount_max_minor` / `account_id` — a rule may ask for more than the payee. Two subscriptions from one vendor at two prices become two rules, so the uniqueness rule moves from the payee to the whole condition set, and `upsert_rule` gains three more arguments |
+| `22-rule-edits.sql` | `upsert_rule` looks before it inserts, so a rule's CONDITIONS can be edited — its payee, an amount, an account. Same signature as 21's, body only |
 
-All are re-runnable, with **four ordering traps**, and three of them are the
+All are re-runnable, with **five ordering traps**, and three of them are the
 same trap. The rule migrations stack: `20` drops the three-argument
 `upsert_rule` for a four-argument one and `21` drops that for a seven-argument
 one, while `03` and `20` both stay re-runnable — so running either after `21`
-puts an older signature back beside the current one, PostgREST cannot resolve
-the call, and every rule the app learns dead-letters with "could not find the
-function … in the schema cache". Re-run the highest of them;
-`00-which-migrations-applied.sql` has a row that counts the signatures. `21`
-also REPLACES `rules_match_unique` with `rules_condition_unique`, and while the
-old index stands a second rule for one payee is refused outright — there is a
+or `22` puts an older signature back beside the current one, PostgREST cannot
+resolve the call, and every rule the app learns dead-letters with "could not
+find the function … in the schema cache". Re-run the highest of them;
+`00-which-migrations-applied.sql` has a row that counts the signatures.
+
+**`22` is the trap that counts no signatures**, and it is the nastiest of them
+for exactly that reason: it replaces `21`'s `upsert_rule` with the SAME
+seven-argument signature, so re-running `21` afterwards silently swaps the body
+back to the broken one — no error, no second overload, and the signature count
+still reads 1. Editing what a rule matches starts dead-lettering on
+`rules_pkey` again and nothing else in the schema notices. The detector row for
+`22` therefore reads `prosrc` rather than the signature. Verified by doing it.
+
+`21` also REPLACES `rules_match_unique` with `rules_condition_unique`, and while
+the old index stands a second rule for one payee is refused outright — there is a
 row for that too. The next: `19` replaces
 `07`'s `transactions_select`, so re-running `07` afterwards silently puts the
 narrower policy back — nothing errors, published rows simply stop arriving, and
@@ -313,6 +323,20 @@ the single place a level comes from.
   schema cache" rather than a null.
 - **`db.table.toArray()[0]` is not "the first one"** — it is primary-key order
   over random uuids.
+- **`on conflict` names ONE arbiter, and a row can already be there two ways.**
+  `upsert_rule` was a single `insert … on conflict (the condition set) do update`
+  for eighteen migrations, which resolves the case it was written for — two
+  devices learning one payee — and not the other one: the client sends the id of
+  the row being edited, so an edit that changes any part of the condition set
+  collides with nothing on that index and dies on `rules_pkey` instead. Editing
+  what a rule MATCHED therefore never worked, and it failed the worst way — a
+  dead letter minutes later in Settings, reading `duplicate key value violates
+  unique constraint "rules_pkey"`, which "Try again" cannot fix because the
+  retry re-sends the same doomed insert. Migration `22` looks before inserting,
+  which is the shape `upsert_budget` had from the start. The general lesson:
+  where the client supplies the primary key, an upsert needs to consider the
+  primary key as well as the natural one, and `on conflict` alone cannot.
+
 - **Schema constraints drift from the client.** `categories.slot` stayed
   `between 1 and 8` while the palette grew to 12, so adding a category failed once
   the auto-assigned colour passed 8.

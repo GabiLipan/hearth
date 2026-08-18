@@ -226,6 +226,20 @@ select '21-rule-conditions.sql',
        'rules.amount_min_minor + rules.account_id + seven-argument upsert_rule exist'
 
 union all
+-- 22 REPLACES 21's upsert_rule with the SAME seven-argument signature, so
+-- `to_regprocedure` cannot tell the two apart and neither can the duplicate
+-- check below — this one reads the body. Until it is true, editing what a rule
+-- matches (its payee, an amount, an account) dead-letters on `rules_pkey` and
+-- cannot be retried. Note the trap this creates in the other direction:
+-- re-running 21 AFTER 22 puts the broken body back silently, with no error and
+-- no extra overload for anything else here to notice.
+select '22-rule-edits.sql',
+       exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public' and p.proname = 'upsert_rule'
+                  and p.prosrc like '%deleted on another device%'),
+       'upsert_rule edits an existing rule in place instead of re-inserting it'
+
+union all
 -- Not a migration: 21 replaces the uniqueness rule on `rules`, because two
 -- rules for one payee at two amounts is the whole point of it. If the old index
 -- is still here the second one is refused outright, with a duplicate-key dead
@@ -238,15 +252,15 @@ select 'rules keyed on the whole condition',
 union all
 -- Not a migration: the same trap 09-after-10 sets, now two files along. Both 20
 -- and 21 drop the previous upsert_rule and replace it with a wider one, and 03
--- and 20 are both still re-runnable — running either AFTER 21 puts an older
--- signature back beside the current one. supabase-js drops `undefined`
+-- and 20 are both still re-runnable — running either AFTER 21 or 22 puts an
+-- older signature back beside the current one. supabase-js drops `undefined`
 -- arguments, so the call becomes ambiguous and every rule the app learns
 -- dead-letters with "could not find the function in the schema cache". Re-run
 -- the highest of them to clear it.
 select 'no duplicate upsert_rule',
        (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'public' and p.proname = 'upsert_rule') <= 1,
-       'exactly one upsert_rule signature — re-run 21 if this is false'
+       'exactly one upsert_rule signature — re-run 22 if this is false'
 
 union all
 -- Not a migration: a state you can only reach by re-running 09 AFTER 10, which
