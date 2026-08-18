@@ -1071,9 +1071,16 @@ function Notices() {
   return (
     <div
       className={cx(
-        'pointer-events-none absolute right-0 z-[45] flex flex-col items-center gap-2 px-4',
+        'pointer-events-none absolute right-0 z-[45] flex flex-col gap-2 px-4 md:px-5 xl:px-6',
         'left-[var(--rail-w,0px)]',
         'top-[calc(var(--header-h,0px)_+_0.5rem)] md:top-[calc(env(safe-area-inset-top)_+_0.75rem)]',
+        // Centred on a phone, where the top of the screen is two floating discs
+        // and a gap; against the right edge on a wide screen, where the top of
+        // the content is the page's own title and a notice parked over it would
+        // be a standing condition covering the name of the page it is not
+        // about. Which is also where every desktop notification anybody has
+        // seen appears.
+        'items-center md:items-end',
       )}
     >
       <UpdateNotice />

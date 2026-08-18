@@ -1789,14 +1789,26 @@ function ScrollRow({
     // paint — any of which changes what overflows without touching the row.
     const ro = new ResizeObserver(read)
     ro.observe(el)
-    for (const child of el.children) ro.observe(child)
+    const watchChildren = () => {
+      for (const child of el.children) ro.observe(child)
+    }
+    watchChildren()
+    // Filters appear and vanish with the page's state, and a new one is a new
+    // box to watch. A MutationObserver rather than a dependency on `children`:
+    // that prop is a new array on every render, so keying the effect on it
+    // would tear down and re-attach both observers and the scroll listener
+    // several times a keystroke while somebody is typing in the search box.
+    const mo = new MutationObserver(() => {
+      watchChildren()
+      read()
+    })
+    mo.observe(el, { childList: true })
     return () => {
       el.removeEventListener('scroll', read)
       ro.disconnect()
+      mo.disconnect()
     }
-    // Re-observed when the set of children changes: filters appear and vanish
-    // with the page's state, and a new one is a new box to watch.
-  }, [children])
+  }, [])
 
   const nudge = (dir: 1 | -1) => {
     const el = ref.current
@@ -1809,7 +1821,15 @@ function ScrollRow({
 
   return (
     <div className={cx('relative', bleed, className)}>
-      <div ref={ref} className={cx('no-scrollbar flex items-center overflow-x-auto py-1', gap, rowClassName)}>
+      {/* `[&>*]:shrink-0` is not decoration: a flex child with nothing stopping
+          it shrinks to fit the row, and in a row that SCROLLS there is nothing
+          to fit — so "Import CSV" was being squeezed onto two lines at the end
+          of a bar with 300px of scroll behind it. Nothing in here is ever
+          narrower than it wants to be. */}
+      <div
+        ref={ref}
+        className={cx('no-scrollbar flex items-center overflow-x-auto py-1 [&>*]:shrink-0', gap, rowClassName)}
+      >
         {children}
       </div>
       <ScrollEdge side="left" show={edges.left} onClick={() => nudge(-1)} />
@@ -1833,12 +1853,17 @@ function ScrollEdge({ side, show, onClick }: { side: 'left' | 'right'; show: boo
     <div
       aria-hidden
       className={cx(
-        'absolute inset-y-0 flex w-14 items-center transition-opacity duration-200 motion-reduce:transition-none',
+        // A little inset either end, so the button sits ON the fade rather than
+        // flush against the edge of the screen the fade runs off.
+        'absolute inset-y-0 flex w-16 items-center px-1 transition-opacity duration-200 motion-reduce:transition-none',
         // The fade is the page's own colour, so the controls dissolve into the
         // background rather than under a grey plate.
+        // `to-page/0` rather than `to-transparent`: the bare keyword is
+        // transparent BLACK, and a gradient interpolating towards it washes the
+        // middle of the ramp grey on a light page.
         side === 'left'
-          ? 'left-0 justify-start bg-gradient-to-r from-page from-40% to-transparent'
-          : 'right-0 justify-end bg-gradient-to-l from-page from-40% to-transparent',
+          ? 'left-0 justify-start bg-gradient-to-r from-page from-40% to-page/0'
+          : 'right-0 justify-end bg-gradient-to-l from-page from-40% to-page/0',
         show ? 'opacity-100' : 'pointer-events-none opacity-0',
       )}
     >

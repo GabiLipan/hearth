@@ -1286,16 +1286,16 @@ export function SettingsGroupPage() {
   const wide = useWide()
   const found = GROUPS.find((g) => g.slug === group)
   if (!found) return <Navigate to="/settings" replace />
-  const { Body, title } = found
+  const { Body } = found
 
   // On a wide screen the list of compartments is still on screen beside this
-  // one, so there is nothing to go back to and no back link. The heading is
-  // here instead of in the page title, which says "Settings" throughout — the
-  // shell is one page with rooms in it, not seven pages.
+  // one, so there is nothing to go back to and no back link. Nor a heading:
+  // `Layout` already titles the page with this group's name, and a second copy
+  // of the word directly under the first is how the phone's index used to read
+  // before the top bar stopped repeating it.
   if (wide) {
     return (
       <SettingsShell active={found.slug}>
-        <h2 className="mb-3 text-lg font-semibold tracking-tight">{title}</h2>
         <Body />
       </SettingsShell>
     )
