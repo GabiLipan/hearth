@@ -89,9 +89,38 @@ export function cleanTitle(raw: string | undefined | null): string | undefined {
  * wrote. Every list in the app reads rows through this rather than `t.payee` —
  * the payee is still the identity, and is still what matching, pairing and
  * de-duplication compare.
+ *
+ * A row added by hand may have no payee at all — nobody types "SQ *THE GOOD
+ * FORK 3241" from memory, and the reference arrives later, when a statement is
+ * imported and matched against it. So the fallback has a fallback.
  */
 export function displayName(t: { payee: string; title?: string }): string {
-  return cleanTitle(t.title) ?? t.payee
+  return cleanTitle(t.title) ?? (t.payee.trim() || 'No description')
+}
+
+/**
+ * The bank's own words, where they are not already what is on screen.
+ *
+ * `undefined` on a row nobody has named (the payee IS the name there, and
+ * printing it twice is noise) and on one with no reference yet. Everything that
+ * shows a transaction shows `displayName` and then this, muted — see
+ * `components/TxnName.tsx`, which is how the two stay in step.
+ */
+export function reference(t: { payee: string; title?: string }): string | undefined {
+  if (!cleanTitle(t.title)) return undefined
+  return t.payee.trim() || undefined
+}
+
+/**
+ * The string a rule is keyed on for this row.
+ *
+ * The payee, because that is what a statement will say next month — but a row
+ * added by hand may not have one, and there the name is the only identity
+ * there is. Learning "Dinner out → Eating out" off a manual entry is worth
+ * having; it simply cannot match an imported bank string, which is correct.
+ */
+export function matchKey(t: { payee?: string; title?: string }): string {
+  return (t.payee ?? '').trim() || cleanTitle(t.title) || ''
 }
 
 /**

@@ -6,7 +6,8 @@ import { create, update, remove as removeRow } from '../lib/data'
 import { useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules, useCacheReady } from '../lib/cache'
 import { canEditTransaction, levelOn } from '../lib/accounts'
 import { fullName } from '../lib/categories'
-import { applyCategory, cleanTitle, coverageOf, displayName, normalizePayee, TITLE_MAX } from '../lib/rules'
+import { applyCategory, cleanTitle, coverageOf, normalizePayee, TITLE_MAX } from '../lib/rules'
+import { TxnName } from '../components/TxnName'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import {
@@ -369,7 +370,9 @@ export default function RulesPage() {
               {(coverage.get(preview.id)?.changed ?? []).map((t) => (
                 <li key={t.id} className="flex items-center gap-2.5 rounded-xl bg-surface-2/50 px-2.5 py-1.5">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{displayName(t)}</p>
+                    <p className="flex min-w-0 text-sm font-medium">
+                      <TxnName txn={t} />
+                    </p>
                     <p className="truncate text-xs text-ink-3">
                       {t.date} · currently{' '}
                       {t.categoryId ? (catMap.get(t.categoryId)?.name ?? 'a deleted category') : 'uncategorised'}

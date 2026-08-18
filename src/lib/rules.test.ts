@@ -9,6 +9,8 @@ import {
   coverageOf,
   displayName,
   learnRule,
+  matchKey,
+  reference,
   similarTo,
   titleRule,
   unnamedLike,
@@ -143,6 +145,28 @@ describe('what a payee is called', () => {
     expect(displayName({ payee: 'SQ *THE GOOD FORK 3241' })).toBe('SQ *THE GOOD FORK 3241')
     // A blank is not a name — otherwise a row renders with nothing on it.
     expect(displayName({ payee: 'TESCO', title: '   ' })).toBe('TESCO')
+  })
+
+  it('shows the bank’s words after the name, and never instead of it twice', () => {
+    // The pair every table and card renders: the name, then the reference.
+    expect(reference({ payee: 'SQ *THE GOOD FORK 3241', title: 'Dinner out' })).toBe('SQ *THE GOOD FORK 3241')
+    // Nothing to add — the payee IS the name on this row.
+    expect(reference({ payee: 'Tesco' })).toBeUndefined()
+    // Added by hand and never matched to a statement: there is no reference yet.
+    expect(reference({ payee: '', title: 'Dinner out' })).toBeUndefined()
+  })
+
+  it('labels a row that has a name and no reference at all', () => {
+    // Nobody types "SQ *THE GOOD FORK 3241" from memory, so a manual entry is
+    // routinely all name and no reference until a statement is imported.
+    expect(displayName({ payee: '', title: 'Dinner out' })).toBe('Dinner out')
+    expect(displayName({ payee: '' })).toBe('No description')
+  })
+
+  it('keys a rule on the reference, falling back to the name', () => {
+    expect(matchKey({ payee: 'SQ *THE GOOD FORK 3241', title: 'Dinner out' })).toBe('SQ *THE GOOD FORK 3241')
+    expect(matchKey({ payee: '  ', title: 'Dinner out' })).toBe('Dinner out')
+    expect(matchKey({})).toBe('')
   })
 
   it('stores a name as one trimmed line, or as nothing at all', () => {

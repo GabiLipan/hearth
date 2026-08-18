@@ -17,6 +17,7 @@ import { parseAmount, currencySymbol } from '../lib/money'
 import { dateWindow, todayISO } from '../lib/dates'
 import {
   learnRule,
+  matchKey,
   suggestCategory,
   suggestTitle,
   prettyPayee,
@@ -155,19 +156,27 @@ export function TransactionForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing])
 
-  // Auto-suggest a category as soon as we recognise the payee
+  // Auto-suggest a category as soon as we recognise what this is.
+  //
+  // Keyed on the reference where there is one and on the name otherwise, which
+  // is the same choice `matchKey` makes when the rule is learned — so an entry
+  // typed by hand with no reference still recognises the next one like it.
   useEffect(() => {
-    if (!open || editing || payee.trim().length < 3) return
+    if (!open || editing) return
+    const key = matchKey({ payee, title })
+    if (key.length < 3) return
     let cancelled = false
     const t = setTimeout(async () => {
-      const id = await suggestCategory(payee)
+      const id = await suggestCategory(key)
       if (!cancelled && id && (categoryId === undefined || suggested)) {
         setCategoryId(id)
         setSuggested(true)
       }
       // The same offer for the name, and under the same rule: a suggestion may
       // fill an empty field or replace one it filled itself, and must never
-      // overwrite something typed by hand.
+      // overwrite something typed by hand. Only ever from the REFERENCE —
+      // suggesting a name from a name is circular.
+      if (payee.trim().length < 3) return
       const name = await suggestTitle(payee)
       if (!cancelled && name && (title.trim() === '' || titleSuggested)) {
         setTitle(name)
@@ -179,7 +188,7 @@ export function TransactionForm({
       clearTimeout(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payee, open])
+  }, [payee, title, open])
 
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
@@ -447,7 +456,21 @@ export function TransactionForm({
   }, [amount])
 
   const amountMinor = parseAmount(amount)
-  const canSave = amountMinor !== null && amountMinor > 0 && payee.trim() && categoryId !== undefined && accountId !== undefined
+  /**
+   * Either name will do, and one of them is required.
+   *
+   * A row added by hand is usually all name and no reference — nobody types
+   * "SQ *THE GOOD FORK 3241" from memory, and the statement will supply it
+   * later, when it is imported and matched against this row. A row with
+   * NEITHER is a row nothing on any screen could label, which is why this is
+   * an `or` rather than both being optional.
+   */
+  const canSave =
+    amountMinor !== null &&
+    amountMinor > 0 &&
+    (payee.trim() !== '' || cleanTitle(title) !== undefined) &&
+    categoryId !== undefined &&
+    accountId !== undefined
 
   async function save() {
     if (!canSave) return
@@ -517,9 +540,17 @@ export function TransactionForm({
     // only ever learned from spending, but "FPI SMITH J LTD" is precisely the
     // sort of thing that wants calling "Salary".
     const learntTitle = cleanTitle(title)
-    if (kind !== 'expense' && learntTitle) await learnRule(payee, { title: learntTitle })
+    // The reference is what a statement will say next month, so it is the key
+    // wherever there is one. Where there is not, the name is the only identity
+    // the row has — a rule learned from it can never match an imported bank
+    // string, which is right, and will match the next entry typed by hand.
+    const key = matchKey({ payee, title })
+    // A name is only worth learning against a REFERENCE: keyed on the name
+    // itself it would say nothing but "call this what you called it".
+    const learntFrom = payee.trim() ? learntTitle : undefined
+    if (kind !== 'expense' && learntFrom) await learnRule(key, { title: learntFrom })
     if (kind === 'expense') {
-      await learnRule(payee, { categoryId: categoryId!, title: learntTitle })
+      await learnRule(key, { categoryId: categoryId!, title: learntFrom })
       // …and, if asked, applies what it just learned backwards. `similar` is
       // already filtered to what this device may change, so the predicate here
       // passes everything through.
@@ -607,7 +638,7 @@ export function TransactionForm({
                 if (
                   await confirmAction({
                     title: 'Delete this transaction?',
-                    body: `“${payee.trim() || editing.payee}” will disappear from your reports and budgets too.`,
+                    body: `“${displayName({ payee: payee.trim() || editing.payee, title })}” will disappear from your reports and budgets too.`,
                     confirmLabel: 'Delete',
                     tone: 'danger',
                   })
@@ -691,11 +722,46 @@ export function TransactionForm({
           </div>
         )}
 
-        <Field label={kind === 'expense' ? 'Where did you spend?' : 'Where from?'}>
+        {/* What this IS, in your words — the thing every list shows. It comes
+            first because a row added by hand is usually all name and no
+            reference: the bank's version of the string arrives later, when a
+            statement is imported and matched against this row. */}
+        <Field
+          label={kind === 'expense' ? 'What was it?' : 'What was it for?'}
+          hint={
+            titleSuggested
+              ? 'Remembered from the last one from here — change it and Hearth will learn the new name.'
+              : undefined
+          }
+        >
+          <TextInput
+            value={title}
+            maxLength={TITLE_MAX}
+            onChange={(e) => {
+              setTitle(e.target.value)
+              setTitleSuggested(false)
+            }}
+            placeholder={kind === 'expense' ? 'e.g. Dinner out' : 'e.g. Salary'}
+            autoComplete="off"
+          />
+        </Field>
+
+        {/* The bank's own words, exactly as they will appear on the statement.
+            This is the identity: `normalizePayee`, the duplicate check,
+            transfer pairing and every rule compare THIS and never the name. It
+            is optional here and never optional on an import. */}
+        <Field
+          label="Reference"
+          hint={
+            title.trim() && !payee.trim()
+              ? 'Optional. Importing a statement will fill this in and match this entry rather than adding it twice.'
+              : 'What your bank calls it. Part of it is enough.'
+          }
+        >
           <TextInput
             value={payee}
             onChange={(e) => setPayee(e.target.value)}
-            placeholder={kind === 'expense' ? 'e.g. Tesco' : 'e.g. Salary'}
+            placeholder={kind === 'expense' ? 'e.g. Tesco' : 'e.g. ACME LTD'}
             list="payee-suggestions"
             autoComplete="off"
           />
@@ -706,31 +772,6 @@ export function TransactionForm({
           </datalist>
         </Field>
 
-        {/* What this is CALLED, as opposed to what the bank called it. The
-            payee above stays exactly as imported — it is what every rule,
-            duplicate check and transfer pairing in the app compares — and this
-            is what Activity, the widgets and the reports show. Learned back
-            through the same rules that learn a category, so the next
-            "SQ *THE GOOD FORK 3241" arrives already called "Dinner out". */}
-        <Field
-          label="Call it"
-          hint={
-            titleSuggested
-              ? 'Remembered from the last one from here — change it and Hearth will learn the new name.'
-              : 'Optional. Leave it blank to show whatever the bank wrote.'
-          }
-        >
-          <TextInput
-            value={title}
-            maxLength={TITLE_MAX}
-            onChange={(e) => {
-              setTitle(e.target.value)
-              setTitleSuggested(false)
-            }}
-            placeholder={payee.trim() ? prettyPayee(payee) : 'e.g. Dinner out'}
-            autoComplete="off"
-          />
-        </Field>
 
         {unnamed.length > 0 && (
           <CheckRow

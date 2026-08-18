@@ -1,7 +1,7 @@
 import type { Account, Category, Transaction } from './db'
 import { budgetCategoryId, styleOf } from './categories'
 import { monthKey, monthLabel, shiftMonth, todayISO } from './dates'
-import { normalizePayee, payeeSimilar, prettyPayee } from './rules'
+import { matchKey, normalizePayee, payeeSimilar, prettyPayee } from './rules'
 import {
   accountsInBook,
   bookTotals,
@@ -282,6 +282,8 @@ export function topPayees(
     /** The shortest normalised form seen — the most generic, so "tesco" beats "tesco express". */
     key: string
     raw: string
+    /** The label is a name somebody typed, so it is printed as they typed it. */
+    verbatim: boolean
     totalMinor: number
     count: number
     cats: Map<string, number>
@@ -294,7 +296,12 @@ export function topPayees(
     if (!spendsIn(flow, book, t.accountId, ids)) continue
     if (effectiveMonth(t, flow) !== month) continue
 
-    const key = normalizePayee(t.payee) || t.payee.toLowerCase()
+    // A row added by hand may have no reference at all, and there its name is
+    // the only identity it has — grouping on the payee alone would collect
+    // every such row of the month into one blank "payee".
+    const source = matchKey(t)
+    const verbatim = !t.payee.trim()
+    const key = normalizePayee(source) || source.toLowerCase()
     let g = seen.get(key)
     if (!g) {
       g = groups.find((x) => payeeSimilar(x.key, key))
@@ -302,10 +309,11 @@ export function topPayees(
         // The more generic name is the better label for the group.
         if (key.length < g.key.length) {
           g.key = key
-          g.raw = t.payee
+          g.raw = source
+          g.verbatim = verbatim
         }
       } else {
-        g = { key, raw: t.payee, totalMinor: 0, count: 0, cats: new Map() }
+        g = { key, raw: source, verbatim, totalMinor: 0, count: 0, cats: new Map() }
         groups.push(g)
       }
       seen.set(key, g)
@@ -323,7 +331,12 @@ export function topPayees(
       // £400 line says more about what a payee is than nine £3 ones.
       const top = [...g.cats.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
       const style = styleOf(top ? catMap.get(top) : undefined, catMap)
-      return { payee: prettyPayee(g.raw), totalMinor: g.totalMinor, count: g.count, ...style }
+      return {
+        payee: g.verbatim ? g.raw : prettyPayee(g.raw),
+        totalMinor: g.totalMinor,
+        count: g.count,
+        ...style,
+      }
     })
 }
 

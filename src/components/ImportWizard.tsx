@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileUp, CheckCircle2 } from 'lucide-react'
-import { db, getSetting, setSetting } from '../lib/db'
+import { db, getSetting, setSetting, type Transaction } from '../lib/db'
 import { useAccounts, useCategories, useMyLevels } from '../lib/cache'
 import { fullName } from '../lib/categories'
 import { canAddTransactions, levelOn } from '../lib/accounts'
@@ -17,9 +17,11 @@ import {
   type ImportRow,
 } from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
-import { categoryRule, titleRule, prettyPayee, learnRule, buildHistoryMatcher, buildTitleMatcher, cleanTitle } from '../lib/rules'
+import { categoryRule, titleRule, learnRule, buildHistoryMatcher, buildTitleMatcher, cleanTitle } from '../lib/rules'
 import { findLikelyDuplicate } from '../lib/dedupe'
-import { createMany } from '../lib/data'
+import { createMany, update } from '../lib/data'
+import { canEditTransaction } from '../lib/accounts'
+import { TxnName } from './TxnName'
 import { useSyncState } from '../hooks/useSync'
 import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
@@ -27,6 +29,12 @@ import { alertAction } from './confirm'
 import { Sheet, Button, Field, Select, Segmented, cx } from './ui'
 
 type Step = 'pick' | 'map' | 'review' | 'done'
+
+/** "its reference", "its reference and a category", "a, b and c". */
+function listWords(words: string[]): string {
+  if (words.length <= 1) return words[0] ?? 'the details'
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`
+}
 
 interface ReviewRow {
   date: string
@@ -37,7 +45,24 @@ interface ReviewRow {
   categoryId?: string
   duplicate: boolean // exact re-import of a previously imported row
   /** fuzzy match against an existing (usually manual) entry — needs the user's call */
-  possibleDup?: { payee: string; date: string }
+  possibleDup?: { payee: string; title?: string; date: string }
+  /**
+   * The row this one is the statement's version of, and what the statement can
+   * tell it that it does not already know.
+   *
+   * A transaction added by hand is the same purchase written from the other
+   * end: it has a name and a date and no reference, because nobody types
+   * "SQ *THE GOOD FORK 3241". The statement has the reference, the import hash
+   * and — through the rules — often a category. Filling those in is strictly
+   * better than either importing a second copy of the purchase or discarding
+   * what the statement knows.
+   *
+   * Only ever fields the existing row is MISSING. The statement never overwrites
+   * something a person typed.
+   */
+  completes?: { id: string; fills: Partial<Transaction>; words: string[] }
+  /** Whether to actually fill them in. Off for a row nobody may edit. */
+  complete: boolean
   include: boolean
   userTouched: boolean
 }
@@ -64,6 +89,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   const [remembered, setRemembered] = useState(false)
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [importedCount, setImportedCount] = useState(0)
+  const [completedCount, setCompletedCount] = useState(0)
   const [reading, setReading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -155,13 +181,10 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       const hash = importHash(r)
       const duplicate = existingHashes.has(hash) || seen.has(hash)
       seen.add(hash)
-      let possibleDup: ReviewRow['possibleDup']
+      let match: Transaction | undefined
       if (!duplicate) {
-        const match = findLikelyDuplicate(r, existing, matchedIds)
-        if (match) {
-          matchedIds.add(match.id)
-          possibleDup = { payee: match.payee, date: match.date }
-        }
+        match = findLikelyDuplicate(r, existing, matchedIds)
+        if (match) matchedIds.add(match.id)
       }
       let categoryId: string | undefined
       if (r.amountMinor < 0) {
@@ -174,15 +197,47 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       // what past rows were called second, exactly as the category is — and on
       // income too, where a category is not.
       const title = cleanTitle(titleRule(r.payee, rules)?.title) ?? fromTitles(r.payee)
+
+      // What the statement can tell the row somebody already added, limited to
+      // what that row is missing. The reference is the one that matters —
+      // without it the manual row can never be matched by anything again, and
+      // will keep being offered as a possible duplicate of every future
+      // statement.
+      let completes: ReviewRow['completes']
+      if (match) {
+        const fills: Partial<Transaction> = {}
+        const words: string[] = []
+        if (!match.payee.trim() && r.payee.trim()) {
+          fills.payee = r.payee.trim()
+          words.push('its reference')
+        }
+        if (!match.importHash) fills.importHash = hash
+        if (!cleanTitle(match.title) && title) {
+          fills.title = title
+          words.push('a name')
+        }
+        if (!match.categoryId && categoryId) {
+          fills.categoryId = categoryId
+          words.push('a category')
+        }
+        if (Object.keys(fills).length > 0) completes = { id: match.id, fills, words }
+      }
+
       return {
         date: r.date,
-        payee: prettyPayee(r.payee),
+        // Exactly what the statement said. `prettyPayee` used to title-case a
+        // stripped-down version of it, which threw away the very string the
+        // reference exists to be — the one you can find on your bank's website.
+        // Making it readable is what `title` is for.
+        payee: r.payee.trim(),
         title,
         amountMinor: r.amountMinor,
         categoryId,
         duplicate,
-        possibleDup,
-        include: !duplicate && !possibleDup,
+        possibleDup: match ? { payee: match.payee, title: match.title, date: match.date } : undefined,
+        completes,
+        complete: completes !== undefined && canEditTransaction(match!, levelOn(match!.accountId, levels), userId),
+        include: !duplicate && !match,
         userTouched: false,
       }
     })
@@ -206,17 +261,34 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       createdBy: userId,
       createdAt: now,
     })))
+    /**
+     * The rows that were already here, finished off.
+     *
+     * These are NOT imported — a second copy of the same purchase is exactly
+     * what the duplicate check exists to prevent — but everything the statement
+     * knows and the manual row does not is written onto it. Field-level, so two
+     * devices doing this at once cannot overwrite each other, and only fields
+     * that were empty, so nothing anybody typed is touched.
+     */
+    let completed = 0
+    for (const r of rows) {
+      if (!r.complete || !r.completes) continue
+      await update('transactions', r.completes.id, r.completes.fills)
+      completed++
+    }
     // Learn from every category the user corrected by hand.
     for (const r of toImport) {
       if (r.userTouched && r.amountMinor < 0 && r.categoryId) await learnRule(r.payee, { categoryId: r.categoryId })
     }
     setImportedCount(toImport.length)
+    setCompletedCount(completed)
     setStep('done')
   }
 
   const dupCount = rows.filter((r) => r.duplicate).length
   const possibleCount = rows.filter((r) => r.possibleDup).length
   const includeCount = rows.filter((r) => r.include).length
+  const completeCount = rows.filter((r) => r.complete && r.completes).length
 
   return (
     <Sheet open={open} onClose={close} title="Import bank statement" wide>
@@ -379,7 +451,9 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
             {possibleCount > 0 && (
               <>
                 {' '}· <span className="font-medium text-ink">{possibleCount} possible duplicate{possibleCount === 1 ? '' : 's'}</span> of
-                entries you added by hand — they're unticked, so tick any that are genuinely separate purchases
+                entries you added by hand — they're unticked, so tick any that are genuinely separate purchases.
+                Where the statement knows something the entry does not — its reference, most of all — it can fill
+                that in instead of importing a second copy
               </>
             )}
             . Fix any categories — Hearth learns from your corrections.
@@ -407,26 +481,55 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                 <input
                   type="checkbox"
                   checked={r.include}
-                  onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, include: e.target.checked } : x)))}
+                  onChange={(e) =>
+                    setRows(
+                      rows.map((x, j) =>
+                        j === i
+                          ? {
+                              ...x,
+                              include: e.target.checked,
+                              // One purchase is either a new row or the row that
+                              // is already here, finished off. Never both.
+                              complete: e.target.checked ? false : x.completes !== undefined,
+                            }
+                          : x,
+                      ),
+                    )
+                  }
                   className="size-4 shrink-0 accent-[var(--accent)]"
-                  aria-label={`Include ${r.payee}`}
+                  aria-label={`Include ${r.title ?? r.payee}`}
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {r.title ?? r.payee}
-                    {r.duplicate && <span className="ml-1.5 text-xs text-ink-3">already imported</span>}
+                  <p className="flex min-w-0 text-sm font-medium">
+                    <TxnName txn={r} />
+                    {r.duplicate && <span className="ml-1.5 shrink-0 text-xs text-ink-3">already imported</span>}
                   </p>
                   <p className="truncate text-xs text-ink-3 tabular">
                     {fmtFullDate(r.date)}
-                    {/* What the bank actually wrote, where a learned name has
-                        taken its place on the line above. */}
-                    {r.title && <span> · {r.payee}</span>}
                     {r.possibleDup && (
                       <span className="text-ink-2">
-                        {' '}· looks like “{r.possibleDup.payee}” added {fmtDay(r.possibleDup.date)}
+                        {' '}· looks like “
+                        {r.possibleDup.title ?? r.possibleDup.payee ?? 'one you added'}” added{' '}
+                        {fmtDay(r.possibleDup.date)}
                       </span>
                     )}
                   </p>
+                  {/* The offer that stops a manual entry and its statement line
+                      being two rows for one purchase: keep the one that is
+                      there, and give it what the statement knows. */}
+                  {r.completes && !r.include && (
+                    <label className="mt-1 flex items-center gap-1.5 text-xs text-ink-2">
+                      <input
+                        type="checkbox"
+                        checked={r.complete}
+                        onChange={(e) =>
+                          setRows(rows.map((x, j) => (j === i ? { ...x, complete: e.target.checked } : x)))
+                        }
+                        className="size-3.5 shrink-0 accent-[var(--accent)]"
+                      />
+                      Fill in {listWords(r.completes.words)} on the one you added
+                    </label>
+                  )}
                 </div>
                 {r.amountMinor < 0 ? (
                   <select
@@ -460,8 +563,17 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
             <Button variant="subtle" onClick={() => (csv ? setStep('map') : reset())}>
               Back
             </Button>
-            <Button className="flex-1" disabled={includeCount === 0} onClick={doImport}>
-              Import {includeCount} transaction{includeCount === 1 ? '' : 's'}
+            {/* Completing rows is real work with nothing imported, so the
+                button has to be pressable when that is all there is to do. */}
+            <Button
+              className="flex-1"
+              disabled={includeCount === 0 && completeCount === 0}
+              onClick={doImport}
+            >
+              {includeCount === 0
+                ? `Fill in ${completeCount} transaction${completeCount === 1 ? '' : 's'}`
+                : `Import ${includeCount} transaction${includeCount === 1 ? '' : 's'}`}
+              {includeCount > 0 && completeCount > 0 && `, fill in ${completeCount}`}
             </Button>
           </div>
         </div>
@@ -470,10 +582,18 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       {step === 'done' && (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <CheckCircle2 size={44} className="text-good" />
-          <p className="text-lg font-semibold">Imported {importedCount} transactions</p>
+          <p className="text-lg font-semibold">
+            Imported {importedCount} transaction{importedCount === 1 ? '' : 's'}
+          </p>
           <p className="max-w-sm text-sm text-ink-2">
             They're categorised and in your activity. The more you correct, the smarter future imports get.
           </p>
+          {completedCount > 0 && (
+            <p className="max-w-sm text-sm text-ink-2">
+              {completedCount} {completedCount === 1 ? 'transaction you had already added was' : 'transactions you had already added were'}{' '}
+              filled in from the statement rather than imported again.
+            </p>
+          )}
           <Button onClick={close}>Done</Button>
         </div>
       )}

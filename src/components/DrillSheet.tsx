@@ -6,7 +6,7 @@ import { useAccountMap, useAccounts, useAllTransactions, useBooks, useCategoryMa
 import { canSeeTransactionsAt, levelOn } from '../lib/accounts'
 import { accountsInBook, showsInBook, BOOK_LABEL } from '../lib/books'
 import { fullName } from '../lib/categories'
-import { displayName } from '../lib/rules'
+import { TxnName } from './TxnName'
 import { fmtDay, fmtFullDate, monthLabel } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { AccountDot, CategoryDot, Sheet, cx } from './ui'
@@ -111,7 +111,9 @@ function Rows({ drill }: { drill: Drill }) {
                   />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{displayName(t)}</p>
+                  <p className="flex min-w-0 text-sm font-medium">
+                    <TxnName txn={t} />
+                  </p>
                   <p className="truncate text-xs text-ink-3">
                     {fmtDay(t.date)}
                     {' · '}

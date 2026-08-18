@@ -28,7 +28,12 @@ export function findLikelyDuplicate(
     if (usedIds?.has(t.id)) continue
     const gap = Math.abs(differenceInCalendarDays(parseISO(t.date), parseISO(cand.date)))
     if (gap > 3) continue
-    if (!payeeSimilar(t.payee, cand.payee)) continue
+    // A row added by hand may have no reference at all — nobody types
+    // "SQ *THE GOOD FORK 3241" from memory, they type what it was. There is
+    // nothing to compare, so the amount and the date carry the match on their
+    // own. That is a weaker claim, which is why it is only ever OFFERED: the
+    // import wizard unticks these and asks, and the transaction form asks too.
+    if (t.payee.trim() && !payeeSimilar(t.payee, cand.payee)) continue
     if (gap < bestGap) {
       best = t
       bestGap = gap

@@ -22,6 +22,7 @@ import { accountsInBook, showsInBook, isHouseholdPaid, BOOK_LABEL, type BookId, 
 import { applyContributor, learnContributors, suggestContributor, taggable } from '../lib/contributors'
 import { askedOfMe, isAsking, looksLikeTransfer } from '../lib/unexplained'
 import { cleanTitle, displayName } from '../lib/rules'
+import { TxnName } from '../components/TxnName'
 import { fullName, isTopLevel, usableOn } from '../lib/categories'
 import { useSticky, useStickyIds } from '../lib/sticky'
 import { useHeadline } from '../lib/headline'
@@ -694,7 +695,9 @@ export default function Activity() {
                                     )}
                                   </span>
                                   <div className="min-w-0 flex-1">
-                                    <p className="truncate font-medium">{displayName(t)}</p>
+                                    <p className="flex min-w-0 font-medium">
+                                      <TxnName txn={t} />
+                                    </p>
                                     <p className="flex items-center gap-1 truncate text-sm text-ink-3">
                                       {!transfer && (looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
                                       {forHousehold && <HouseholdMark book={book} payer={payerOf(t)} />}
@@ -851,11 +854,9 @@ export default function Activity() {
                             {forHousehold && (
                               <HouseholdMark book={book} payer={payerOf(t)} className="mr-1.5 align-middle" />
                             )}
-                            <span className="font-medium">{displayName(t)}</span>
-                            {/* What the bank actually wrote, where a name has
-                                taken its place. Dimmed and after, so the column
-                                still reads as one thing. */}
-                            {t.title && <span className="ml-2 text-ink-3">{t.payee}</span>}
+{/* The name, then the bank's own words after it — the column
+                                is one line, so both are inside one truncating span. */}
+                            <TxnName txn={t} className="font-medium" />
                             {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
                           </EditableCell>
                           {/* Both halves, with the parent dimmed: a row filed
@@ -1211,7 +1212,9 @@ function AskedOfMe({ txns, onOpen }: { txns: Transaction[]; onOpen: (t: Transact
             >
               <HelpCircle size={16} className="shrink-0 text-ink-3" />
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium md:text-sm">{displayName(t)}</p>
+                <p className="flex min-w-0 font-medium md:text-sm">
+                  <TxnName txn={t} />
+                </p>
                 <p className="truncate text-xs text-ink-3">
                   {fmtFullDate(t.date)} · {accMap.get(t.accountId)?.name ?? 'an account'} ·{' '}
                   {t.explainRequestedBy ? nameOf(members.get(t.explainRequestedBy)) : 'Somebody'} asked
@@ -1292,7 +1295,9 @@ function SuggestedContributions({ txns, books }: { txns: Transaction[]; books: B
           return (
             <li key={t.id} className="flex items-center gap-3 px-4 py-3 md:px-3 md:py-2.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium md:text-sm">{displayName(t)}</p>
+                <p className="flex min-w-0 font-medium md:text-sm">
+                  <TxnName txn={t} />
+                </p>
                 <p className="truncate text-xs text-ink-3">
                   {fmtFullDate(t.date)} · {accMap.get(t.accountId)?.name ?? 'an account'} ·{' '}
                   <span className="tabular">{money(t.amountMinor, { sign: true })}</span>

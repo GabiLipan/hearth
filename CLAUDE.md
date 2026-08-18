@@ -131,8 +131,9 @@ published by the page and read by the header),
 `outbox.ts` (queue, retries, dead letters), `pull.ts` (read path),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
 allow-lists), `session.ts` (auth, household, sync orchestration),
-`components/confirm.tsx` (asking before something irreversible, in the app's own
-voice), `components/toast.tsx` (saying what just happened, and offering to take
+`components/TxnName.tsx` (what a row is called, and the bank's own words after
+it), `components/confirm.tsx` (asking before something irreversible, in the
+app's own voice), `components/toast.tsx` (saying what just happened, and offering to take
 it back).
 
 ### Invariants — break these and things corrupt quietly
@@ -898,10 +899,37 @@ the single place a level comes from.
   `transactions.title` (migration 20) is what a row is CALLED; `payee` stays
   exactly as the bank wrote it, because `normalizePayee`, the duplicate check,
   transfer pairing, contributor learning and every rule compare THAT. Display
-  goes through `displayName(t)` — a list reading `t.payee` shows the bank string
-  on a row somebody has named, and one reading `t.title` shows nothing on the
-  rows nobody has. Activity searches both, or a row hides from the word on
-  screen or from the string on the statement in your hand.
+  goes through `TxnName` — the name, then the reference muted after it — and
+  never through either field alone: a list reading `t.payee` shows the bank
+  string on a row somebody has named, one reading `t.title` shows nothing on the
+  rows nobody has, and one printing both unconditionally says "Tesco Tesco" on
+  every row nobody has renamed. `displayName` and `reference` are the two halves
+  it is built from, for the places that need a string rather than a node.
+  Activity searches both, or a row hides from the word on screen or from the
+  string on the statement in your hand.
+- **A row added by hand may have no reference at all, and that is the normal
+  case.** Nobody types "SQ *THE GOOD FORK 3241" from memory. So the form needs a
+  name OR a payee rather than both (`payee` has always been `not null default
+  ''` server-side, so this needed no migration), `displayName` has a fallback
+  for a row with neither, and `matchKey(t)` — the payee, else the name — is what
+  a rule is keyed on when one is learned from an entry with no reference. Such a
+  rule can never match an imported bank string, which is correct; it matches the
+  next thing typed by hand. Anything grouping rows by payee has to use
+  `matchKey` too, or every referenceless row of the month collects into one
+  blank group — `topPayees` did exactly that.
+- **An import keeps the bank's string exactly, and finishes the rows already
+  here.** It used to store `prettyPayee(r.payee)`, which title-cases a
+  stripped-down copy — throwing away the one string you can look up on your
+  bank's website, in the one place it is ever authoritative. Making it readable
+  is `title`'s job now. And a statement line matching an entry somebody typed is
+  no longer only a duplicate to skip: `ReviewRow.completes` carries the fields
+  that row is MISSING (its reference above all, plus the import hash, a name and
+  a category where it has none), the wizard offers to fill them in, and ticking
+  "import it anyway" turns that off — one purchase is either a new row or the
+  old one completed, never both. Only ever empty fields: the statement never
+  overwrites something a person typed. `findLikelyDuplicate` matches a
+  referenceless row on the amount and the date alone, which is a weaker claim
+  and is why it is only ever offered, never applied.
 - **A rule now answers two questions, and asking once gets one of them wrong.**
   A rule may carry a category, a name, or both (`rules.category_id` is nullable
   as of 20 — categories are only learned from spending, a name is worth learning
