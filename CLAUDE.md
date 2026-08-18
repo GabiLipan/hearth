@@ -1004,7 +1004,12 @@ the single place a level comes from.
   the app clear of anybody's trade dress. Their `displayName` is load-bearing —
   `TERMS` derives the search words from it, so it is the only thing that makes
   "american express" find `amex` — and `CategoryIcon.test.ts` asserts every one
-  of them has it. `IconComponent`, not `LucideIcon`, is what the registry holds
+  of them has it. **Check a new one against the real mark at 19px**, which is
+  what `Face` renders at: Simple Icons (CC0) carries nine of these and is the
+  reference, and comparing at badge size rather than at 56 is what caught four
+  of them being wrong. It is deliberately not a dependency — it has no Lloyds,
+  Halifax, Bank of Scotland, NatWest, RBS, Santander or Nationwide, and its
+  Visa, Amex and Discover are wordmarks, which at 19px are a smudge. `IconComponent`, not `LucideIcon`, is what the registry holds
   now; both kinds satisfy it and no call site knows which it has.
 - **A goal wears the same face as a category, and now gets to choose it.**
   `goals.slot` and `goals.icon` have existed since the table did and the cards

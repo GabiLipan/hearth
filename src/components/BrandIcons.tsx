@@ -18,6 +18,17 @@
  * slot colour) and look broken doing it. Drawing them as strokes makes them
  * members of the set, and it keeps the app clear of anybody's trade dress.
  *
+ * The shapes were checked against the real marks rather than drawn from memory:
+ * Simple Icons (CC0) has nine of these, and comparing at 19px — the size `Face`
+ * actually renders an icon at — is what caught Barclays' eagle being a moth,
+ * Monzo's M being a tile, Starling's swirl being a gull and HSBC's hexagon
+ * pointing the wrong way. It is not a dependency, and it cannot be: it has no
+ * Lloyds, Halifax, Bank of Scotland, NatWest, RBS, Santander or Nationwide —
+ * the whole British high street — and the marks it does have for Visa, Amex and
+ * Discover are wordmarks, which at this size are a smudge. Where a brand has no
+ * symbol at all, the drawing here is a stand-in (Visa's V, Amex's boxed A)
+ * rather than a claim to be the logo.
+ *
  * The same rule that governs the rest of the registry governs these: **a key is
  * permanent.** A bank that renames itself gets its label changed and keeps its
  * key, because the key is what is written on rows in the database.
@@ -207,9 +218,9 @@ RbsMark.displayName = 'Rbs Royal Bank Of Scotland Daisy'
 /** The hexagon, with its bowtie. */
 export const HsbcMark = (p: MarkProps) => (
   <Mark {...p}>
-    <path d="M12 2.5l8.5 4.8v9.4L12 21.5l-8.5-4.8V7.3z" />
-    <path d="M4 7.6l8 4.4 8-4.4" />
-    <path d="M4 16.4l8-4.4 8 4.4" />
+    <path d="M7.4 3.6h9.2L22 12l-5.4 8.4H7.4L2 12z" />
+    <path d="M7.4 3.6 12 12l4.6-8.4" />
+    <path d="M7.4 20.4 12 12l4.6 8.4" />
   </Mark>
 )
 HsbcMark.displayName = 'Hsbc Bank Hexagon'
@@ -217,10 +228,12 @@ HsbcMark.displayName = 'Hsbc Bank Hexagon'
 /** The eagle, wings spread. */
 export const BarclaysMark = (p: MarkProps) => (
   <Mark {...p}>
-    <path d="M12 11.5C9.2 8.6 6 7.4 2.5 7.8c1.4 4.2 4.5 7 9.5 8.3" />
-    <path d="M12 11.5c2.8-2.9 6-4.1 9.5-3.7-1.4 4.2-4.5 7-9.5 8.3" />
-    <path d="M12 16.1v3.4" />
-    <circle cx="12" cy="8.6" r="1.7" />
+    <path d="M11.2 8.6C8.4 7.2 5.2 7 2.2 8.2c1.6 3.5 4.6 5.7 8.8 6.5z" />
+    <path d="M12.8 8.6c2.8-1.4 6-1.6 9-.4-1.6 3.5-4.6 5.7-8.8 6.5z" />
+    <path d="M12 7.2v10" />
+    <path d="M10.2 17.2 12 21.2l1.8-4" />
+    <circle cx="12" cy="5.2" r="1.5" />
+    <path d="M10.4 5.4 8.4 5.8" />
   </Mark>
 )
 BarclaysMark.displayName = 'Barclays Bank Eagle'
@@ -248,7 +261,7 @@ NationwideMark.displayName = 'Nationwide Building Society Arch'
 export const ChaseMark = (p: MarkProps) => (
   <Mark {...p}>
     <path d="M8.2 2.5h7.6l5.7 5.7v7.6l-5.7 5.7H8.2l-5.7-5.7V8.2z" />
-    <path d="M12 8.4l3.6 3.6-3.6 3.6L8.4 12z" />
+    <rect x="9.2" y="9.2" width="5.6" height="5.6" />
   </Mark>
 )
 ChaseMark.displayName = 'Chase Bank Octagon'
@@ -256,8 +269,7 @@ ChaseMark.displayName = 'Chase Bank Octagon'
 /** The rounded tile, with its m. */
 export const MonzoMark = (p: MarkProps) => (
   <Mark {...p}>
-    <rect x="2.5" y="2.5" width="19" height="19" rx="5" />
-    <path d="M8 16.5V10a2 2 0 0 1 4 0 2 2 0 0 1 4 0v6.5" />
+    <path d="M3.5 20V4.6l8.5 8.6 8.5-8.6V20" />
   </Mark>
 )
 MonzoMark.displayName = 'Monzo Bank App'
@@ -266,7 +278,7 @@ MonzoMark.displayName = 'Monzo Bank App'
 export const StarlingMark = (p: MarkProps) => (
   <Mark {...p}>
     <circle cx="12" cy="12" r="9.5" />
-    <path d="M5.5 14.2c2.9 0 5.1-1.1 6.5-3.4 1.4 2.3 3.6 3.4 6.5 3.4" />
+    <path d="M15.2 8.4c-1.1-1.1-2.9-1.3-4.2-.4-1.5 1-1.6 3.1-.2 4.2l2.4 1.8c1.4 1.1 1.3 3.2-.2 4.2-1.3.9-3.1.7-4.2-.4" />
   </Mark>
 )
 StarlingMark.displayName = 'Starling Bank Bird App'
