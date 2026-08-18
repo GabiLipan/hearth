@@ -213,16 +213,40 @@ select '20-transaction-titles.sql',
        'transactions.title + rules.title + four-argument upsert_rule exist'
 
 union all
--- Not a migration: the same trap 09-after-10 sets, one file along. 20 drops the
--- three-argument upsert_rule and replaces it with a four-argument one, and 03
--- is still re-runnable — running 03 AFTER 20 puts the old signature back beside
--- the new. supabase-js drops `undefined` arguments, so the call becomes
--- ambiguous and every rule the app learns dead-letters with "could not find the
--- function in the schema cache". Re-run 20 to clear it.
+-- Until this reads true, a rule can only ever match on the payee: two
+-- subscriptions from one vendor at two prices are one rule, and filing either
+-- files both.
+select '21-rule-conditions.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'rules'
+                  and column_name = 'amount_min_minor')
+   and exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'rules' and column_name = 'account_id')
+   and to_regprocedure('public.upsert_rule(uuid,text,uuid,text,bigint,bigint,uuid)') is not null,
+       'rules.amount_min_minor + rules.account_id + seven-argument upsert_rule exist'
+
+union all
+-- Not a migration: 21 replaces the uniqueness rule on `rules`, because two
+-- rules for one payee at two amounts is the whole point of it. If the old index
+-- is still here the second one is refused outright, with a duplicate-key dead
+-- letter minutes later. Re-run 21.
+select 'rules keyed on the whole condition',
+       to_regclass('public.rules_match_unique') is null
+   and to_regclass('public.rules_condition_unique') is not null,
+       'rules_condition_unique has replaced rules_match_unique — re-run 21 if this is false'
+
+union all
+-- Not a migration: the same trap 09-after-10 sets, now two files along. Both 20
+-- and 21 drop the previous upsert_rule and replace it with a wider one, and 03
+-- and 20 are both still re-runnable — running either AFTER 21 puts an older
+-- signature back beside the current one. supabase-js drops `undefined`
+-- arguments, so the call becomes ambiguous and every rule the app learns
+-- dead-letters with "could not find the function in the schema cache". Re-run
+-- the highest of them to clear it.
 select 'no duplicate upsert_rule',
        (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'public' and p.proname = 'upsert_rule') <= 1,
-       'exactly one upsert_rule signature — re-run 20 if this is false'
+       'exactly one upsert_rule signature — re-run 21 if this is false'
 
 union all
 -- Not a migration: a state you can only reach by re-running 09 AFTER 10, which

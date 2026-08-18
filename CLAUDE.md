@@ -65,18 +65,24 @@ read-only detector that reports which are present — run it when unsure.
 | `18-contributions.sql` | `transactions.contributor_id` — say who paid money in, where the far leg is in an account that will never be in the app |
 | `19-published-household-rows.sql` | `accounts.publishes_household_rows` — a row marked as the household's is readable by the household, wherever it was paid from. The one row-level rule in the schema |
 | `20-transaction-titles.sql` | `transactions.title` + `rules.title` — what a row is CALLED, as opposed to what the bank wrote, learned back through the same rules that learn a category. `rules.category_id` becomes nullable, and `upsert_rule` gains a fourth argument |
+| `21-rule-conditions.sql` | `rules.amount_min_minor` / `amount_max_minor` / `account_id` — a rule may ask for more than the payee. Two subscriptions from one vendor at two prices become two rules, so the uniqueness rule moves from the payee to the whole condition set, and `upsert_rule` gains three more arguments |
 
-All are re-runnable, with **three ordering traps**. The third is the second one
-again, one file along: `20` drops the three-argument `upsert_rule` and replaces
-it with a four-argument one, and `03` is still re-runnable — running `03` after
-`20` puts the old signature back beside the new, PostgREST cannot resolve the
-call, and every rule the app learns dead-letters. Re-run `20`;
-`00-which-migrations-applied.sql` detects it. The second: `19` replaces
+All are re-runnable, with **four ordering traps**, and three of them are the
+same trap. The rule migrations stack: `20` drops the three-argument
+`upsert_rule` for a four-argument one and `21` drops that for a seven-argument
+one, while `03` and `20` both stay re-runnable — so running either after `21`
+puts an older signature back beside the current one, PostgREST cannot resolve
+the call, and every rule the app learns dead-letters with "could not find the
+function … in the schema cache". Re-run the highest of them;
+`00-which-migrations-applied.sql` has a row that counts the signatures. `21`
+also REPLACES `rules_match_unique` with `rules_condition_unique`, and while the
+old index stands a second rule for one payee is refused outright — there is a
+row for that too. The next: `19` replaces
 `07`'s `transactions_select`, so re-running `07` afterwards silently puts the
 narrower policy back — nothing errors, published rows simply stop arriving, and
 the household book quietly loses everything paid from a personal account. Re-run
-`19`; `00-which-migrations-applied.sql` has a row that detects exactly this. The
-first: `10` drops the two-argument
+`19`; `00-which-migrations-applied.sql` has a row that detects exactly this. And
+the first of them, which is where the pattern was learned: `10` drops the two-argument
 `link_transfer` and replaces it with a three-argument one, and `09` is still
 re-runnable, so running `09` *after* `10` puts the old signature back beside
 the new. PostgREST then cannot resolve the call — supabase-js drops `undefined`
@@ -106,7 +112,8 @@ UI  →  data.ts (create/update/remove)  →  Dexie cache   (instant paint)
 
 Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 `rules.ts` (payee matching, learning — where a payee is filed AND what it is
-called — and bulk recategorisation), `bills.ts`
+called — the conditions beyond the payee that tell two charges from one vendor
+apart, and bulk recategorisation), `bills.ts`
 (suggestions, posting, reconciliation), `transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
@@ -930,6 +937,20 @@ the single place a level comes from.
   overwrites something a person typed. `findLikelyDuplicate` matches a
   referenceless row on the amount and the date alone, which is a weaker claim
   and is why it is only ever offered, never applied.
+- **A rule is a question about a TRANSACTION now, not about a string.** Since
+  migration 21 one may also require an amount (a magnitude, compared against
+  `abs(amountMinor)`) or an account, so `categoryRule`/`titleRule` take a
+  `RuleTarget` and every caller has to hand over everything it knows — the
+  import wizard passes the row's amount and the account being imported into,
+  the transaction form passes what has been typed so far. A caller that passes
+  the payee alone is not merely less precise: an unsatisfied condition is not
+  an absent one, so a rule keyed on £8.99 correctly matches nothing, and the
+  effect is that conditions are silently ignored on exactly the rows they were
+  written for. Specificity, not length, is what wins now — "tesco, exactly £40"
+  beats "tesco petrol" — and `learnRule` follows the same rule when deciding
+  WHICH rule a save teaches, or correcting the £8.99 charge would quietly
+  rewrite the general rule and leave the specific one saying something nobody
+  agreed with.
 - **A rule now answers two questions, and asking once gets one of them wrong.**
   A rule may carry a category, a name, or both (`rules.category_id` is nullable
   as of 20 — categories are only learned from spending, a name is worth learning

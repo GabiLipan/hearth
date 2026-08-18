@@ -186,9 +186,14 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
         match = findLikelyDuplicate(r, existing, matchedIds)
         if (match) matchedIds.add(match.id)
       }
+      // Everything a rule may test, since a statement line carries all of it:
+      // the account is the one being imported into, and the amount is on the
+      // row. Anything narrower would silently ignore the conditions on exactly
+      // the rows they were written for.
+      const target = { payee: r.payee, amountMinor: r.amountMinor, accountId }
       let categoryId: string | undefined
       if (r.amountMinor < 0) {
-        categoryId = categoryRule(r.payee, rules)?.categoryId ?? fromHistory(r.payee) ?? fallbackExpense?.id
+        categoryId = categoryRule(target, rules)?.categoryId ?? fromHistory(r.payee) ?? fallbackExpense?.id
       } else {
         categoryId = fallbackIncome?.id
       }
@@ -196,7 +201,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       // arrives already reading in English. Asked of the rules first and of
       // what past rows were called second, exactly as the category is — and on
       // income too, where a category is not.
-      const title = cleanTitle(titleRule(r.payee, rules)?.title) ?? fromTitles(r.payee)
+      const title = cleanTitle(titleRule(target, rules)?.title) ?? fromTitles(r.payee)
 
       // What the statement can tell the row somebody already added, limited to
       // what that row is missing. The reference is the one that matters —
@@ -278,7 +283,8 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     }
     // Learn from every category the user corrected by hand.
     for (const r of toImport) {
-      if (r.userTouched && r.amountMinor < 0 && r.categoryId) await learnRule(r.payee, { categoryId: r.categoryId })
+      if (r.userTouched && r.amountMinor < 0 && r.categoryId)
+        await learnRule({ payee: r.payee, amountMinor: r.amountMinor, accountId }, { categoryId: r.categoryId })
     }
     setImportedCount(toImport.length)
     setCompletedCount(completed)

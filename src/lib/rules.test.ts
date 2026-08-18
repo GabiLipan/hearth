@@ -6,24 +6,27 @@ import {
   buildTitleMatcher,
   categoryRule,
   cleanTitle,
+  conditionWords,
   coverageOf,
   displayName,
   learnRule,
   matchKey,
   reference,
+  ruleMatches,
   similarTo,
   titleRule,
   unnamedLike,
 } from './rules'
 
 let seq = 0
-const rule = (match: string, categoryId?: string, title?: string): Rule => ({
+const rule = (match: string, categoryId?: string, title?: string, over: Partial<Rule> = {}): Rule => ({
   id: `r${++seq}`,
   match,
   categoryId,
   title,
   createdAt: 'x',
   updatedAt: 'x',
+  ...over,
 })
 
 const txn = (over: Partial<Transaction> & { payee: string }): Transaction => ({
@@ -186,10 +189,82 @@ describe('what a payee is called', () => {
     const specific = rule('tesco petrol', undefined, 'Petrol')
     const rules = [general, specific]
 
-    expect(categoryRule('TESCO PETROL LEEDS', rules)?.id).toBe(general.id)
-    expect(titleRule('TESCO PETROL LEEDS', rules)?.id).toBe(specific.id)
+    expect(categoryRule({ payee: 'TESCO PETROL LEEDS' }, rules)?.id).toBe(general.id)
+    expect(titleRule({ payee: 'TESCO PETROL LEEDS' }, rules)?.id).toBe(specific.id)
     // And a rule that only files does not claim to name anything.
-    expect(titleRule('TESCO STORES 3241', rules)).toBeUndefined()
+    expect(titleRule({ payee: 'TESCO STORES 3241' }, rules)).toBeUndefined()
+  })
+
+  it('tells two charges from one payee apart by their amount', () => {
+    // The case the whole feature exists for: one vendor, two subscriptions,
+    // one string on the statement.
+    const small = rule('vendor a', 'software', undefined, { amountMinMinor: 899, amountMaxMinor: 899 })
+    const large = rule('vendor a', 'music', undefined, { amountMinMinor: 1299, amountMaxMinor: 1299 })
+    const rules = [small, large]
+
+    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -899 }, rules)?.id).toBe(small.id)
+    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -1299 }, rules)?.id).toBe(large.id)
+    // And a third price neither rule claims is left alone rather than guessed at.
+    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -450 }, rules)).toBeUndefined()
+  })
+
+  it('compares magnitudes, so the sign of the row is not the rule’s business', () => {
+    const r = rule('vendor a', 'software', undefined, { amountMinMinor: 899, amountMaxMinor: 899 })
+    expect(ruleMatches(r, { payee: 'vendor a', amountMinor: -899 })).toBe(true)
+    expect(ruleMatches(r, { payee: 'vendor a', amountMinor: 899 })).toBe(true)
+  })
+
+  it('does not claim a row whose amount is not known yet', () => {
+    // The transaction form asks while the amount box is still empty. An
+    // unsatisfied condition is not an absent one.
+    const r = rule('vendor a', 'software', undefined, { amountMinMinor: 899, amountMaxMinor: 899 })
+    expect(ruleMatches(r, { payee: 'vendor a' })).toBe(false)
+  })
+
+  it('lets a condition beat a longer match', () => {
+    // "tesco petrol" is the longer string; "tesco, exactly £40" is the
+    // narrower claim, and specificity is what wins.
+    const longer = rule('tesco petrol', 'fuel')
+    const conditioned = rule('tesco', 'weekly shop', undefined, { amountMinMinor: 4000, amountMaxMinor: 4000 })
+    const rules = [longer, conditioned]
+
+    expect(categoryRule({ payee: 'TESCO PETROL LEEDS', amountMinor: -4000 }, rules)?.id).toBe(conditioned.id)
+    expect(categoryRule({ payee: 'TESCO PETROL LEEDS', amountMinor: -3000 }, rules)?.id).toBe(longer.id)
+  })
+
+  it('keeps an account-keyed rule off the same payee on another account', () => {
+    const r = rule('vendor a', 'software', undefined, { accountId: 'joint' })
+    expect(ruleMatches(r, { payee: 'vendor a', accountId: 'joint' })).toBe(true)
+    expect(ruleMatches(r, { payee: 'vendor a', accountId: 'mine' })).toBe(false)
+    expect(ruleMatches(r, { payee: 'vendor a' })).toBe(false)
+  })
+
+  it('divides coverage between two rules for one payee', () => {
+    const small = rule('vendor a', 'software', undefined, { amountMinMinor: 899, amountMaxMinor: 899 })
+    const large = rule('vendor a', 'music', undefined, { amountMinMinor: 1299, amountMaxMinor: 1299 })
+    const rules = [small, large]
+    const txns = [
+      txn({ payee: 'VENDOR A LTD', amountMinor: -899, categoryId: 'other' }),
+      txn({ payee: 'VENDOR A LTD', amountMinor: -1299, categoryId: 'other' }),
+    ]
+
+    expect(coverageOf(small, txns, rules).all).toHaveLength(1)
+    expect(coverageOf(small, txns, rules).all[0].amountMinor).toBe(-899)
+    expect(coverageOf(large, txns, rules).all[0].amountMinor).toBe(-1299)
+  })
+
+  it('says what a rule asks for, in the words the screens use', () => {
+    const money = (m: number) => `£${(m / 100).toFixed(2)}`
+    expect(conditionWords(rule('a', 'c', undefined, { amountMinMinor: 899, amountMaxMinor: 899 }), money))
+      .toEqual(['exactly £8.99'])
+    expect(conditionWords(rule('a', 'c', undefined, { amountMinMinor: 500, amountMaxMinor: 1500 }), money))
+      .toEqual(['£5.00 to £15.00'])
+    expect(conditionWords(rule('a', 'c', undefined, { amountMinMinor: 500 }), money)).toEqual(['£5.00 or more'])
+    expect(conditionWords(rule('a', 'c', undefined, { amountMaxMinor: 500 }), money)).toEqual(['up to £5.00'])
+    expect(conditionWords(rule('a', 'c'), money)).toEqual([])
+    expect(
+      conditionWords(rule('a', 'c', undefined, { accountId: 'joint' }), money, () => 'Joint account'),
+    ).toEqual(['on Joint account'])
   })
 
   it('gives a name-only rule no coverage, because applying one rewrites categories', () => {
@@ -241,6 +316,40 @@ describe('learning and applying a name', () => {
     const rules = await db.rules.toArray()
     expect(rules).toHaveLength(1)
     expect(rules[0]).toMatchObject({ match: 'tesco stores', categoryId: 'groceries', title: 'Big shop' })
+  })
+
+  it('teaches the rule that actually covers the row, not the general one', async () => {
+    // Two rules for one vendor. Recategorising the £8.99 charge must correct
+    // the £8.99 rule — correcting the general one would leave the specific one
+    // saying something nobody agrees with.
+    // Keyed on the payee exactly as `normalizePayee` leaves it: `learnRule`
+    // only ever teaches a rule whose match IS this payee, never a shorter one
+    // that happens to cover it.
+    await db.rules.bulkPut([
+      rule('vendor a ltd', 'software', undefined, { amountMinMinor: 899, amountMaxMinor: 899 }),
+      rule('vendor a ltd', 'music'),
+    ])
+    const specific = (await db.rules.toArray()).find((r) => r.amountMinMinor === 899)!
+
+    await learnRule({ payee: 'VENDOR A LTD', amountMinor: -899 }, { categoryId: 'streaming' })
+
+    expect((await db.rules.get(specific.id))?.categoryId).toBe('streaming')
+    expect(await db.rules.count()).toBe(2)
+  })
+
+  it('falls back to the general rule when no condition covers the row', async () => {
+    await db.rules.put(rule('vendor a ltd', 'software', undefined, { amountMinMinor: 899, amountMaxMinor: 899 }))
+
+    await learnRule({ payee: 'VENDOR A LTD', amountMinor: -1299 }, { categoryId: 'music' })
+
+    const rules = await db.rules.toArray()
+    expect(rules).toHaveLength(2)
+    // The new one carries no conditions of its own: learning from a row means
+    // "this payee", and narrowing it to the amount that happened to be on the
+    // row would write a rule that matched exactly one transaction.
+    const learnt = rules.find((r) => r.categoryId === 'music')!
+    expect(learnt.amountMinMinor).toBeUndefined()
+    expect(learnt.accountId).toBeUndefined()
   })
 
   it('does not write a rule that says nothing', async () => {

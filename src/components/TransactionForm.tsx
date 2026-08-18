@@ -166,8 +166,19 @@ export function TransactionForm({
     const key = matchKey({ payee, title })
     if (key.length < 3) return
     let cancelled = false
+    // Everything a rule may test. The amount is `parseAmount`'s answer, so it
+    // is `undefined` while the box is empty or half-typed — which is right: a
+    // rule keyed on £8.99 must not claim a row that has no amount yet, and the
+    // effect re-runs when one arrives. `magnitude` because a rule's bounds are
+    // magnitudes and this form holds the amount unsigned.
+    const magnitude = parseAmount(amount)
+    const target = {
+      payee: key,
+      amountMinor: magnitude === null ? undefined : magnitude,
+      accountId,
+    }
     const t = setTimeout(async () => {
-      const id = await suggestCategory(key)
+      const id = await suggestCategory(target)
       if (!cancelled && id && (categoryId === undefined || suggested)) {
         setCategoryId(id)
         setSuggested(true)
@@ -177,7 +188,7 @@ export function TransactionForm({
       // overwrite something typed by hand. Only ever from the REFERENCE —
       // suggesting a name from a name is circular.
       if (payee.trim().length < 3) return
-      const name = await suggestTitle(payee)
+      const name = await suggestTitle({ ...target, payee })
       if (!cancelled && name && (title.trim() === '' || titleSuggested)) {
         setTitle(name)
         setTitleSuggested(true)
@@ -188,7 +199,7 @@ export function TransactionForm({
       clearTimeout(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payee, title, open])
+  }, [payee, title, amount, accountId, open])
 
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
@@ -548,9 +559,14 @@ export function TransactionForm({
     // A name is only worth learning against a REFERENCE: keyed on the name
     // itself it would say nothing but "call this what you called it".
     const learntFrom = payee.trim() ? learntTitle : undefined
-    if (kind !== 'expense' && learntFrom) await learnRule(key, { title: learntFrom })
+    // The whole row, so that saving the £8.99 charge teaches the rule written
+    // for £8.99 rather than the general one for the vendor. `learnRule` writes
+    // no conditions of its own — it only uses these to find which existing rule
+    // this row is actually covered by.
+    const learntOn = { payee: key, amountMinor: amountMinor ?? undefined, accountId }
+    if (kind !== 'expense' && learntFrom) await learnRule(learntOn, { title: learntFrom })
     if (kind === 'expense') {
-      await learnRule(key, { categoryId: categoryId!, title: learntFrom })
+      await learnRule(learntOn, { categoryId: categoryId!, title: learntFrom })
       // …and, if asked, applies what it just learned backwards. `similar` is
       // already filtered to what this device may change, so the predicate here
       // passes everything through.

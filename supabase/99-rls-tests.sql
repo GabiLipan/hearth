@@ -363,8 +363,8 @@ begin
 
   -- Re-learning a payee must update the rule, not fail on the unique index.
   -- Four arguments since migration 20: the name a rule may also carry.
-  perform public.upsert_rule(null, 'tesco', groceries, null);
-  r := public.upsert_rule(null, 'tesco', other, null);
+  perform public.upsert_rule(null, 'tesco', groceries, null, null, null, null);
+  r := public.upsert_rule(null, 'tesco', other, null, null, null, null);
   select count(*) into n from public.rules where deleted_at is null;
   perform pg_temp.check('re-learning a payee updates its rule instead of duplicating', n = 1, n::text);
   perform pg_temp.check('re-learning a payee changes the category', r.category_id = other, '');

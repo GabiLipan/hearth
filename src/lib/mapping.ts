@@ -75,10 +75,11 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
     'paidForHousehold', 'contributorId',
   ],
   budgets: ['id', 'categoryId', 'ownerId', 'amountMinor', 'month'],
-  // Written by upsert_rule, so the queued payload is the whole row — both
-  // `categoryId` and `title` are arguments the RPC needs on every call, and
-  // either may be null (a rule that only files, or one that only names).
-  rules: ['id', 'match', 'categoryId', 'title'],
+  // Written by upsert_rule, so the queued payload is the whole row — every one
+  // of these is an argument the RPC needs on every call, and each may be null
+  // (a rule that only files, one that only names, one that does not care what
+  // the amount was).
+  rules: ['id', 'match', 'categoryId', 'title', 'amountMinMinor', 'amountMaxMinor', 'accountId'],
 } as const
 
 /** Columns to request when pulling. Explicit, so adding a server column does not silently change payload size. */

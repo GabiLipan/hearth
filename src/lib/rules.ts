@@ -39,33 +39,123 @@ export function payeeSimilar(a: string, b: string): boolean {
 }
 
 /**
- * The longest rule matching this payee that satisfies `wants`.
+ * What a rule is asked about.
  *
- * Longest match wins — "tesco petrol" beats "tesco" — and the predicate is not
- * a convenience. A rule may carry a category, a name, or both (migration 20),
- * so "the rule that matches" is genuinely two questions: asking once and
- * reading both fields off the answer would let a title-only rule for "tesco
- * petrol" shadow the category rule for "tesco", and the fuel would quietly
- * stop being filed anywhere.
+ * A rule used to be a question about a string, so `payee` was the whole
+ * argument. Migration 21 lets one ALSO require an amount or an account, so the
+ * question is now about a transaction — and the two extra fields are optional
+ * because two callers genuinely do not have them: the "what will this be
+ * called" preview in the transaction form runs while the amount box is still
+ * empty, and a rule keyed on an amount must simply not match yet rather than
+ * matching on the payee alone.
  */
-function bestMatch(payee: string, rules: Rule[], wants: (r: Rule) => boolean): Rule | undefined {
-  const hay = normalizePayee(payee)
+export interface RuleTarget {
+  payee: string
+  amountMinor?: number
+  accountId?: string
+}
+
+/**
+ * How many things beyond the payee this rule insists on.
+ *
+ * Specificity, and it beats the length of the match. "tesco petrol" is a longer
+ * string than "tesco", but "tesco, exactly £8.99" is a narrower claim than
+ * either — it describes one charge rather than a merchant — so a rule carrying
+ * a condition wins over one that does not, and length decides between rules
+ * carrying the same number.
+ */
+function conditionCount(r: Rule): number {
+  return (
+    (r.amountMinMinor !== undefined || r.amountMaxMinor !== undefined ? 1 : 0) +
+    (r.accountId !== undefined ? 1 : 0)
+  )
+}
+
+/**
+ * Does this rule's conditions hold for this transaction?
+ *
+ * The payee test is `includes` on the normalised form, exactly as before. The
+ * amounts are MAGNITUDES — `abs`, because spending is stored negative and
+ * nobody thinks of a subscription as costing minus eight ninety-nine — and both
+ * bounds are inclusive, so an exact amount is the two set equal.
+ *
+ * A rule with an amount condition asked about a target with no amount does not
+ * match. That is the honest answer rather than a lenient one: the condition is
+ * unsatisfied, not absent, and answering "probably" here would file a row on
+ * the strength of a rule that has not been shown to apply to it.
+ */
+export function ruleMatches(rule: Rule, target: RuleTarget): boolean {
+  if (!normalizePayee(target.payee).includes(rule.match)) return false
+  if (rule.accountId !== undefined && rule.accountId !== target.accountId) return false
+  if (rule.amountMinMinor !== undefined || rule.amountMaxMinor !== undefined) {
+    if (target.amountMinor === undefined) return false
+    const magnitude = Math.abs(target.amountMinor)
+    if (rule.amountMinMinor !== undefined && magnitude < rule.amountMinMinor) return false
+    if (rule.amountMaxMinor !== undefined && magnitude > rule.amountMaxMinor) return false
+  }
+  return true
+}
+
+/**
+ * The most specific rule matching this transaction that satisfies `wants`.
+ *
+ * Most conditions first, then longest match — see `conditionCount`. The
+ * predicate is not a convenience: a rule may carry a category, a name, or both
+ * (migration 20), so "the rule that matches" is genuinely two questions.
+ * Asking once and reading both fields off the answer would let a title-only
+ * rule for "tesco petrol" shadow the category rule for "tesco", and the fuel
+ * would quietly stop being filed anywhere.
+ */
+function bestMatch(target: RuleTarget, rules: Rule[], wants: (r: Rule) => boolean): Rule | undefined {
   let best: Rule | undefined
   for (const r of rules) {
-    if (!wants(r)) continue
-    if (hay.includes(r.match) && (!best || r.match.length > best.match.length)) best = r
+    if (!wants(r) || !ruleMatches(r, target)) continue
+    if (!best || moreSpecific(r, best)) best = r
   }
   return best
 }
 
-/** The rule that says where a payee is filed. */
-export function categoryRule(payee: string, rules: Rule[]): Rule | undefined {
-  return bestMatch(payee, rules, (r) => r.categoryId !== undefined)
+/** Strictly narrower than `b`: more conditions, or the same number and a longer match. */
+function moreSpecific(a: Rule, b: Rule): boolean {
+  const ca = conditionCount(a)
+  const cb = conditionCount(b)
+  return ca !== cb ? ca > cb : a.match.length > b.match.length
 }
 
-/** The rule that says what a payee is called. */
-export function titleRule(payee: string, rules: Rule[]): Rule | undefined {
-  return bestMatch(payee, rules, (r) => cleanTitle(r.title) !== undefined)
+/** The rule that says where a transaction is filed. */
+export function categoryRule(target: RuleTarget, rules: Rule[]): Rule | undefined {
+  return bestMatch(target, rules, (r) => r.categoryId !== undefined)
+}
+
+/** The rule that says what a transaction is called. */
+export function titleRule(target: RuleTarget, rules: Rule[]): Rule | undefined {
+  return bestMatch(target, rules, (r) => cleanTitle(r.title) !== undefined)
+}
+
+/**
+ * The conditions a rule carries, as a sentence.
+ *
+ * One phrasing, shared by the rules table, the phone's list and the preview
+ * sheet, so a rule reads the same wherever it is shown — a rule the user cannot
+ * read is a rule they cannot tell from the one beside it, which is the whole
+ * problem two rules for one payee create.
+ */
+export function conditionWords(
+  rule: Rule,
+  money: (minor: number) => string,
+  accountName?: (id: string) => string | undefined,
+): string[] {
+  const words: string[] = []
+  const { amountMinMinor: lo, amountMaxMinor: hi } = rule
+  if (lo !== undefined && hi !== undefined) {
+    words.push(lo === hi ? `exactly ${money(lo)}` : `${money(lo)} to ${money(hi)}`)
+  } else if (lo !== undefined) {
+    words.push(`${money(lo)} or more`)
+  } else if (hi !== undefined) {
+    words.push(`up to ${money(hi)}`)
+  }
+  if (rule.accountId) words.push(`on ${accountName?.(rule.accountId) ?? 'one account'}`)
+  return words
 }
 
 /**
@@ -124,15 +214,32 @@ export function matchKey(t: { payee?: string; title?: string }): string {
 }
 
 /**
- * Learn what we know about a payee: where it is filed, what it is called, or
- * both. The normalised payee is the match key, and an existing rule for the
+ * Learn what we know about a transaction: where it is filed, what it is called,
+ * or both. The normalised payee is the match key, and an existing rule for the
  * same key is UPDATED rather than replaced — learning a name must not forget a
  * category somebody chose, and the other way round.
  *
+ * ## Which rule, now that a payee can have several
+ *
+ * Since migration 21 one payee may be covered by more than one rule — "vendor
+ * a" and "vendor a, exactly £8.99" — so "the rule for this payee" is no longer
+ * a lookup on `match` alone. Categorising the £8.99 charge has to teach the
+ * rule that actually speaks for it, or the specific rule would go on saying
+ * something nobody agrees with while the general one was quietly corrected.
+ *
+ * So: among the rules keyed on exactly this payee, take the most specific one
+ * whose conditions this transaction satisfies, and update that. If none does,
+ * write a new rule with no conditions — the general case, which is what
+ * learning from a row has always meant.
+ *
  * A rule that would say nothing is not written.
  */
-export async function learnRule(payee: string, what: { categoryId?: string; title?: string }) {
-  const match = normalizePayee(payee)
+export async function learnRule(target: RuleTarget | string, what: { categoryId?: string; title?: string }) {
+  // A bare payee is still accepted: three callers learn from a row whose amount
+  // is not the point, and a target with no amount matches only unconditional
+  // rules, which is exactly the old behaviour.
+  const t: RuleTarget = typeof target === 'string' ? { payee: target } : target
+  const match = normalizePayee(t.payee)
   if (match.length < 3) return
   const title = cleanTitle(what.title)
   const patch: { categoryId?: string; title?: string } = {}
@@ -140,7 +247,13 @@ export async function learnRule(payee: string, what: { categoryId?: string; titl
   if (title !== undefined) patch.title = title
   if (patch.categoryId === undefined && patch.title === undefined) return
 
-  const existing = await db.rules.where('match').equals(match).first()
+  const sameKey = await db.rules.where('match').equals(match).toArray()
+  let existing: Rule | undefined
+  for (const r of sameKey) {
+    if (!ruleMatches(r, t)) continue
+    if (!existing || moreSpecific(r, existing)) existing = r
+  }
+
   if (existing) {
     await update('rules', existing.id, patch)
   } else {
@@ -215,22 +328,31 @@ export function buildTitleMatcher(txns: Transaction[]): (payee: string) => strin
   }
 }
 
-/** Suggest a category for a payee from rules, else fuzzily from past transactions. */
-export async function suggestCategory(payee: string): Promise<string | undefined> {
+/**
+ * Suggest a category from rules, else fuzzily from past transactions.
+ *
+ * The fuzzy fallback is deliberately still payee-only. It is a guess drawn from
+ * what this merchant has been filed as before, and narrowing a guess by an
+ * amount would make it right less often rather than more — the whole reason
+ * conditions exist is that they are a claim somebody made on purpose.
+ */
+export async function suggestCategory(target: RuleTarget | string): Promise<string | undefined> {
+  const t: RuleTarget = typeof target === 'string' ? { payee: target } : target
   const rules = await db.rules.toArray()
-  const rule = categoryRule(payee, rules)
+  const rule = categoryRule(t, rules)
   if (rule?.categoryId) return rule.categoryId
   const txns = await db.transactions.toArray()
-  return buildHistoryMatcher(txns)(payee)
+  return buildHistoryMatcher(txns)(t.payee)
 }
 
-/** Suggest a name for a payee from rules, else fuzzily from what past rows were called. */
-export async function suggestTitle(payee: string): Promise<string | undefined> {
+/** Suggest a name from rules, else fuzzily from what past rows were called. */
+export async function suggestTitle(target: RuleTarget | string): Promise<string | undefined> {
+  const t: RuleTarget = typeof target === 'string' ? { payee: target } : target
   const rules = await db.rules.toArray()
-  const rule = titleRule(payee, rules)
+  const rule = titleRule(t, rules)
   if (rule) return cleanTitle(rule.title)
   const txns = await db.transactions.toArray()
-  return buildTitleMatcher(txns)(payee)
+  return buildTitleMatcher(txns)(t.payee)
 }
 
 /* ---------- applying a rule to history ---------- */
@@ -278,7 +400,7 @@ export function coverageOf(rule: Rule, txns: Transaction[], rules: Rule[]): Rule
   // `applyTitle`, and it is asked separately because it answers a different
   // question about a different set of rows.
   if (!rule.categoryId) return { all: [], changed: [] }
-  const all = txns.filter((t) => recategorisable(t) && categoryRule(t.payee, rules)?.id === rule.id)
+  const all = txns.filter((t) => recategorisable(t) && categoryRule(t, rules)?.id === rule.id)
   return { all, changed: all.filter((t) => t.categoryId !== rule.categoryId) }
 }
 

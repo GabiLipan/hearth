@@ -245,6 +245,11 @@ const RPC_WRITERS: Partial<Record<SyncedTable, (entry: OutboxEntry) => Promise<u
           // cache" rather than storing a rule that only files or only names.
           p_category_id: e.payload.categoryId ?? null,
           p_title: e.payload.title ?? null,
+          // The conditions, same reasoning: each is a real argument on every
+          // call, and `null` is the value that means "any".
+          p_amount_min_minor: e.payload.amountMinMinor ?? null,
+          p_amount_max_minor: e.payload.amountMaxMinor ?? null,
+          p_account_id: e.payload.accountId ?? null,
         }),
   // Revoking is the same call with 'none': the server tombstones rather than
   // deleting, so there is no separate delete path to keep in step.

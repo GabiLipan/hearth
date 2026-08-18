@@ -7,6 +7,9 @@
 -- what it gets is what any plain column gets — the check constraint, and
 -- `transactions_update` and nothing new deciding who may set one. And
 -- `upsert_rule` changed shape: it takes a name, `category_id` may now be null,
+-- and it has since grown three more arguments in migration 21 — the calls here
+-- pass them as null, which is "this rule matches on the payee and nothing
+-- else", exactly what these checks are about,
 -- and there must be exactly ONE signature of it left, because a second one is
 -- silent — supabase-js drops undefined arguments and every rule the app learns
 -- would dead-letter with "could not find the function in the schema cache".
@@ -85,7 +88,7 @@ begin
   perform pg_temp.check('exactly one upsert_rule signature',
     (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'public' and p.proname = 'upsert_rule') = 1,
-    'run 20 again if 03-rpc.sql was re-run after it');
+    'run the highest rule migration again if 03-rpc.sql was re-run after it');
 end $$;
 
 -- ============================================================
@@ -228,32 +231,32 @@ end $$;
 do $$
 declare r public.rules; n bigint;
 begin
-  r := public.upsert_rule(null, 'the good fork', current_setting('test.category')::uuid, 'Dinner out');
+  r := public.upsert_rule(null, 'the good fork', current_setting('test.category')::uuid, 'Dinner out', null, null, null);
   perform pg_temp.check('a rule can carry a category and a name at once',
     r.category_id = current_setting('test.category')::uuid and r.title = 'Dinner out',
     coalesce(r.title, '<null>'));
 
   -- Categories are only learned from spending; a NAME is worth learning on any
   -- row, which is why category_id became nullable in migration 20.
-  r := public.upsert_rule(null, 'smith j ltd', null, 'Salary');
+  r := public.upsert_rule(null, 'smith j ltd', null, 'Salary', null, null, null);
   perform pg_temp.check('a rule may be about the name alone',
     r.category_id is null and r.title = 'Salary');
 
   perform pg_temp.check('a rule that says nothing at all is refused',
-    pg_temp.raises(format('select public.upsert_rule(null, %L, null, null)', 'nothing')) = '23514');
+    pg_temp.raises(format('select public.upsert_rule(null, %L, null, null, null, null, null)', 'nothing')) = '23514');
 
   -- The whole row is the payload on every call (see RPC_TABLES in outbox.ts),
   -- so both fields are authoritative — including when one of them is being
   -- cleared. Re-learning must update in place rather than colliding on
   -- lower(match), which is why this is an RPC in the first place.
-  r := public.upsert_rule(null, 'the good fork', current_setting('test.category')::uuid, null);
+  r := public.upsert_rule(null, 'the good fork', current_setting('test.category')::uuid, null, null, null, null);
   select count(*) into n from public.rules where lower(match) = 'the good fork' and deleted_at is null;
   perform pg_temp.check('re-learning a payee updates its rule instead of duplicating', n = 1, n::text);
   perform pg_temp.check('a null name clears the name rather than being left alone',
     r.title is null, coalesce(r.title, '<null>'));
 
   perform pg_temp.check('an empty name is stored as no name',
-    (public.upsert_rule(null, 'the good fork', current_setting('test.category')::uuid, '  ')).title is null);
+    (public.upsert_rule(null, 'the good fork', current_setting('test.category')::uuid, '  ', null, null, null)).title is null);
 end $$;
 
 reset role;

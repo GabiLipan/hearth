@@ -191,6 +191,22 @@ export interface Rule {
   categoryId?: string
   /** What to call a transaction from this payee. Undefined = this rule only files it. */
   title?: string
+  /**
+   * Conditions beyond the payee, each undefined for "don't care" (migration 21).
+   *
+   * The amounts are MAGNITUDES in minor units, compared against
+   * `abs(amountMinor)` — nobody thinks of a subscription as costing minus eight
+   * ninety-nine, and the direction of a row already decides whether a category
+   * is applied at all. Equal bounds are an exact amount.
+   *
+   * They exist because a payee substring cannot tell two subscriptions from one
+   * vendor apart, and matching every rule on the amount cannot cope with a bill
+   * that differs every month. So each is opted into per rule.
+   */
+  amountMinMinor?: number
+  amountMaxMinor?: number
+  /** Restricts the rule to one account. Undefined = any. */
+  accountId?: string
   createdBy?: string
   createdAt: string
   updatedAt: string

@@ -1,16 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, Plus, Trash2, Wand2, Check } from 'lucide-react'
+import { ChevronLeft, Pencil, Plus, Trash2, Wand2, Check } from 'lucide-react'
 import type { Rule, Transaction } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
-import { useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules, useCacheReady } from '../lib/cache'
+import { useAccounts, useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules, useCacheReady } from '../lib/cache'
 import { canEditTransaction, levelOn } from '../lib/accounts'
 import { fullName } from '../lib/categories'
-import { applyCategory, cleanTitle, coverageOf, normalizePayee, TITLE_MAX } from '../lib/rules'
+import { applyCategory, cleanTitle, conditionWords, coverageOf, normalizePayee, TITLE_MAX } from '../lib/rules'
 import { TxnName } from '../components/TxnName'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import {
+  AccountDot,
   Button,
   Card,
   CategoryDot,
@@ -18,6 +19,7 @@ import {
   Empty,
   Field,
   Select,
+  Segmented,
   Sheet,
   SearchInput,
   TextInput,
@@ -52,9 +54,23 @@ export default function RulesPage() {
 
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
+  // The rule the sheet is editing. `null` and `adding` are two states of one
+  // sheet: `RuleSheet` writes an existing rule or creates one from the same
+  // fields, so there is nothing here that wants two components.
+  const [editing, setEditing] = useState<Rule | null>(null)
   const [preview, setPreview] = useState<Rule | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+
+  const accounts = useAccounts()
+  const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts])
+  /**
+   * One rule's conditions, phrased once for both lists.
+   *
+   * `conditionWords` is in `lib/rules.ts` beside the matcher that enforces
+   * them, so what a rule SAYS on screen and what it DOES cannot drift.
+   */
+  const conditions = (r: Rule) => conditionWords(r, money, (id) => accountMap.get(id)?.name)
 
   const canEdit = useMemo(
     () => (t: Transaction) => canEditTransaction(t, levelOn(t.accountId, levels), userId),
@@ -158,8 +174,11 @@ export default function RulesPage() {
         Every time you categorise a payee — or give one a name of your own — Hearth remembers it and
         applies it to future entries and imports. Here you can point one somewhere else, rename it,
         apply it to what you have already recorded, or write one yourself. A rule can do either job or
-        both: a name alone is enough where the bank’s words are the only problem. Where two rules could
-        match, the more specific one wins — “tesco petrol” beats “tesco”.
+        both: a name alone is enough where the bank’s words are the only problem. A rule can also ask
+        for more than the payee — an exact amount, a range, a particular account — which is how two
+        subscriptions billed by the same vendor become two rules instead of one. Where several could
+        match, the most specific wins: a rule that names an amount beats one that does not, and
+        “tesco petrol” beats “tesco”.
       </p>
 
       {done && (
@@ -219,7 +238,22 @@ export default function RulesPage() {
                           {r.title && r.categoryId && ' · '}
                           {r.categoryId && (cat ? fullName(cat, catMap) : 'Category deleted')}
                         </p>
+                        {/* What else this rule insists on. Shown under the
+                            payee rather than beside it, because two rules for
+                            one payee are now the ordinary case and the line
+                            that tells them apart is the important one. */}
+                        {conditions(r).length > 0 && (
+                          <p className="truncate text-xs text-ink-3">and {conditions(r).join(' · ')}</p>
+                        )}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditing(r)}
+                        aria-label={`Edit rule ${r.match}`}
+                        className="shrink-0 p-1 text-ink-3 hover:text-ink"
+                      >
+                        <Pencil size={16} />
+                      </button>
                       <button
                         type="button"
                         onClick={() => void removeRow('rules', r.id)}
@@ -248,10 +282,11 @@ export default function RulesPage() {
           {/* Desktop: the category becomes an editable control in its own column,
               so repointing a rule is one click rather than delete-and-relearn. */}
           <Card className="hidden overflow-hidden md:block">
-            <ScrollTable minWidth={880}>
+            <ScrollTable minWidth={1040}>
               <thead>
                 <tr className={table.head}>
                   <th className={cx(table.th, 'min-w-48 pl-3', table.pinned)}>When the payee contains</th>
+                  <th className={cx(table.th, 'w-52')}>…and</th>
                   <th className={cx(table.th, 'w-56')}>Call it</th>
                   <th className={cx(table.th, 'w-56')}>Categorise as</th>
                   <th className={cx(table.th, 'w-28 text-right')}>Matches</th>
@@ -267,6 +302,20 @@ export default function RulesPage() {
                     <tr key={r.id} className={table.row}>
                       <td className={cx(table.cell, 'pl-3 pr-3', table.pinned)}>
                         <span className="truncate font-medium">{r.match}</span>
+                      </td>
+                      <td className={cx(table.cell, 'pr-3 text-ink-3')}>
+                        {conditions(r).length === 0 ? (
+                          // "Anything" rather than a dash: this column is the
+                          // difference between two rows that otherwise read
+                          // identically, so the empty case has to say what it
+                          // means rather than look like missing data.
+                          <span className="text-ink-3/70">any amount, any account</span>
+                        ) : (
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            {r.accountId && <AccountDot account={accountMap.get(r.accountId)} size={20} />}
+                            <span className="truncate">{conditions(r).join(' · ')}</span>
+                          </span>
+                        )}
                       </td>
                       <td className={cx(table.cell, 'pr-3')}>
                         <div className="max-w-52">
@@ -317,6 +366,14 @@ export default function RulesPage() {
                           ) : (
                             cov && cov.all.length > 0 && <Chip>up to date</Chip>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => setEditing(r)}
+                            aria-label={`Edit rule ${r.match}`}
+                            className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <button
                             type="button"
                             onClick={() => void removeRow('rules', r.id)}
@@ -386,7 +443,19 @@ export default function RulesPage() {
         )}
       </Sheet>
 
-      <NewRuleSheet open={adding} onClose={() => setAdding(false)} />
+      {/* One sheet, two jobs. `key` on the rule's id so the fields reload when
+          the sheet is opened on a different rule — without it a second Edit
+          press would show the first rule's amounts, since the loading effect
+          fires on `open` and `open` never went false in between. */}
+      <RuleSheet
+        key={editing?.id ?? 'new'}
+        rule={editing ?? undefined}
+        open={adding || editing !== null}
+        onClose={() => {
+          setAdding(false)
+          setEditing(null)
+        }}
+      />
     </div>
   )
 }
@@ -442,33 +511,92 @@ function TitleCell({ rule }: { rule: Rule }) {
   )
 }
 
-function NewRuleSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+/**
+ * Writing a rule, and editing one — the same sheet, because they are the same
+ * question asked at two moments.
+ *
+ * ## Why the conditions are opt-in, one at a time
+ *
+ * A payee substring is the whole of what a rule used to be, and it cannot tell
+ * two subscriptions from one vendor apart: £8.99 and £12.99 arrive on the
+ * statement as the same words, so filing one filed both. The obvious answer —
+ * match on the amount as well — breaks the commonest rule in any household, an
+ * energy bill from the same payee that is a different number every month.
+ *
+ * So neither is the default. The payee is what a rule is keyed on, and each
+ * further condition is something this rule asks for and the one beside it does
+ * not. That is also why the amount is a THREE-way choice rather than a pair of
+ * boxes left blank: "any", "exactly", "between" are the three things people
+ * mean, and two empty number fields do not say which of them is intended.
+ */
+function RuleSheet({ rule, open, onClose }: { rule?: Rule; open: boolean; onClose: () => void }) {
   const categories = useCategories()
   const catMap = useCategoryMap()
+  const accounts = useAccounts()
   const expense = categories.filter((c) => c.kind === 'expense')
+
   const [match, setMatch] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [title, setTitle] = useState('')
+  const [amountMode, setAmountMode] = useState<AmountMode>('any')
+  const [low, setLow] = useState('')
+  const [high, setHigh] = useState('')
+  const [accountId, setAccountId] = useState('')
+
+  /**
+   * Load the rule being edited when the sheet OPENS, and not on every render.
+   *
+   * The same shape `Sheet`'s callers use for their keys: a form keyed on the
+   * row it edits also remounts when it closes, which throws the sheet away
+   * before it can animate out. Here the fields are filled by an effect instead,
+   * keyed on `open` — so opening always gets fresh values and closing leaves
+   * the sheet holding what it had, which is what it animates out with.
+   */
+  useEffect(() => {
+    if (!open) return
+    setMatch(rule?.match ?? '')
+    setCategoryId(rule?.categoryId ?? '')
+    setTitle(rule?.title ?? '')
+    setAccountId(rule?.accountId ?? '')
+    const lo = rule?.amountMinMinor
+    const hi = rule?.amountMaxMinor
+    setAmountMode(lo === undefined && hi === undefined ? 'any' : lo === hi ? 'exact' : 'range')
+    setLow(lo === undefined ? '' : majorOf(lo))
+    setHigh(hi === undefined ? '' : majorOf(hi))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   // Stored normalised, because that is what the matcher compares against — a
   // rule saved as "Tesco Stores 3241" would match nothing at all.
   const normalised = normalizePayee(match)
-  // Either half is enough, and neither is not: `rules_say_something` refuses a
-  // rule that says nothing, and a write refused server-side surfaces minutes
-  // later as a dead letter rather than as an error on this form.
-  const canSave = normalised.length >= 3 && (categoryId !== '' || cleanTitle(title) !== undefined)
+  const lo = parseMajor(low)
+  const hi = parseMajor(high)
+  const amounts = amountBounds(amountMode, lo, hi)
+
+  // Either half of what a rule SAYS is enough, and neither is not:
+  // `rules_say_something` refuses a rule that says nothing, and a write refused
+  // server-side surfaces minutes later as a dead letter rather than as an error
+  // on this form. The conditions are separate — a rule may carry none.
+  const canSave =
+    normalised.length >= 3 &&
+    (categoryId !== '' || cleanTitle(title) !== undefined) &&
+    (amountMode === 'any' || amounts !== null)
 
   async function save() {
     if (!canSave) return
-    await create('rules', {
+    const fields = {
       match: normalised,
       categoryId: categoryId || undefined,
       title: cleanTitle(title),
-      createdAt: new Date().toISOString(),
-    })
-    setMatch('')
-    setCategoryId('')
-    setTitle('')
+      amountMinMinor: amounts?.min,
+      amountMaxMinor: amounts?.max,
+      accountId: accountId || undefined,
+    }
+    // A field present with `undefined` clears it; an absent one would leave it
+    // alone. Everything here is stated on every save, which is also what
+    // `upsert_rule` needs — see RPC_WRITERS in outbox.ts.
+    if (rule) await update('rules', rule.id, fields)
+    else await create('rules', { ...fields, createdAt: new Date().toISOString() })
     onClose()
   }
 
@@ -476,10 +604,11 @@ function NewRuleSheet({ open, onClose }: { open: boolean; onClose: () => void })
     <Sheet
       open={open}
       onClose={onClose}
-      title="New rule"
+      onSubmit={save}
+      title={rule ? 'Edit rule' : 'New rule'}
       footer={
-        <Button size="lg" className="w-full" disabled={!canSave} onClick={save}>
-          Add rule
+        <Button type="submit" size="lg" className="w-full" disabled={!canSave}>
+          {rule ? 'Save rule' : 'Add rule'}
         </Button>
       }
     >
@@ -499,18 +628,79 @@ function NewRuleSheet({ open, onClose }: { open: boolean; onClose: () => void })
             autoComplete="off"
           />
         </Field>
+
         <Field
-          label="Call it"
-          hint="Optional. What these show as, instead of whatever the bank wrote."
+          label="…and the amount is"
+          hint={
+            amountMode === 'any'
+              ? 'Leave this alone for a payee that charges a different amount every month — an energy bill, a supermarket.'
+              : 'Use this to tell two charges from the same payee apart. Amounts are compared without their sign, so this reads the same for money in and money out.'
+          }
         >
-          <TextInput
-            value={title}
-            maxLength={TITLE_MAX}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Vet insurance"
-            autoComplete="off"
-          />
+          <div className="space-y-2">
+            <Segmented
+              label="Amount condition"
+              value={amountMode}
+              onChange={setAmountMode}
+              options={AMOUNT_MODES}
+            />
+            {amountMode === 'exact' && (
+              <TextInput
+                value={low}
+                onChange={(e) => setLow(e.target.value)}
+                inputMode="decimal"
+                placeholder="8.99"
+                aria-label="Exact amount"
+              />
+            )}
+            {amountMode === 'range' && (
+              <div className="flex items-center gap-2">
+                <TextInput
+                  value={low}
+                  onChange={(e) => setLow(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="5.00"
+                  aria-label="Smallest amount"
+                />
+                <span className="shrink-0 text-sm text-ink-3">to</span>
+                <TextInput
+                  value={high}
+                  onChange={(e) => setHigh(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="15.00"
+                  aria-label="Largest amount"
+                />
+              </div>
+            )}
+          </div>
         </Field>
+
+        <Field label="…and it is on" hint="Optional. Only accounts you can see are offered, and a rule can only be keyed on one of those.">
+          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <option value="">Any account</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <div className="border-t border-hairline pt-4">
+          <Field
+            label="Call it"
+            hint="Optional. What these show as, instead of whatever the bank wrote."
+          >
+            <TextInput
+              value={title}
+              maxLength={TITLE_MAX}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Vet insurance"
+              autoComplete="off"
+            />
+          </Field>
+        </div>
+
         <Field label="Categorise as" hint="Optional, if you have given it a name.">
           <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">Don’t file it anywhere</option>
@@ -524,4 +714,45 @@ function NewRuleSheet({ open, onClose }: { open: boolean; onClose: () => void })
       </div>
     </Sheet>
   )
+}
+
+type AmountMode = 'any' | 'exact' | 'range'
+
+const AMOUNT_MODES: { value: AmountMode; label: string }[] = [
+  { value: 'any', label: 'Any' },
+  { value: 'exact', label: 'Exactly' },
+  { value: 'range', label: 'Between' },
+]
+
+/**
+ * A typed amount as minor units, or null for anything that is not one.
+ *
+ * Deliberately its own two lines rather than the transaction form's
+ * `parseAmount`: this one is about a BOUND, so a blank is a perfectly ordinary
+ * answer ("no upper limit") and has to be distinguishable from a typo.
+ */
+function parseMajor(raw: string): number | null {
+  const t = raw.trim().replace(/[£,\s]/g, '')
+  if (!t) return null
+  const n = Number(t)
+  if (!Number.isFinite(n) || n < 0) return null
+  return Math.round(n * 100)
+}
+
+const majorOf = (minor: number) => (minor / 100).toFixed(2)
+
+/**
+ * The two bounds a mode and a pair of numbers come to.
+ *
+ * `null` means "the user has chosen a condition and not finished typing it",
+ * which is what stops the save button — an empty bound saved as "any" would be
+ * a rule quietly wider than the one on screen.
+ */
+function amountBounds(mode: AmountMode, lo: number | null, hi: number | null) {
+  if (mode === 'any') return undefined
+  if (mode === 'exact') return lo === null ? null : { min: lo, max: lo }
+  if (lo === null || hi === null) return null
+  // Swapped rather than refused, exactly as `upsert_rule` does: two bounds
+  // typed into two boxes pass through "larger first" on the way to being right.
+  return { min: Math.min(lo, hi), max: Math.max(lo, hi) }
 }
