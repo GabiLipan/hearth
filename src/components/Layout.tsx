@@ -633,6 +633,30 @@ export function Layout({ children }: { children: ReactNode }) {
   )
 }
 
+/** The rail pill's geometry, in the list's own coordinates. */
+type PillBox = { top: number; height: number; originX: number; width: number }
+
+/**
+ * How the rail's mark leaves one row and arrives at another.
+ *
+ * Not `PILL_MS`, which is the length of a JOURNEY — a pill crossing the tab bar
+ * has ground to cover and 460ms of spring is what stops it looking flung. These
+ * two go nowhere: one collapses where it stands and the other grows where it is
+ * pressed, so the same duration would read as hesitation. Out is quick and gets
+ * out of the way; in overlaps its tail and takes the bounce, because the arrival
+ * is the half that answers the press.
+ *
+ * `SEED_SCALE` is the shape both ends meet at, as a fraction of the row's own
+ * height: a disc a little smaller than the icon, centred on it. Zero is the
+ * obvious value and the wrong one — a pill scaled to nothing has no rounded
+ * corners left to read and the collapse ends as a vanishing line.
+ */
+const RAIL_OUT_MS = 200
+const RAIL_OUT_EASE = 'cubic-bezier(0.36, 0, 0.66, -0.4)'
+const RAIL_IN_MS = 380
+const RAIL_IN_DELAY = 110
+const SEED_SCALE = 0.55
+
 /**
  * The desktop rail: the tab bar's opposite number, standing up.
  *
@@ -644,14 +668,23 @@ export function Layout({ children }: { children: ReactNode }) {
  * treatment, and the current page is marked by a PILL that travels rather than
  * by a background that blinks on wherever you clicked.
  *
- * That pill is the same idea as `BottomTabs`', simplified by the axis: the rows
- * here are a fixed height in a fixed order, so where it is going can be read
- * straight off the active row without having to settle any labels first. It
- * still starts from live geometry — clicking a third row while the second is
- * travelling has to pick the journey up from where it actually got to — and it
- * still writes the resting position first and animates over the top of it, with
- * no `fill`, because a finish event is never delivered while the app is in the
- * background and an animation holding the final value would strand the pill.
+ * That pill does NOT travel, and this is the one place the rail deliberately
+ * parts company with `BottomTabs`. A pill sliding sideways between six tabs an
+ * inch apart reads as one object moving; the same slide down a 300px column of
+ * rows reads as a lift travelling past the floors you did not ask for, and the
+ * further it goes the more it looks like the app is thinking about it. So the
+ * mark is not carried from one row to the next: the old one collapses into its
+ * own icon and goes, and the new one grows out of the icon you actually
+ * pressed, which is where the eye already is.
+ *
+ * Two elements rather than one, because the two halves overlap in time — the
+ * outgoing pill is a ghost that only ever exists while it is leaving. Both are
+ * scaled about the icon's centre rather than resized, so the whole thing is
+ * composited, and both still write their RESTING state first and animate over
+ * the top of it with no `fill` forwards: a finish event is never delivered
+ * while the app is in the background, and an animation holding the final value
+ * would strand the pill mid-collapse. The ghost's resting state is "gone",
+ * which is what makes that safe for the half that ends invisible.
  */
 function Rail({
   ref,
@@ -668,38 +701,93 @@ function Rail({
 }) {
   const listRef = useRef<HTMLDivElement>(null)
   const pillRef = useRef<HTMLSpanElement>(null)
-  const placed = useRef(false)
+  const ghostRef = useRef<HTMLSpanElement>(null)
+  /** Where the pill is resting, so the next change knows what to collapse. */
+  const placed = useRef<PillBox | null>(null)
+
+  /**
+   * The active row's box, and the point both halves of the animation scale
+   * about: the centre of its icon.
+   *
+   * The icon rather than the row's own centre, because that is the thing that
+   * stays put — the label beside it comes and goes with the rail collapsing,
+   * and a mark that grew from the middle of a 200px row would be growing from
+   * a point with nothing under it.
+   */
+  const measure = (): PillBox | null => {
+    const list = listRef.current
+    const active = list?.querySelector<HTMLElement>('[data-rail="active"]')
+    // Nothing to measure while the rail is `display: none` on a phone.
+    if (!list || !active || !active.offsetHeight) return null
+    const icon = active.querySelector('svg')
+    const listLeft = list.getBoundingClientRect().left
+    const iconBox = icon?.getBoundingClientRect()
+    return {
+      top: active.offsetTop,
+      height: active.offsetHeight,
+      // The pill is `inset-x-0`, so its own box starts at the list's left edge.
+      originX: iconBox ? iconBox.left + iconBox.width / 2 - listLeft : list.clientWidth / 2,
+      width: list.clientWidth,
+    }
+  }
+
+  /** The shape the pill collapses into: a small disc over the icon. */
+  const seed = (box: PillBox) =>
+    `scale(${((box.height * SEED_SCALE) / Math.max(box.width, 1)).toFixed(4)}, ${SEED_SCALE})`
+
+  const put = (el: HTMLElement, box: PillBox) => {
+    el.style.top = `${box.top}px`
+    el.style.height = `${box.height}px`
+    el.style.transformOrigin = `${box.originX}px 50%`
+  }
 
   const place = (animate: boolean) => {
-    const list = listRef.current
     const pill = pillRef.current
-    if (!list || !pill) return
-    const active = list.querySelector<HTMLElement>('[data-rail="active"]')
-    // Nothing to measure while the rail is `display: none` on a phone.
-    if (!active || !active.offsetHeight) {
+    const ghost = ghostRef.current
+    if (!pill || !ghost) return
+    const to = measure()
+    if (!to) {
       pill.style.opacity = '0'
-      placed.current = false
+      placed.current = null
       return
     }
 
-    const pillNow = pill.getBoundingClientRect()
-    const listNow = list.getBoundingClientRect()
-    const from = placed.current && pillNow.height ? { top: pillNow.top - listNow.top, height: pillNow.height } : null
-    pill.getAnimations().forEach((a) => a.cancel())
+    const from = placed.current
+    for (const el of [pill, ghost]) el.getAnimations().forEach((a) => a.cancel())
 
-    const to = { top: active.offsetTop, height: active.offsetHeight }
-    pill.style.top = `${to.top}px`
-    pill.style.height = `${to.height}px`
+    // The resting state, written before anything is animated over it.
+    put(pill, to)
     pill.style.opacity = '1'
-    placed.current = true
+    ghost.style.opacity = '0'
+    placed.current = to
 
-    if (!animate || !from || !motionOk()) return
+    const moved = from && from.top !== to.top
+    if (!animate || !moved || !motionOk()) return
+
+    // Out: the mark you are leaving, shrinking into the icon it belonged to.
+    // A touch of anticipation on the way in — it swells a hair before it goes,
+    // which is what makes a collapse read as one gesture rather than as a
+    // window closing.
+    put(ghost, from)
+    ghost.animate(
+      [
+        { transform: 'scale(1, 1)', opacity: 1 },
+        { transform: seed(from), opacity: 0 },
+      ],
+      { duration: RAIL_OUT_MS, easing: RAIL_OUT_EASE },
+    )
+
+    // In: the new one out of the icon you pressed, overlapping the tail of the
+    // collapse rather than queueing behind it. `backwards` fill only reaches
+    // the delay — without it the pill would sit at full size for that moment
+    // and then jump back to nothing to start.
     pill.animate(
       [
-        { top: `${from.top}px`, height: `${from.height}px` },
-        { top: `${to.top}px`, height: `${to.height}px` },
+        { transform: seed(to), opacity: 0 },
+        { transform: seed(to), opacity: 1, offset: 0.12 },
+        { transform: 'scale(1, 1)', opacity: 1 },
       ],
-      { duration: PILL_MS, easing: PILL_SPRING },
+      { duration: RAIL_IN_MS, delay: RAIL_IN_DELAY, easing: PILL_SPRING, fill: 'backwards' },
     )
   }
 
@@ -802,6 +890,13 @@ function Rail({
       <div ref={listRef} className="relative flex min-h-0 flex-1 flex-col gap-0.5">
         <span
           ref={pillRef}
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 rounded-full bg-accent/12 opacity-0"
+        />
+        {/* The pill being left behind. At rest it is nothing at all; it exists
+            for the 200ms it spends collapsing into the icon it belonged to. */}
+        <span
+          ref={ghostRef}
           aria-hidden
           className="pointer-events-none absolute inset-x-0 rounded-full bg-accent/12 opacity-0"
         />
