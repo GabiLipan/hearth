@@ -326,6 +326,15 @@ export function BudgetGlanceWidget({ data }: WidgetProps) {
 /** How much history the sparkline beside each balance covers. */
 const SPARK_DAYS = 30
 
+/**
+ * The column every account's line is drawn in.
+ *
+ * Stated once because an account with nothing to draw has to hold the same
+ * column open — a row that simply omitted it ended its balance where the other
+ * rows ended their lines.
+ */
+const SPARK_BOX = 'h-5 w-12 shrink-0 sm:w-14'
+
 export function AccountsWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const balance = (a: Account) => balanceOf(a, data.txns, data.remoteBalances, levelOn(a.id, data.levels))
@@ -357,15 +366,30 @@ export function AccountsWidget({ data }: WidgetProps) {
                     from the server rather than from rows this device holds. */}
                 {!canSeeTransactionsAt(level) && <Eye size={12} className="ml-1.5 inline text-ink-3" />}
               </span>
-              {spark && (
+              {/* Figure first, line last, and the line is the only thing at
+                  the end of the row — which is what makes both of them line up
+                  down the card. Between the name and the balance the line's
+                  left edge was wherever that row's balance happened to start,
+                  so £28 and £3,769.53 put their sparklines an inch apart and
+                  the shapes could not be read against each other. Right-aligned
+                  against a fixed column, the figures end on one line and the
+                  lines all start and end on two more. */}
+              <span className={cx('shrink-0 text-right text-sm font-semibold tabular', bal < 0 && 'text-critical-text')}>
+                {money(bal)}
+              </span>
+              {/* An account seen at `balance` level has no line to draw, and an
+                  absent one must not pull that row's figure out to the edge —
+                  so the column is held open either way. */}
+              {spark ? (
                 <Sparkline
                   values={spark}
                   color={paintOf(face.slot, face.color)}
-                  className="h-5 w-12 shrink-0 opacity-70 sm:w-14"
+                  className={cx(SPARK_BOX, 'opacity-70')}
                   label={`${a.name}: the last ${SPARK_DAYS} days`}
                 />
+              ) : (
+                <span aria-hidden className={SPARK_BOX} />
               )}
-              <span className={cx('text-sm font-semibold tabular', bal < 0 && 'text-critical-text')}>{money(bal)}</span>
             </li>
           )
         })}

@@ -499,7 +499,7 @@ export function Layout({ children }: { children: ReactNode }) {
           up underneath it. Zero on desktop, where the dock is `md:hidden`. */}
       <div
         id={APP_SCROLLER_ID}
-        className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] pb-[var(--tabbar-h,0px)] md:pt-[env(safe-area-inset-top)]"
+        className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] pb-[var(--tabbar-h,0px)] md:pt-[var(--safe-top)]"
       >
         {/* Content — fills every pixel the sidebar leaves, at any viewport width.
             Pages decide their own column counts from there. */}
@@ -738,15 +738,21 @@ function Rail({
       ref={ref}
       className={cx(
         'z-40 hidden shrink-0 flex-col gap-0.5 rounded-[1.75rem] p-2.5 md:flex',
-        // Inset on all four sides, so the page shows round it. `my-2.5` rather
+        // Inset on all four sides, so the page shows round it. Margins rather
         // than a height: the frame stretches its flex items, and a margin is
         // what turns "as tall as the frame" into "as tall as the frame, less
         // the gutter" without any arithmetic to keep in step.
-        'my-2.5 ml-2.5',
-        // The status bar sits over the app on an installed iPad, where the
-        // phone header that normally absorbs it is hidden (`md:hidden`). The
-        // rail's own top margin covers part of that now, so this is the rest.
-        'pt-[calc(0.625rem_+_env(safe-area-inset-top))]',
+        'mb-2.5 ml-2.5',
+        // The status bar is painted OVER the app on an installed iPad, where
+        // the phone header that absorbs it elsewhere is hidden (`md:hidden`) —
+        // so the clock sat inside this card's own top corner. The inset goes
+        // into the top MARGIN rather than the padding: pushing the content down
+        // inside the card leaves the card itself under the clock, frosted
+        // background and rounded corner and all, which is the thing that read
+        // as an overlap. Moving the whole card down puts the status bar over
+        // the page's ground, where it belongs. `--safe-top` rather than the raw
+        // inset because iPadOS reports 0 for a bar it is nevertheless drawing.
+        'mt-[calc(0.625rem_+_var(--safe-top))]',
         // The same four properties the tab bar wears, stated once in `ui.tsx`.
         CHROME_FROST,
         // Bouncy, like the pill: the width is the one thing about this rail
@@ -1073,7 +1079,7 @@ function Notices() {
       className={cx(
         'pointer-events-none absolute right-0 z-[45] flex flex-col gap-2 px-4 md:px-5 xl:px-6',
         'left-[var(--rail-w,0px)]',
-        'top-[calc(var(--header-h,0px)_+_0.5rem)] md:top-[calc(env(safe-area-inset-top)_+_0.75rem)]',
+        'top-[calc(var(--header-h,0px)_+_0.5rem)] md:top-[calc(var(--safe-top)_+_0.75rem)]',
         // Centred on a phone, where the top of the screen is two floating discs
         // and a gap; against the right edge on a wide screen, where the top of
         // the content is the page's own title and a notice parked over it would

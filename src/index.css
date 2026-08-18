@@ -335,6 +335,35 @@ select,
   height: 100vh;
 }
 
+/**
+ * The room the status bar takes at the top of the window — `--safe-top`.
+ *
+ * `env(safe-area-inset-top)` is the honest answer on an iPhone and a lie on an
+ * iPad: the installed app is `black-translucent`, so the status bar is painted
+ * OVER the top of the window, and iPadOS still reports an inset of 0 for it —
+ * in Stage Manager, in Split View and full screen alike. Nothing on a phone
+ * noticed, because the phone's top bar is a floating layer with a wide gap
+ * above the discs; on an iPad the sidebar is a card that starts at the top of
+ * the frame, and the clock sat inside its rounded corner.
+ *
+ * So: the inset where there is one, floored at the height of a status bar where
+ * the app is installed and the inset is missing. A browser tab keeps 0 — there
+ * the status bar has the browser's own chrome under it and none of this is the
+ * app's problem. Both spellings of "installed" again, for the reason
+ * `.app-frame` gives twice above.
+ */
+:root {
+  --safe-top: env(safe-area-inset-top);
+}
+@media (display-mode: standalone) {
+  :root {
+    --safe-top: max(env(safe-area-inset-top), 24px);
+  }
+}
+:root[data-standalone] {
+  --safe-top: max(env(safe-area-inset-top), 24px);
+}
+
 /* Currency figures that must align vertically */
 .tabular {
   font-variant-numeric: tabular-nums;
@@ -353,7 +382,7 @@ select,
   padding-bottom: env(safe-area-inset-bottom);
 }
 .pt-safe {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--safe-top);
 }
 
 /**
