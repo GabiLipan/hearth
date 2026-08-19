@@ -351,23 +351,43 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
 /* ---------- which month a contribution belongs to ---------- */
 
 /**
- * Contributions on or after this day of the month count towards the NEXT month.
+ * Money ARRIVING on or after this day of the month counts towards the NEXT one.
  *
- * We fund the joint account when we are paid, at the end of one month, and
- * spend it during the next. Every calendar month does therefore contain one
- * contribution and one month of spending — nothing is missing — but they are
- * the wrong pair: August's spending is funded by the money that arrived on 31
- * July, while August's own arrival pays for September.
+ * We are paid at the end of one month and spend it during the next. Every
+ * calendar month does therefore contain one salary, one contribution and one
+ * month of spending — nothing is missing — but they are the wrong pair:
+ * August's spending is funded by the money that arrived on 31 July, while
+ * August's own arrival pays for September.
  *
  * Left alone, that is visible twice. The monthly income-versus-spending chart
  * compares spending against money it did not spend; and for most of the month
  * the household reads as though it has spent thousands against nothing, because
  * its income has not turned up yet and will not until the 31st.
  *
- * Shifting the contribution is the smallest fix that addresses both. Spending
- * keeps its real date, so statements still reconcile and nothing else in the
- * app moves; only the money that was always *for* the following month is
- * counted there.
+ * Shifting the arrival is the smallest fix that addresses both. Spending keeps
+ * its real date, so statements still reconcile and nothing else in the app
+ * moves; only the money that was always *for* the following month is counted
+ * there.
+ *
+ * ## Why it is every arrival and not only a contribution
+ *
+ * It used to shift contributions alone, and that is half a rule. It works on
+ * the household book, which is what it was written for: the contribution and
+ * the spending it funds land in the same month. On the PERSONAL book it breaks
+ * the pairing it exists to fix, because a salary paid on the 31st is an arrival
+ * too. July then held the salary and no contribution; August held the
+ * contribution and no salary — so the personal book read
+ *
+ *     Earned £0 · To our household £2,909 · Left with me −£3,065
+ *
+ * every single month, and Everything's "money in" was the other person's
+ * contribution and nothing else. Both months were wrong, in opposite
+ * directions, and the figure that made it obvious was a salary of zero.
+ *
+ * So the rule is stated once and applied to everything that ARRIVES: a
+ * contribution, a salary, interest, a refund. Money going OUT is never shifted
+ * — a withdrawal is a response to something rather than a regular advance, and
+ * spending on the 29th was spending on the 29th.
  */
 export const CONTRIBUTION_CUTOFF_DAY = 25
 
@@ -385,15 +405,35 @@ export const CONTRIBUTION_CUTOFF_DAY = 25
  * obviously "for".
  */
 export function effectiveMonth(t: Transaction, flow: Flow | undefined): string {
-  // Both readings of a contribution, or the shift would depend on whether the
-  // OTHER person happens to use the app — which is exactly the accident this
-  // whole mechanism exists to stop mattering. An arrival nobody has claimed is
-  // still not shifted: until somebody says it is a contribution it is ordinary
-  // income, and guessing would move a tax refund into next month.
-  if (flow !== 'contribution' && flow !== 'contribution-unpaired') return monthKey(t.date)
+  if (!shifts(t, flow)) return monthKey(t.date)
   const day = Number(t.date.slice(8, 10))
   if (day < CONTRIBUTION_CUTOFF_DAY) return monthKey(t.date)
   return shiftMonth(monthKey(t.date), 1)
+}
+
+/**
+ * Whether a row is an ARRIVAL, and so counts towards the month it funds.
+ *
+ * Both readings of a contribution, so the shift does not depend on whether the
+ * other person happens to use the app — exactly the accident this whole
+ * mechanism exists to stop mattering — and both kinds of outside income, since
+ * a salary landing on the 31st is the same event as the contribution it pays
+ * for and has to move with it.
+ *
+ * Note what is NOT here. A `withdrawal` is money coming back out in response to
+ * something rather than a regular advance, so there is no next month it is
+ * obviously "for". Spending is never shifted at all. And `paid-for-household`
+ * is spending that happens to also be a contribution: the money left on the day
+ * it left, so it belongs to that month on both sides of the book — shifting it
+ * would move a purchase away from the statement line it reconciles against.
+ */
+function shifts(t: Transaction, flow: Flow | undefined): boolean {
+  if (flow === 'contribution' || flow === 'contribution-unpaired') return true
+  // The arriving half only. A `contribution` is one flow seen from two ends,
+  // and the leg LEAVING a personal account is not an arrival — but it is the
+  // same event, so it is shifted above regardless of sign, which is what keeps
+  // my book and the household's agreeing about when it happened.
+  return (flow === 'personal-income' || flow === 'external-income') && t.amountMinor > 0
 }
 
 /* ---------- aggregates ---------- */

@@ -346,10 +346,12 @@ describe('money moved at the end of one month to be spent in the next', () => {
 
     expect(aug.contributions).toBe(380000)
     expect(aug.spend).toBe(180000)
-    // Interest paid into the joint account is real outside income and stays
-    // exactly where it landed.
-    expect(aug.externalIncome).toBe(57)
-    expect(aug.net).toBe(380000 + 57 - 180000)
+    // Interest paid in on the 31st is an arrival like any other, so it funds
+    // September rather than the month it landed in. One rule for everything
+    // that comes IN — see `CONTRIBUTION_CUTOFF_DAY`.
+    expect(aug.externalIncome).toBe(0)
+    expect(bookTotals(txns, flows, 'household', '2026-09', books).externalIncome).toBe(57)
+    expect(aug.net).toBe(380000 - 180000)
   })
 
   it('does not leave it counted in July as well', () => {
@@ -363,8 +365,29 @@ describe('money moved at the end of one month to be spent in the next', () => {
     // The same event must not land in different months on either side of it.
     expect(bookTotals(txns, flows, 'mine', '2026-07', books).contributed).toBe(0)
     expect(bookTotals(txns, flows, 'mine', '2026-08', books).contributed).toBe(200000)
-    // My salary keeps its real date — only the contribution shifts.
-    expect(bookTotals(txns, flows, 'mine', '2026-07', books).externalIncome).toBe(300000)
+    // And the salary that paid for it moves WITH it. Shifting only the
+    // contribution is half a rule: it left July holding a salary and no
+    // contribution, and August holding a contribution and no salary, so the
+    // personal book read "Earned £0 · To our household £2,909" every month.
+    expect(bookTotals(txns, flows, 'mine', '2026-07', books).externalIncome).toBe(0)
+    expect(bookTotals(txns, flows, 'mine', '2026-08', books).externalIncome).toBe(300000)
+  })
+
+  it('so a month holds the salary AND what it paid for, which is the point', () => {
+    const aug = bookTotals(txns, flows, 'mine', '2026-08', books)
+    expect(aug.income).toBe(300000)
+    expect(aug.contributed).toBe(200000)
+    expect(aug.net).toBe(100000)
+    // July holds neither, rather than one of each.
+    expect(bookTotals(txns, flows, 'mine', '2026-07', books).income).toBe(0)
+    expect(bookTotals(txns, flows, 'mine', '2026-07', books).contributed).toBe(0)
+  })
+
+  it('leaves an ordinary mid-month salary exactly where it landed', () => {
+    const midMonth = [txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-08-15', categoryId: 'salary' })]
+    const f = classifyFlows(midMonth, books)
+    expect(bookTotals(midMonth, f, 'mine', '2026-08', books).externalIncome).toBe(300000)
+    expect(bookTotals(midMonth, f, 'mine', '2026-09', books).externalIncome).toBe(0)
   })
 
   it('leaves a contribution made early in the month where it is', () => {
@@ -923,8 +946,11 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const rows = [tagged()]
     const untagged = [tagged({ contributorId: undefined })]
 
+    // Both land in August now — the shift is about the money arriving, not
+    // about whether anybody has said whose it was — so the comparison is
+    // between two readings of the SAME month rather than of two.
     const withTag = bookTotals(rows, classifyFlows(rows, books), 'household', '2026-08', books)
-    const without = bookTotals(untagged, classifyFlows(untagged, books), 'household', '2026-07', books)
+    const without = bookTotals(untagged, classifyFlows(untagged, books), 'household', '2026-08', books)
 
     expect(withTag.income).toBe(without.income)
     expect(withTag.net).toBe(without.net)
@@ -981,7 +1007,8 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const flows = classifyFlows(rows, books)
 
     expect(flows.get(rows[0].id)).toBe('personal-income')
-    expect(bookTotals(rows, flows, 'mine', '2026-07', books).externalIncome).toBe(180000)
+    // Dated the 29th, so it funds the following month like any other arrival.
+    expect(bookTotals(rows, flows, 'mine', '2026-08', books).externalIncome).toBe(180000)
   })
 
   it('does not let a transfer be overruled by a tag', () => {
@@ -1037,14 +1064,17 @@ describe('saying who paid in, when there is no far leg to find', () => {
     expect(bookTotals(rows, classifyFlows(rows, books), 'all', '2026-08', books).income).toBe(0)
   })
 
-  it('does not shift an arrival nobody has claimed', () => {
-    // Until somebody says it is a contribution it is ordinary income, and
-    // guessing would move a tax refund into next month.
+  it('shifts an arrival nobody has claimed, because it is still an arrival', () => {
+    // It is not a contribution until somebody says so — the flow stays
+    // `external-income` and the split still refuses to put a name on it — but
+    // WHEN it counts is a question about the money rather than about whose it
+    // was, and money that turns up on the 29th is money the next month spends.
     const rows = [tagged({ contributorId: undefined })]
     const flows = classifyFlows(rows, books)
 
-    expect(bookTotals(rows, flows, 'household', '2026-07', books).externalIncome).toBe(180000)
-    expect(bookTotals(rows, flows, 'household', '2026-08', books).externalIncome).toBe(0)
+    expect(flows.get(rows[0].id)).toBe('external-income')
+    expect(bookTotals(rows, flows, 'household', '2026-07', books).externalIncome).toBe(0)
+    expect(bookTotals(rows, flows, 'household', '2026-08', books).externalIncome).toBe(180000)
   })
 
   it('keeps the categories adding up to the total above them', () => {

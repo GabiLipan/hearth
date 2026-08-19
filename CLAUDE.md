@@ -1639,6 +1639,21 @@ the single place a level comes from.
   the client's `accountAllocation`/`shortfall` mirror the server's rules exactly
   so the screen can say what is about to happen — a figure that changes on the
   next sync with nothing to explain it is the failure being avoided.
+- **The month a row counts towards is about ARRIVAL, and the rule applies to
+  everything that arrives.** `CONTRIBUTION_CUTOFF_DAY` shifts money landing on
+  or after the 25th into the month it funds — we are paid at the end of one
+  month and spend it during the next. It used to shift contributions ALONE,
+  which is half a rule: right on the household book, where the contribution and
+  the spending it pays for land in the same month, and wrong on the personal
+  book, where a salary paid on the 31st is an arrival too. July then held the
+  salary and no contribution, August the contribution and no salary, so Mine
+  read `Earned £0 · To our household £2,909 · Left with me −£3,065` every single
+  month and Everything's "money in" was the other person's contribution and
+  nothing else. `shifts()` in books.ts is the rule stated once: a contribution,
+  a salary, interest, a refund — anything coming IN. Money going out never
+  shifts, and neither does `paid-for-household`, which is spending that happens
+  to also be a contribution and has to stay on the statement line it reconciles
+  against.
 - **A same-book transfer is still `internal`, and is now also reportable.**
   `savedInto` is a SECOND reading of rows `bookTotals` correctly counts in
   nothing: no flow moves, no total changes, and what is left over is simply
