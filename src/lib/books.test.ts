@@ -20,8 +20,12 @@ import {
   savingsAccounts,
   showsInBook,
   isHouseholdPaid,
+  DEFAULT_MONTH_RULE,
   type BookMap,
 } from './books'
+
+/** What these tests count months under, unless one of them varies it. */
+const RULE = DEFAULT_MONTH_RULE
 
 /**
  * The fixture is the household this model was designed around, with one month
@@ -187,7 +191,7 @@ describe('what each transaction is', () => {
 describe('the household book', () => {
   const txns = march()
   const flows = classifyFlows(txns, books)
-  const t = bookTotals(txns, flows, 'household', '2026-03', books)
+  const t = bookTotals(txns, flows, RULE, 'household', '2026-03', books)
 
   it('counts both contributions, including the one I cannot trace', () => {
     expect(t.contributions).toBe(380000)
@@ -213,7 +217,7 @@ describe('the household book', () => {
 describe('my own book', () => {
   const txns = march()
   const flows = classifyFlows(txns, books)
-  const t = bookTotals(txns, flows, 'mine', '2026-03', books)
+  const t = bookTotals(txns, flows, RULE, 'mine', '2026-03', books)
 
   it('shows my salary and nothing of the household', () => {
     expect(t.externalIncome).toBe(300000)
@@ -241,12 +245,12 @@ describe('money coming back out of the household', () => {
     expect(flows.get(out.id)).toBe('withdrawal')
     expect(flows.get(back.id)).toBe('withdrawal')
 
-    const house = bookTotals(txns, flows, 'household', '2026-03', books)
+    const house = bookTotals(txns, flows, RULE, 'household', '2026-03', books)
     expect(house.spend).toBe(240000) // unchanged — it was not spent
     expect(house.withdrawn).toBe(25000)
     expect(house.net).toBe(148800 - 25000)
 
-    const me = bookTotals(txns, flows, 'mine', '2026-03', books)
+    const me = bookTotals(txns, flows, RULE, 'mine', '2026-03', books)
     expect(me.externalIncome).toBe(300000) // salary, undisturbed
     expect(me.returned).toBe(25000)
     expect(me.net).toBe(30000 + 25000)
@@ -276,7 +280,7 @@ describe('the payday ambiguity that used to block auto-linking', () => {
     ]
 
     const totalsFor = (txns: Transaction[], book: 'household' | 'mine') =>
-      bookTotals(txns, classifyFlows(txns, books), book, '2026-03', books)
+      bookTotals(txns, classifyFlows(txns, books), RULE, book, '2026-03', books)
 
     expect(totalsFor(readingA, 'household')).toEqual(totalsFor(readingB, 'household'))
     expect(totalsFor(readingA, 'mine')).toEqual(totalsFor(readingB, 'mine'))
@@ -299,11 +303,11 @@ describe('spending by category, per book', () => {
   const flows = classifyFlows(txns, books)
 
   it('rolls subcategories up to their parent, and keeps the books apart', () => {
-    const house = bookSpendByCategory(txns, flows, cats, 'household', '2026-03', books)
+    const house = bookSpendByCategory(txns, flows, RULE, cats, 'household', '2026-03', books)
     expect(house).toEqual([{ categoryId: 'home', totalMinor: 125000 }])
 
     // My shopping is in MY book, and must not appear in the household's pie.
-    const mine = bookSpendByCategory(txns, flows, cats, 'mine', '2026-03', books)
+    const mine = bookSpendByCategory(txns, flows, RULE, cats, 'mine', '2026-03', books)
     expect(house.find((s) => s.categoryId === 'shopping')).toBeUndefined()
     expect(mine).toEqual([{ categoryId: 'shopping', totalMinor: 70000 }])
   })
@@ -311,7 +315,7 @@ describe('spending by category, per book', () => {
   it('drills into a parent without losing what was booked on the parent itself', () => {
     // The drill-down has to add up to the slice that was clicked, or it reads as
     // a bug even when both numbers are right.
-    const inside = bookSpendByCategory(txns, flows, cats, 'household', '2026-03', books, 'home')
+    const inside = bookSpendByCategory(txns, flows, RULE, cats, 'household', '2026-03', books, 'home')
 
     expect(inside).toEqual([
       { categoryId: 'mortgage', totalMinor: 120000 },
@@ -342,7 +346,7 @@ describe('money moved at the end of one month to be spent in the next', () => {
   const flows = classifyFlows(txns, books)
 
   it('counts the contribution towards the month it was for', () => {
-    const aug = bookTotals(txns, flows, 'household', '2026-08', books)
+    const aug = bookTotals(txns, flows, RULE, 'household', '2026-08', books)
 
     expect(aug.contributions).toBe(380000)
     expect(aug.spend).toBe(180000)
@@ -350,12 +354,12 @@ describe('money moved at the end of one month to be spent in the next', () => {
     // September rather than the month it landed in. One rule for everything
     // that comes IN — see `CONTRIBUTION_CUTOFF_DAY`.
     expect(aug.externalIncome).toBe(0)
-    expect(bookTotals(txns, flows, 'household', '2026-09', books).externalIncome).toBe(57)
+    expect(bookTotals(txns, flows, RULE, 'household', '2026-09', books).externalIncome).toBe(57)
     expect(aug.net).toBe(380000 - 180000)
   })
 
   it('does not leave it counted in July as well', () => {
-    const jul = bookTotals(txns, flows, 'household', '2026-07', books)
+    const jul = bookTotals(txns, flows, RULE, 'household', '2026-07', books)
 
     expect(jul.contributions).toBe(0)
     expect(jul.income).toBe(0)
@@ -363,31 +367,31 @@ describe('money moved at the end of one month to be spent in the next', () => {
 
   it('moves both legs together, so my book agrees about when it happened', () => {
     // The same event must not land in different months on either side of it.
-    expect(bookTotals(txns, flows, 'mine', '2026-07', books).contributed).toBe(0)
-    expect(bookTotals(txns, flows, 'mine', '2026-08', books).contributed).toBe(200000)
+    expect(bookTotals(txns, flows, RULE, 'mine', '2026-07', books).contributed).toBe(0)
+    expect(bookTotals(txns, flows, RULE, 'mine', '2026-08', books).contributed).toBe(200000)
     // And the salary that paid for it moves WITH it. Shifting only the
     // contribution is half a rule: it left July holding a salary and no
     // contribution, and August holding a contribution and no salary, so the
     // personal book read "Earned £0 · To our household £2,909" every month.
-    expect(bookTotals(txns, flows, 'mine', '2026-07', books).externalIncome).toBe(0)
-    expect(bookTotals(txns, flows, 'mine', '2026-08', books).externalIncome).toBe(300000)
+    expect(bookTotals(txns, flows, RULE, 'mine', '2026-07', books).externalIncome).toBe(0)
+    expect(bookTotals(txns, flows, RULE, 'mine', '2026-08', books).externalIncome).toBe(300000)
   })
 
   it('so a month holds the salary AND what it paid for, which is the point', () => {
-    const aug = bookTotals(txns, flows, 'mine', '2026-08', books)
+    const aug = bookTotals(txns, flows, RULE, 'mine', '2026-08', books)
     expect(aug.income).toBe(300000)
     expect(aug.contributed).toBe(200000)
     expect(aug.net).toBe(100000)
     // July holds neither, rather than one of each.
-    expect(bookTotals(txns, flows, 'mine', '2026-07', books).income).toBe(0)
-    expect(bookTotals(txns, flows, 'mine', '2026-07', books).contributed).toBe(0)
+    expect(bookTotals(txns, flows, RULE, 'mine', '2026-07', books).income).toBe(0)
+    expect(bookTotals(txns, flows, RULE, 'mine', '2026-07', books).contributed).toBe(0)
   })
 
   it('leaves an ordinary mid-month salary exactly where it landed', () => {
     const midMonth = [txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-08-15', categoryId: 'salary' })]
     const f = classifyFlows(midMonth, books)
-    expect(bookTotals(midMonth, f, 'mine', '2026-08', books).externalIncome).toBe(300000)
-    expect(bookTotals(midMonth, f, 'mine', '2026-09', books).externalIncome).toBe(0)
+    expect(bookTotals(midMonth, f, RULE, 'mine', '2026-08', books).externalIncome).toBe(300000)
+    expect(bookTotals(midMonth, f, RULE, 'mine', '2026-09', books).externalIncome).toBe(0)
   })
 
   it('leaves a contribution made early in the month where it is', () => {
@@ -396,8 +400,8 @@ describe('money moved at the end of one month to be spent in the next', () => {
     const early = [txn({ accountId: 'joint', amountMinor: 50000, date: '2026-08-08', transferId: 'topup' })]
     const f = classifyFlows(early, books)
 
-    expect(bookTotals(early, f, 'household', '2026-08', books).contributions).toBe(50000)
-    expect(bookTotals(early, f, 'household', '2026-09', books).contributions).toBe(0)
+    expect(bookTotals(early, f, RULE, 'household', '2026-08', books).contributions).toBe(50000)
+    expect(bookTotals(early, f, RULE, 'household', '2026-09', books).contributions).toBe(0)
   })
 
   it('does not shift a withdrawal, which is not an advance on anything', () => {
@@ -405,8 +409,126 @@ describe('money moved at the end of one month to be spent in the next', () => {
     const back = txn({ accountId: 'myPrivate', amountMinor: 25000, date: '2026-08-30', transferId: 'back' })
     const f = classifyFlows([out, back], books)
 
-    expect(bookTotals([out, back], f, 'household', '2026-08', books).withdrawn).toBe(25000)
-    expect(bookTotals([out, back], f, 'household', '2026-09', books).withdrawn).toBe(0)
+    expect(bookTotals([out, back], f, RULE, 'household', '2026-08', books).withdrawn).toBe(25000)
+    expect(bookTotals([out, back], f, RULE, 'household', '2026-09', books).withdrawn).toBe(0)
+  })
+})
+
+describe('a household that has moved its cutoffs', () => {
+  it('shifts a contribution from the day the household chose, not the 25th', () => {
+    // The bug this replaced: payday moves to the 23rd because the 25th is a
+    // Sunday, the transfer follows it, and both fall back into the month they
+    // were meant to leave — a whole month's funding in the wrong bucket.
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-23', transferId: 'early' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-23', transferId: 'early' }),
+    ]
+    const f = classifyFlows(rows, books)
+    const earlier = { contributionDay: 23, incomeDay: 23 }
+
+    expect(bookTotals(rows, f, RULE, 'household', '2026-08', books).contributions).toBe(0)
+    expect(bookTotals(rows, f, earlier, 'household', '2026-08', books).contributions).toBe(200000)
+    expect(bookTotals(rows, f, earlier, 'household', '2026-07', books).contributions).toBe(0)
+  })
+
+  it('leaves everything where it lands when a cutoff is off', () => {
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-31', transferId: 'late' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-31', transferId: 'late' }),
+    ]
+    const f = classifyFlows(rows, books)
+    const off = { contributionDay: null, incomeDay: null }
+
+    expect(bookTotals(rows, f, off, 'household', '2026-07', books).contributions).toBe(200000)
+    expect(bookTotals(rows, f, off, 'household', '2026-08', books).contributions).toBe(0)
+  })
+
+  it('keeps the two cutoffs independent', () => {
+    // The whole reason there are two. The salary arrives on the 24th and the
+    // transfer goes on the 26th; one cutoff has to be wrong about one of them.
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-07-24', categoryId: 'salary' }),
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-26', transferId: 'split' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-26', transferId: 'split' }),
+    ]
+    const f = classifyFlows(rows, books)
+    const split = { contributionDay: 25, incomeDay: 24 }
+
+    // Both land in August, which is the month they fund — and neither had to
+    // borrow the other's date to get there.
+    expect(bookTotals(rows, f, split, 'mine', '2026-08', books).externalIncome).toBe(300000)
+    expect(bookTotals(rows, f, split, 'household', '2026-08', books).contributions).toBe(200000)
+    // Under one shared cutoff of 25 the salary falls back into July, which is
+    // the half of the old behaviour that made "Earned" and "Paid in" disagree.
+    expect(bookTotals(rows, f, RULE, 'mine', '2026-07', books).externalIncome).toBe(300000)
+  })
+
+  it('shifts income without shifting contributions, and the reverse', () => {
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-07-28', categoryId: 'salary' }),
+      txn({ accountId: 'joint', amountMinor: 180000, date: '2026-07-28', transferId: 'hers' }),
+    ]
+    const f = classifyFlows(rows, books)
+
+    const incomeOnly = { contributionDay: null, incomeDay: 25 }
+    expect(bookTotals(rows, f, incomeOnly, 'mine', '2026-08', books).externalIncome).toBe(300000)
+    expect(bookTotals(rows, f, incomeOnly, 'household', '2026-07', books).contributions).toBe(180000)
+
+    const contributionsOnly = { contributionDay: 25, incomeDay: null }
+    expect(bookTotals(rows, f, contributionsOnly, 'mine', '2026-07', books).externalIncome).toBe(300000)
+    expect(bookTotals(rows, f, contributionsOnly, 'household', '2026-08', books).contributions).toBe(180000)
+  })
+
+  it('never shifts spending, however late in the month and however low the cutoff', () => {
+    const rows = [txn({ accountId: 'joint', amountMinor: -60000, date: '2026-07-31', categoryId: 'groceries' })]
+    const f = classifyFlows(rows, books)
+    const aggressive = { contributionDay: 1, incomeDay: 1 }
+
+    expect(bookTotals(rows, f, aggressive, 'household', '2026-07', books).spend).toBe(60000)
+    expect(bookTotals(rows, f, aggressive, 'household', '2026-08', books).spend).toBe(0)
+  })
+})
+
+describe('a row that says which month it is for', () => {
+  const cats: Category[] = [
+    { id: 'groceries', name: 'Groceries', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+  ]
+
+  it('moves spending, which no cutoff can', () => {
+    const rows = [
+      txn({ accountId: 'joint', amountMinor: -60000, date: '2026-07-04', categoryId: 'groceries', bookMonth: '2026-08' }),
+    ]
+    const f = classifyFlows(rows, books)
+
+    expect(bookTotals(rows, f, RULE, 'household', '2026-07', books).spend).toBe(0)
+    expect(bookTotals(rows, f, RULE, 'household', '2026-08', books).spend).toBe(60000)
+  })
+
+  it('carries the category breakdown with it, so the donut still adds up', () => {
+    // The failure this prevents: a "£600 spent" heading over a donut of £0,
+    // because the total moved the row and the breakdown did not.
+    const rows = [
+      txn({ accountId: 'joint', amountMinor: -60000, date: '2026-07-04', categoryId: 'groceries', bookMonth: '2026-08' }),
+    ]
+    const f = classifyFlows(rows, books)
+
+    expect(bookSpendByCategory(rows, f, RULE, cats, 'household', '2026-08', books)).toEqual([
+      { categoryId: 'groceries', totalMinor: 60000 },
+    ])
+    expect(bookSpendByCategory(rows, f, RULE, cats, 'household', '2026-07', books)).toEqual([])
+  })
+
+  it('beats a cutoff that would have moved it somewhere else', () => {
+    // An answer somebody typed is never overridden by one the app inferred —
+    // including "no, this one really is July's".
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-07-31', transferId: 'pinned', bookMonth: '2026-07' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-31', transferId: 'pinned', bookMonth: '2026-07' }),
+    ]
+    const f = classifyFlows(rows, books)
+
+    expect(bookTotals(rows, f, RULE, 'household', '2026-07', books).contributions).toBe(200000)
+    expect(bookTotals(rows, f, RULE, 'household', '2026-08', books).contributions).toBe(0)
   })
 })
 
@@ -417,7 +539,7 @@ describe('who put what into the household', () => {
     // only accounts hidden from me belong to the other people here.
     const txns = march()
     const flows = classifyFlows(txns, books)
-    const split = contributionSplit(txns, flows, '2026-03', books)
+    const split = contributionSplit(txns, flows, RULE, '2026-03', books)
 
     expect(split.mineMinor).toBe(200000)
     expect(split.theirsMinor).toBe(180000)
@@ -430,7 +552,7 @@ describe('who put what into the household', () => {
     // just a credit in the joint account. It must not be attributed to anyone.
     const arrival = txn({ accountId: 'joint', amountMinor: 180000, date: '2026-03-02' })
     const flows = classifyFlows([arrival], books)
-    const split = contributionSplit([arrival], flows, '2026-03', books)
+    const split = contributionSplit([arrival], flows, RULE, '2026-03', books)
 
     expect(split.mineMinor).toBe(0)
     expect(split.theirsMinor).toBe(0)
@@ -446,7 +568,7 @@ describe('who put what into the household', () => {
       txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'mine' }),
       txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true, createdBy: ME }),
     ]
-    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-03', books, ME)
+    const split = contributionSplit(rows, classifyFlows(rows, books), RULE, '2026-03', books, ME)
 
     expect(split.mineMinor).toBe(209000)
     expect(split.minePaidMinor).toBe(9000)
@@ -462,7 +584,7 @@ describe('who put what into the household', () => {
     const rows = [
       txn({ accountId: 'herCard', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true, createdBy: HER }),
     ]
-    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-03', books, ME)
+    const split = contributionSplit(rows, classifyFlows(rows, books), RULE, '2026-03', books, ME)
 
     expect(split.theirsMinor).toBe(9000)
     expect(split.theirsPaidMinor).toBe(9000)
@@ -473,7 +595,7 @@ describe('who put what into the household', () => {
     const rows = [
       txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true }),
     ]
-    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-03', books, ME)
+    const split = contributionSplit(rows, classifyFlows(rows, books), RULE, '2026-03', books, ME)
 
     expect(split.mineMinor).toBe(0)
     expect(split.theirsMinor).toBe(0)
@@ -492,10 +614,10 @@ describe('who put what into the household', () => {
       txn({ accountId: 'herCard', amountMinor: -4400, date: '2026-03-11', paidForHousehold: true, createdBy: HER }),
     ]
     const f = classifyFlows(rows, books)
-    const split = contributionSplit(rows, f, '2026-03', books, ME)
+    const split = contributionSplit(rows, f, RULE, '2026-03', books, ME)
 
     expect(split.mineMinor + split.theirsMinor + split.otherMinor).toBe(
-      bookTotals(rows, f, 'household', '2026-03', books).contributions,
+      bookTotals(rows, f, RULE, 'household', '2026-03', books).contributions,
     )
   })
 })
@@ -549,7 +671,7 @@ describe('adding several months into one set of figures', () => {
     // `income` and `net` are derived from the other fields, so adding them
     // directly would count the same money twice.
     const rows = march()
-    const one = bookTotals(rows, classifyFlows(rows, books), 'household', '2026-03', books)
+    const one = bookTotals(rows, classifyFlows(rows, books), RULE, 'household', '2026-03', books)
     const two = sumBookTotals([one, one])
 
     expect(two.contributions).toBe(one.contributions * 2)
@@ -580,7 +702,7 @@ describe('asking the same question of several months', () => {
   const flows = classifyFlows(rows, books)
   const totalFor = (m: string | string[]) =>
     Object.fromEntries(
-      bookSpendByCategory(rows, flows, cats, 'household', m, books).map((r) => [r.categoryId, r.totalMinor]),
+      bookSpendByCategory(rows, flows, RULE, cats, 'household', m, books).map((r) => [r.categoryId, r.totalMinor]),
     )
 
   it('a single key and an array of one are the same question', () => {
@@ -644,7 +766,7 @@ describe('an arbitrary run of days', () => {
     const flows = classifyFlows(rows, books)
 
     // bookTotals shifts it into April; the range does not.
-    expect(bookTotals(rows, flows, 'household', '2026-04', books).contributions).toBe(200000)
+    expect(bookTotals(rows, flows, RULE, 'household', '2026-04', books).contributions).toBe(200000)
     expect(bookTotalsInRange(rows, flows, 'household', books, '2026-03-01', '2026-03-31').contributions).toBe(200000)
     expect(bookTotalsInRange(rows, flows, 'household', books, '2026-04-01', '2026-04-30').contributions).toBe(0)
   })
@@ -657,7 +779,7 @@ describe('an arbitrary run of days', () => {
     expect(t.spend).toBe(240000)
     // Same answer as the month version, which is the point: a range that
     // happens to be a whole month must not disagree with `bookTotals`.
-    expect(t.spend).toBe(bookTotals(rows, classifyFlows(rows, books), 'household', '2026-03', books).spend)
+    expect(t.spend).toBe(bookTotals(rows, classifyFlows(rows, books), RULE, 'household', '2026-03', books).spend)
   })
 })
 
@@ -686,7 +808,7 @@ describe('paying for the household out of my own pocket', () => {
   const flows = () => classifyFlows(fixture, books)
 
   it('is a contribution out of my book, not spending', () => {
-    const t = bookTotals(rows(), flows(), 'mine', '2026-03', books)
+    const t = bookTotals(rows(), flows(), RULE, 'mine', '2026-03', books)
     expect(t.spend).toBe(0)
     expect(t.contributed).toBe(9000)
     // Salary less what I put in. The £90 is not mine to have spent.
@@ -694,7 +816,7 @@ describe('paying for the household out of my own pocket', () => {
   })
 
   it('is money in AND money out of the household book', () => {
-    const t = bookTotals(rows(), flows(), 'household', '2026-03', books)
+    const t = bookTotals(rows(), flows(), RULE, 'household', '2026-03', books)
     expect(t.contributions).toBe(9000)
     expect(t.spend).toBe(9000)
     // Received and spent in the same breath.
@@ -704,20 +826,20 @@ describe('paying for the household out of my own pocket', () => {
   it('reaches the household category breakdown, even though it is in my account', () => {
     // The point of the whole feature: the household's grocery figure is the
     // household's real grocery figure.
-    const byCat = bookSpendByCategory(rows(), flows(), cats, 'household', '2026-03', books)
+    const byCat = bookSpendByCategory(rows(), flows(), RULE, cats, 'household', '2026-03', books)
     expect(byCat).toEqual([{ categoryId: 'groceries', totalMinor: 9000 }])
   })
 
   it('and stays out of mine', () => {
-    expect(bookSpendByCategory(rows(), flows(), cats, 'mine', '2026-03', books)).toEqual([])
+    expect(bookSpendByCategory(rows(), flows(), RULE, cats, 'mine', '2026-03', books)).toEqual([])
   })
 
   it('the categories still add up to the total above them', () => {
     // The failure `spendsIn` exists to prevent: a "£90 spent" heading over an
     // empty donut.
     for (const book of ['household', 'mine', 'all'] as const) {
-      const total = bookTotals(rows(), flows(), book, '2026-03', books).spend
-      const byCat = bookSpendByCategory(rows(), flows(), cats, book, '2026-03', books)
+      const total = bookTotals(rows(), flows(), RULE, book, '2026-03', books).spend
+      const byCat = bookSpendByCategory(rows(), flows(), RULE, cats, book, '2026-03', books)
       expect(byCat.reduce((s, r) => s + r.totalMinor, 0)).toBe(total)
     }
   })
@@ -725,7 +847,7 @@ describe('paying for the household out of my own pocket', () => {
   it('is ordinary spending under Everything, counted once', () => {
     // My account and the joint one are one pool there, so the contribution is
     // internal again and what is left is simply spending.
-    const t = bookTotals(rows(), flows(), 'all', '2026-03', books)
+    const t = bookTotals(rows(), flows(), RULE, 'all', '2026-03', books)
     expect(t.spend).toBe(9000)
     expect(t.contributions).toBe(0)
     expect(t.contributed).toBe(0)
@@ -738,8 +860,8 @@ describe('paying for the household out of my own pocket', () => {
       txn({ accountId: 'myPrivate', amountMinor: 9000, date: '2026-03-12', paidForHousehold: true }),
     ]
     const f = classifyFlows(refund, books)
-    expect(bookTotals(refund, f, 'household', '2026-03', books).contributions).toBe(0)
-    expect(bookTotals(refund, f, 'mine', '2026-03', books).externalIncome).toBe(9000)
+    expect(bookTotals(refund, f, RULE, 'household', '2026-03', books).contributions).toBe(0)
+    expect(bookTotals(refund, f, RULE, 'mine', '2026-03', books).externalIncome).toBe(9000)
   })
 
   it('does nothing when the flag is on a joint account', () => {
@@ -747,7 +869,7 @@ describe('paying for the household out of my own pocket', () => {
     const joint = [
       txn({ accountId: 'joint', amountMinor: -9000, date: '2026-03-10', categoryId: 'groceries', paidForHousehold: true }),
     ]
-    const t = bookTotals(joint, classifyFlows(joint, books), 'household', '2026-03', books)
+    const t = bookTotals(joint, classifyFlows(joint, books), RULE, 'household', '2026-03', books)
     expect(t.spend).toBe(9000)
     expect(t.contributions).toBe(0)
   })
@@ -798,13 +920,13 @@ describe('a household expense published from an account this device is not on', 
   })
 
   it('gives the household book the same figures as the payer sees', () => {
-    const t = bookTotals(fixture, flows(), 'household', '2026-03', books)
+    const t = bookTotals(fixture, flows(), RULE, 'household', '2026-03', books)
     expect(t.contributions).toBe(9000)
     expect(t.spend).toBe(9000 + 4000)
   })
 
   it('reaches the household grocery figure', () => {
-    expect(bookSpendByCategory(fixture, flows(), cats, 'household', '2026-03', books)).toEqual([
+    expect(bookSpendByCategory(fixture, flows(), RULE, cats, 'household', '2026-03', books)).toEqual([
       { categoryId: 'groceries', totalMinor: 13000 },
     ])
   })
@@ -813,17 +935,17 @@ describe('a household expense published from an account this device is not on', 
     // I did not contribute it, and Everything means the accounts this device
     // holds — which hers is not.
     for (const book of ['mine', 'all'] as const) {
-      const t = bookTotals(fixture, flows(), book, '2026-03', books)
+      const t = bookTotals(fixture, flows(), RULE, book, '2026-03', books)
       expect(t.contributed).toBe(0)
       expect(t.contributions).toBe(0)
     }
-    expect(bookTotals(fixture, flows(), 'mine', '2026-03', books).spend).toBe(0)
+    expect(bookTotals(fixture, flows(), RULE, 'mine', '2026-03', books).spend).toBe(0)
   })
 
   it('the categories still add up to the total above them', () => {
     for (const book of ['household', 'mine', 'all'] as const) {
-      const total = bookTotals(fixture, flows(), book, '2026-03', books).spend
-      const byCat = bookSpendByCategory(fixture, flows(), cats, book, '2026-03', books)
+      const total = bookTotals(fixture, flows(), RULE, book, '2026-03', books).spend
+      const byCat = bookSpendByCategory(fixture, flows(), RULE, cats, book, '2026-03', books)
       expect(byCat.reduce((s, r) => s + r.totalMinor, 0)).toBe(total)
     }
   })
@@ -859,7 +981,7 @@ describe('a household expense published from an account this device is not on', 
     const rows = [mine]
     const f = classifyFlows(rows, books)
     const shown = rows.filter((t) => showsInBook(t, 'household', books, new Set(books.household)))
-    const heading = bookTotals(rows, f, 'household', '2026-03', books).spend
+    const heading = bookTotals(rows, f, RULE, 'household', '2026-03', books).spend
     expect(shown.reduce((s, t) => s - t.amountMinor, 0)).toBe(heading)
   })
 
@@ -936,8 +1058,8 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const rows = [tagged()]
     const flows = classifyFlows(rows, books)
 
-    expect(bookTotals(rows, flows, 'household', '2026-08', books).contributions).toBe(180000)
-    expect(bookTotals(rows, flows, 'household', '2026-07', books).contributions).toBe(0)
+    expect(bookTotals(rows, flows, RULE, 'household', '2026-08', books).contributions).toBe(180000)
+    expect(bookTotals(rows, flows, RULE, 'household', '2026-07', books).contributions).toBe(0)
   })
 
   it('leaves the household no better and no worse off', () => {
@@ -949,8 +1071,8 @@ describe('saying who paid in, when there is no far leg to find', () => {
     // Both land in August now — the shift is about the money arriving, not
     // about whether anybody has said whose it was — so the comparison is
     // between two readings of the SAME month rather than of two.
-    const withTag = bookTotals(rows, classifyFlows(rows, books), 'household', '2026-08', books)
-    const without = bookTotals(untagged, classifyFlows(untagged, books), 'household', '2026-08', books)
+    const withTag = bookTotals(rows, classifyFlows(rows, books), RULE, 'household', '2026-08', books)
+    const without = bookTotals(untagged, classifyFlows(untagged, books), RULE, 'household', '2026-08', books)
 
     expect(withTag.income).toBe(without.income)
     expect(withTag.net).toBe(without.net)
@@ -961,7 +1083,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
 
   it('puts it on her name rather than in the unattributed bucket', () => {
     const rows = [tagged()]
-    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-08', books, ME)
+    const split = contributionSplit(rows, classifyFlows(rows, books), RULE, '2026-08', books, ME)
 
     expect(split.theirsMinor).toBe(180000)
     expect(split.mineMinor).toBe(0)
@@ -970,7 +1092,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
 
   it('tells my own tag from hers', () => {
     const rows = [tagged({ contributorId: ME })]
-    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-08', books, ME)
+    const split = contributionSplit(rows, classifyFlows(rows, books), RULE, '2026-08', books, ME)
 
     expect(split.mineMinor).toBe(180000)
     expect(split.theirsMinor).toBe(0)
@@ -983,7 +1105,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const out = txn({ accountId: 'myPrivate', amountMinor: -180000, date: '2026-07-29', transferId: 'p' })
     const arrive = tagged({ transferId: 'p' })
     const rows = [out, arrive]
-    const split = contributionSplit(rows, classifyFlows(rows, books), '2026-08', books, ME)
+    const split = contributionSplit(rows, classifyFlows(rows, books), RULE, '2026-08', books, ME)
 
     expect(split.theirsMinor).toBe(180000)
     expect(split.mineMinor).toBe(0)
@@ -997,7 +1119,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const flows = classifyFlows(rows, books)
 
     expect(flows.get(rows[0].id)).toBe('household-spend')
-    expect(bookTotals(rows, flows, 'household', '2026-07', books).contributions).toBe(0)
+    expect(bookTotals(rows, flows, RULE, 'household', '2026-07', books).contributions).toBe(0)
   })
 
   it('ignores a tag on a personal account', () => {
@@ -1008,7 +1130,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
 
     expect(flows.get(rows[0].id)).toBe('personal-income')
     // Dated the 29th, so it funds the following month like any other arrival.
-    expect(bookTotals(rows, flows, 'mine', '2026-08', books).externalIncome).toBe(180000)
+    expect(bookTotals(rows, flows, RULE, 'mine', '2026-08', books).externalIncome).toBe(180000)
   })
 
   it('does not let a transfer be overruled by a tag', () => {
@@ -1026,7 +1148,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const flows = classifyFlows(rows, books)
 
     expect(flows.get(into.id)).toBe('internal')
-    expect(bookTotals(rows, flows, 'household', '2026-08', books).contributions).toBe(0)
+    expect(bookTotals(rows, flows, RULE, 'household', '2026-08', books).contributions).toBe(0)
   })
 
   it('still counts under Everything, where there is no second leg to double it', () => {
@@ -1035,7 +1157,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
     // with only one row, dropping it deletes real income from the book.
     const rows = [tagged()]
     const flows = classifyFlows(rows, books)
-    const all = bookTotals(rows, flows, 'all', '2026-08', books)
+    const all = bookTotals(rows, flows, RULE, 'all', '2026-08', books)
 
     expect(all.income).toBe(180000)
     // Filed as outside income there, which is what the Sankey draws in that
@@ -1051,7 +1173,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const flows = classifyFlows([herIn], books)
 
     expect(flows.get(herIn.id)).toBe('contribution-unpaired')
-    expect(bookTotals([herIn], flows, 'all', '2026-08', books).income).toBe(180000)
+    expect(bookTotals([herIn], flows, RULE, 'all', '2026-08', books).income).toBe(180000)
   })
 
   it('leaves a genuinely paired contribution alone under Everything', () => {
@@ -1061,7 +1183,7 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const into = txn({ accountId: 'joint', amountMinor: 200000, date: '2026-07-29', transferId: 'p' })
     const rows = [out, into]
 
-    expect(bookTotals(rows, classifyFlows(rows, books), 'all', '2026-08', books).income).toBe(0)
+    expect(bookTotals(rows, classifyFlows(rows, books), RULE, 'all', '2026-08', books).income).toBe(0)
   })
 
   it('shifts an arrival nobody has claimed, because it is still an arrival', () => {
@@ -1073,8 +1195,8 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const flows = classifyFlows(rows, books)
 
     expect(flows.get(rows[0].id)).toBe('external-income')
-    expect(bookTotals(rows, flows, 'household', '2026-07', books).externalIncome).toBe(0)
-    expect(bookTotals(rows, flows, 'household', '2026-08', books).externalIncome).toBe(180000)
+    expect(bookTotals(rows, flows, RULE, 'household', '2026-07', books).externalIncome).toBe(0)
+    expect(bookTotals(rows, flows, RULE, 'household', '2026-08', books).externalIncome).toBe(180000)
   })
 
   it('keeps the categories adding up to the total above them', () => {
@@ -1090,8 +1212,8 @@ describe('saying who paid in, when there is no far leg to find', () => {
     const rows = [...march(), tagged({ date: '2026-03-29' })]
     const flows = classifyFlows(rows, books)
     for (const book of ['household', 'mine', 'all'] as const) {
-      const total = bookTotals(rows, flows, book, '2026-03', books).spend
-      const byCat = bookSpendByCategory(rows, flows, cats, book, '2026-03', books)
+      const total = bookTotals(rows, flows, RULE, book, '2026-03', books).spend
+      const byCat = bookSpendByCategory(rows, flows, RULE, cats, book, '2026-03', books)
       expect(byCat.reduce((s, r) => s + r.totalMinor, 0)).toBe(total)
     }
   })
@@ -1130,8 +1252,8 @@ describe('handing the aggregates a list that has already been narrowed', () => {
   }
 
   it('loses exactly the household spending that was paid from a personal account', () => {
-    const whole = bookTotals(rows, flows, 'household', '2026-03', books)
-    const narrowed = bookTotals(byAccount('household'), flows, 'household', '2026-03', books)
+    const whole = bookTotals(rows, flows, RULE, 'household', '2026-03', books)
+    const narrowed = bookTotals(byAccount('household'), flows, RULE, 'household', '2026-03', books)
 
     expect(whole.spend).toBe(69000)
     expect(narrowed.spend).toBe(60000)
@@ -1145,9 +1267,9 @@ describe('handing the aggregates a list that has already been narrowed', () => {
   it('loses it from the breakdown too, so the donut and its heading still agree', () => {
     // Both are wrong together, which is the reason nothing on screen looked
     // broken: £600 over a £600 donut, on a month that spent £690.
-    const narrowed = bookSpendByCategory(byAccount('household'), flows, cats, 'household', '2026-03', books)
+    const narrowed = bookSpendByCategory(byAccount('household'), flows, RULE, cats, 'household', '2026-03', books)
     expect(narrowed).toEqual([{ categoryId: 'groceries', totalMinor: 60000 }])
-    expect(bookSpendByCategory(rows, flows, cats, 'household', '2026-03', books)).toEqual([
+    expect(bookSpendByCategory(rows, flows, RULE, cats, 'household', '2026-03', books)).toEqual([
       { categoryId: 'groceries', totalMinor: 69000 },
     ])
   })
@@ -1157,8 +1279,8 @@ describe('handing the aggregates a list that has already been narrowed', () => {
     // were never affected — which is what made the household figure look like
     // an isolated oddity rather than a rule being broken.
     for (const book of ['mine', 'all'] as const) {
-      expect(bookTotals(byAccount(book), flows, book, '2026-03', books)).toEqual(
-        bookTotals(rows, flows, book, '2026-03', books),
+      expect(bookTotals(byAccount(book), flows, RULE, book, '2026-03', books)).toEqual(
+        bookTotals(rows, flows, RULE, book, '2026-03', books),
       )
     }
   })
@@ -1186,7 +1308,7 @@ describe('handing the aggregates a list that has already been narrowed', () => {
 describe('the books reconcile', () => {
   const rows = march()
   const flows = classifyFlows(rows, books)
-  const of = (book: 'household' | 'mine' | 'all') => bookTotals(rows, flows, book, '2026-03', books)
+  const of = (book: 'household' | 'mine' | 'all') => bookTotals(rows, flows, RULE, book, '2026-03', books)
 
   it('adds spending up exactly, while every account is one this device holds', () => {
     expect(of('all').spend).toBe(of('household').spend + of('mine').spend)
@@ -1209,7 +1331,7 @@ describe('the books reconcile', () => {
     })
     const withHers = [...rows, hers]
     const f = classifyFlows(withHers, books)
-    const t = (book: 'household' | 'mine' | 'all') => bookTotals(withHers, f, book, '2026-03', books)
+    const t = (book: 'household' | 'mine' | 'all') => bookTotals(withHers, f, RULE, book, '2026-03', books)
 
     expect(f.get(hers.id)).toBe('paid-for-household')
     expect(accountsInBook('all', books).has('herCard')).toBe(false)
@@ -1253,7 +1375,7 @@ describe('the books reconcile', () => {
       }),
     ]
     const f = classifyFlows(withCard, books)
-    const t = (book: 'household' | 'mine' | 'all') => bookTotals(withCard, f, book, '2026-03', books)
+    const t = (book: 'household' | 'mine' | 'all') => bookTotals(withCard, f, RULE, book, '2026-03', books)
 
     expect(t('all').spend).toBe(t('household').spend + t('mine').spend)
     expect(t('all').net).toBe(t('household').net + t('mine').net)
@@ -1282,8 +1404,8 @@ describe('who paid in, over more than one month', () => {
     // it covered twelve is how eleven months of attributed money turned into
     // money with no name on it.
     const summed = sumContributionSplits([
-      contributionSplit(rows, flows, '2026-03', books, ME),
-      contributionSplit(rows, flows, '2026-04', books, ME),
+      contributionSplit(rows, flows, RULE, '2026-03', books, ME),
+      contributionSplit(rows, flows, RULE, '2026-04', books, ME),
     ])
 
     expect(summed.mineMinor).toBe(200000 + 210000 + 9000)
@@ -1295,10 +1417,10 @@ describe('who paid in, over more than one month', () => {
 
   it('and agrees with the household totals over the same months', () => {
     const summed = sumContributionSplits(
-      ['2026-03', '2026-04'].map((m) => contributionSplit(rows, flows, m, books, ME)),
+      ['2026-03', '2026-04'].map((m) => contributionSplit(rows, flows, RULE, m, books, ME)),
     )
     const totals = sumBookTotals(
-      ['2026-03', '2026-04'].map((m) => bookTotals(rows, flows, 'household', m, books)),
+      ['2026-03', '2026-04'].map((m) => bookTotals(rows, flows, RULE, 'household', m, books)),
     )
 
     expect(summed.mineMinor + summed.theirsMinor + summed.otherMinor).toBe(totals.contributions)
@@ -1316,8 +1438,8 @@ describe('who paid in, over more than one month', () => {
     const f = classifyFlows(late, books)
 
     // By month it belongs to April — it was moved on the 28th to be spent in it.
-    expect(contributionSplit(late, f, '2026-04', books, ME).mineMinor).toBe(200000)
-    expect(contributionSplit(late, f, '2026-03', books, ME).mineMinor).toBe(0)
+    expect(contributionSplit(late, f, RULE, '2026-04', books, ME).mineMinor).toBe(200000)
+    expect(contributionSplit(late, f, RULE, '2026-03', books, ME).mineMinor).toBe(0)
     // By range it belongs to the day it moved.
     expect(contributionSplitInRange(late, f, books, '2026-03-01', '2026-03-31', ME).mineMinor).toBe(200000)
     expect(contributionSplitInRange(late, f, books, '2026-04-01', '2026-04-30', ME).mineMinor).toBe(0)
@@ -1352,7 +1474,7 @@ describe('spend per category per month, per book', () => {
   ]
   const flows = classifyFlows(rows, books)
   const series = (book: 'household' | 'mine' | 'all') =>
-    bookMonthlySpendByCategory(rows, flows, cats, book, books, months)
+    bookMonthlySpendByCategory(rows, flows, RULE, cats, book, books, months)
 
   it('agrees month by month with the single-month breakdown', () => {
     // The failure this replaces: Budgets compared a current-month figure
@@ -1361,7 +1483,7 @@ describe('spend per category per month, per book', () => {
       const byMonth = series(book)
       months.forEach((m, i) => {
         const flat = new Map(
-          bookSpendByCategory(rows, flows, cats, book, m, books).map((r) => [r.categoryId, r.totalMinor]),
+          bookSpendByCategory(rows, flows, RULE, cats, book, m, books).map((r) => [r.categoryId, r.totalMinor]),
         )
         for (const [categoryId, cells] of byMonth) {
           expect(cells[i]).toBe(flat.get(categoryId) ?? 0)
@@ -1403,7 +1525,7 @@ describe('money put by rather than spent', () => {
   })
 
   it('changes no total — it says which part of what is left stopped being available', () => {
-    const before = bookTotals(rows, flows, 'household', '2026-03', books)
+    const before = bookTotals(rows, flows, RULE, 'household', '2026-03', books)
     expect(before.net).toBe(before.income - before.spend - before.withdrawn)
     expect(savedInto(rows, flows, 'household', books, savings, '2026-03')).toBeLessThanOrEqual(before.net)
   })
@@ -1425,11 +1547,11 @@ describe('the bridge between the books', () => {
   })
   const rows = [...march(), hers]
   const flows = classifyFlows(rows, books)
-  const bridge = bookBridge(rows, flows, books, '2026-03')
+  const bridge = bookBridge(rows, flows, RULE, books, '2026-03')
 
   it('carries the same figures as asking each book directly', () => {
     for (const book of ['household', 'mine', 'all'] as const) {
-      expect(bridge[book]).toEqual(bookTotals(rows, flows, book, '2026-03', books))
+      expect(bridge[book]).toEqual(bookTotals(rows, flows, RULE, book, '2026-03', books))
     }
   })
 
@@ -1462,14 +1584,14 @@ describe('the bridge between the books', () => {
     const withRow = [...base, txn({ accountId: 'hersSharedWithMe', amountMinor: -5000, date: '2026-03-04' })]
     const f = classifyFlows(withRow, b)
 
-    expect(bookBridge(withRow, f, b, '2026-03').unbookedCount).toBe(1)
-    expect(bookTotals(withRow, f, 'all', '2026-03', b).spend).toBe(
-      bookTotals(base, classifyFlows(base, b), 'all', '2026-03', b).spend,
+    expect(bookBridge(withRow, f, RULE, b, '2026-03').unbookedCount).toBe(1)
+    expect(bookTotals(withRow, f, RULE, 'all', '2026-03', b).spend).toBe(
+      bookTotals(base, classifyFlows(base, b), RULE, 'all', '2026-03', b).spend,
     )
   })
 
   it('adds a year the same way it adds a month', () => {
-    const year = bookBridge(rows, flows, books, ['2026-02', '2026-03'])
+    const year = bookBridge(rows, flows, RULE, books, ['2026-02', '2026-03'])
     expect(year.household.spend).toBe(bridge.household.spend)
     expect(year.all.net).toBe(year.household.net + year.mine.net)
   })
@@ -1484,7 +1606,7 @@ describe('spending split into each book\'s share', () => {
   ]
   const base = march()
   const flows = classifyFlows(base, books)
-  const rows = bookSplitByCategory(base, flows, cats, books, '2026-03')
+  const rows = bookSplitByCategory(base, flows, RULE, cats, books, '2026-03')
   const at = (id: string) => rows.find((r) => r.categoryId === id)!
 
   it('puts joint spending in the household half and personal spending in mine', () => {
@@ -1496,7 +1618,7 @@ describe('spending split into each book\'s share', () => {
 
   it('agrees with the Everything total for each category', () => {
     const combined = new Map(
-      bookSpendByCategory(base, flows, cats, 'all', '2026-03', books).map((r) => [r.categoryId, r.totalMinor]),
+      bookSpendByCategory(base, flows, RULE, cats, 'all', '2026-03', books).map((r) => [r.categoryId, r.totalMinor]),
     )
     for (const r of rows) expect(r.totalMinor).toBe(combined.get(r.categoryId))
   })
@@ -1516,7 +1638,7 @@ describe('spending split into each book\'s share', () => {
       }),
     ]
     const f = classifyFlows(withCard, books)
-    const g = bookSplitByCategory(withCard, f, cats, books, '2026-03').find((r) => r.categoryId === 'groceries')!
+    const g = bookSplitByCategory(withCard, f, RULE, cats, books, '2026-03').find((r) => r.categoryId === 'groceries')!
 
     expect(g.householdMinor).toBe(69000)
     expect(g.mineMinor).toBe(0)
@@ -1540,7 +1662,7 @@ describe('spending split into each book\'s share', () => {
       }),
     ]
     const f = classifyFlows(withHers, books)
-    const g = bookSplitByCategory(withHers, f, cats, books, '2026-03').find((r) => r.categoryId === 'groceries')!
+    const g = bookSplitByCategory(withHers, f, RULE, cats, books, '2026-03').find((r) => r.categoryId === 'groceries')!
 
     expect(g.householdMinor).toBe(64400)
     expect(g.totalMinor).toBe(60000)

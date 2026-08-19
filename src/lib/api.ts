@@ -225,6 +225,9 @@ export interface RemoteHousehold {
   name: string
   join_code: string
   currency: string
+  /** Null means "never shift this" — see `MonthRule` in books.ts. */
+  contribution_cutoff_day: number | null
+  income_cutoff_day: number | null
   visibility_epoch: number
 }
 
@@ -232,7 +235,7 @@ export interface RemoteHousehold {
 export async function fetchHousehold(): Promise<RemoteHousehold | undefined> {
   const { data, error } = await supabase
     .from('households')
-    .select('id,name,join_code,currency,visibility_epoch')
+    .select('id,name,join_code,currency,contribution_cutoff_day,income_cutoff_day,visibility_epoch')
     .maybeSingle()
   if (error) throw classify(error)
   return (data as RemoteHousehold) ?? undefined

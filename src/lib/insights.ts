@@ -12,6 +12,7 @@ import {
   type BookId,
   type BookMap,
   type Flow,
+  type MonthRule,
 } from './books'
 
 /**
@@ -58,11 +59,12 @@ export interface WaterfallStep {
 export function householdWaterfall(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   books: BookMap,
   accounts: Account[],
   month: string,
 ): WaterfallStep[] {
-  const totals = bookTotals(txns, flows, 'household', month, books)
+  const totals = bookTotals(txns, flows, rule, 'household', month, books)
   // `savedInto` rather than a loop of its own. This step and the band on the
   // flow diagram are the same claim about the same rows, and two copies of the
   // rule would eventually disagree about one of them.
@@ -133,12 +135,13 @@ export interface SalaryBar {
 export function salaryBars(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   books: BookMap,
   months: string[],
 ): SalaryBar[] {
   const now = monthKey(todayISO())
   return months.map((key) => {
-    const t = bookTotals(txns, flows, 'mine', key, books)
+    const t = bookTotals(txns, flows, rule, 'mine', key, books)
     return {
       key,
       label: monthLabel(key, 'short'),
@@ -177,6 +180,7 @@ export interface FixedVariable {
 export function fixedVsVariable(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   book: BookId,
   books: BookMap,
   months: string[],
@@ -188,7 +192,7 @@ export function fixedVsVariable(
   for (const t of txns) {
     const flow = flows.get(t.id)
     if (!spendsIn(flow, book, t.accountId, ids)) continue
-    const bucket = byMonth.get(effectiveMonth(t, flow))
+    const bucket = byMonth.get(effectiveMonth(t, flow, rule))
     if (!bucket) continue
     if (t.billId) bucket.fixedMinor -= t.amountMinor
     else bucket.variableMinor -= t.amountMinor
@@ -225,13 +229,14 @@ export interface SavingsRatePoint {
 export function savingsRate(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   book: BookId,
   books: BookMap,
   months: string[],
 ): SavingsRatePoint[] {
   const now = monthKey(todayISO())
   return months.map((key) => {
-    const t = bookTotals(txns, flows, book, key, books)
+    const t = bookTotals(txns, flows, rule, book, key, books)
     // On the personal book, money moved to the household has not been spent,
     // but it is not saved BY ME either — it left. `net` already has it out.
     const saved = t.net
@@ -279,6 +284,7 @@ export interface PayeeTotal {
 export function topPayees(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   categories: Category[],
   book: BookId,
   books: BookMap,
@@ -304,7 +310,7 @@ export function topPayees(
   for (const t of txns) {
     const flow = flows.get(t.id)
     if (!spendsIn(flow, book, t.accountId, ids)) continue
-    if (effectiveMonth(t, flow) !== month) continue
+    if (effectiveMonth(t, flow, rule) !== month) continue
 
     // A row added by hand may have no reference at all, and there its name is
     // the only identity it has — grouping on the payee alone would collect
@@ -384,6 +390,7 @@ export interface Heatmap {
 export function categoryHeatmap(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   categories: Category[],
   book: BookId,
   books: BookMap,
@@ -399,7 +406,7 @@ export function categoryHeatmap(
     if (!t.categoryId) continue
     const flow = flows.get(t.id)
     if (!spendsIn(flow, book, t.accountId, ids)) continue
-    const at = index.get(effectiveMonth(t, flow))
+    const at = index.get(effectiveMonth(t, flow, rule))
     if (at === undefined) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
@@ -454,6 +461,7 @@ export interface PacePoint {
 export function pace(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   book: BookId,
   books: BookMap,
   month: string,
@@ -470,7 +478,7 @@ export function pace(
     for (const t of txns) {
       const flow = flows.get(t.id)
       if (!spendsIn(flow, book, t.accountId, ids)) continue
-      if (effectiveMonth(t, flow) !== key) continue
+      if (effectiveMonth(t, flow, rule) !== key) continue
       byDay[Number(t.date.slice(8, 10))] -= t.amountMinor
     }
     return byDay
@@ -525,6 +533,7 @@ export interface CategoryDelta {
 export function categoryDeltas(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   categories: Category[],
   book: BookId,
   books: BookMap,
@@ -548,7 +557,7 @@ export function categoryDeltas(
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
     const key = budgetCategoryId(cat)!
-    const when = effectiveMonth(t, flow)
+    const when = effectiveMonth(t, flow, rule)
 
     if (when === month) {
       current.set(key, (current.get(key) ?? 0) - t.amountMinor)

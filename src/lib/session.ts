@@ -1,4 +1,5 @@
 import { db, clearEverything, getSetting, setSetting } from './db'
+import { cacheMonthRule, ruleFromRemote } from './monthRule'
 import { supabase } from './supabase'
 import { fetchHousehold, rpc, type RemoteHousehold } from './api'
 import { countDeadLetters, countPending, flush, scheduleFlush, setCanFlush, setOnOutboxChange } from './outbox'
@@ -157,6 +158,7 @@ async function adopt(household: RemoteHousehold) {
   await setSetting('householdId', household.id)
   await setSetting('joinCode', household.join_code)
   await setSetting('currency', household.currency)
+  await cacheMonthRule(ruleFromRemote(household))
   set({ householdId: household.id, joinCode: household.join_code })
   startRealtime(household.id)
 }

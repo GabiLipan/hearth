@@ -270,6 +270,24 @@ select 'rules keyed on the whole condition',
        'rules_condition_unique has replaced rules_match_unique — re-run 21 if this is false'
 
 union all
+-- Until this reads true, the 25th of the month is still hard-coded: a salary
+-- that lands on the 23rd falls back into the month it was meant to leave, and
+-- neither the household's two cutoffs nor a single row's own "counts in" can be
+-- saved.
+select '25-month-rule.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'households'
+                  and column_name = 'contribution_cutoff_day')
+   and exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'households'
+                  and column_name = 'income_cutoff_day')
+   and exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'transactions'
+                  and column_name = 'book_month')
+   and to_regprocedure('public.set_month_rule(integer,integer)') is not null,
+       'households cutoff days + transactions.book_month + set_month_rule() exist'
+
+union all
 -- Not a migration: the same trap 09-after-10 sets, now two files along. Both 20
 -- and 21 drop the previous upsert_rule and replace it with a wider one, and 03
 -- and 20 are both still re-runnable — running either AFTER 21 or 22 puts an

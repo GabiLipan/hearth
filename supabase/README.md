@@ -8,7 +8,7 @@ the app.
 ## Applying it
 
 In the Supabase SQL editor, run the numbered files in order — `01-schema.sql`
-through to `24-goal-allocations.sql`. There is no migrations table, so if you are
+through to `25-month-rule.sql`. There is no migrations table, so if you are
 unsure what a project has already had, run `00-which-migrations-applied.sql`
 first: it is read-only and reports a row per migration.
 
@@ -35,7 +35,7 @@ accounts and goals fails on an unknown column. Run it before deploying.
 Then, to prove it works, sign up two accounts and run `99-rls-tests.sql`. It
 runs inside a transaction and rolls back, so it is safe to re-run and leaves
 nothing behind. Every row of the output must read `ok = true`. The other test
-files (`99b` … `99q`) are the same shape.
+files (`99b` … `99r`) are the same shape.
 
 ## Running it locally
 
@@ -51,7 +51,7 @@ the `auth` schema, `auth.uid()`, the `anon`/`authenticated` roles, the
 `local/00-shim.sql` first and `local/98-grants.sql` last:
 
 ```
-local/00-shim.sql → 01 … 24 → local/98-grants.sql → 99*-tests.sql
+local/00-shim.sql → 01 … 25 → local/98-grants.sql → 99*-tests.sql
 ```
 
 `pgcrypto` needs an explicit import:

@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
-import { classifyAccounts, classifyFlows, type BookId, type BookMap, type Flow } from './books'
+import { classifyAccounts, classifyFlows, type BookId, type BookMap, type Flow, type MonthRule } from './books'
+import { MONTH_RULE_KEY, parseMonthRule } from './monthRule'
 import {
   db,
   getSetting,
@@ -302,6 +303,25 @@ export function useBooks(): BookMap {
 /** What each transaction means, given the books. Recomputed when either changes. */
 export function useFlows(txns: Transaction[] | undefined, books: BookMap): Map<string, Flow> {
   return useMemo(() => classifyFlows(txns ?? [], books), [txns, books])
+}
+
+/**
+ * When this household's months start, for anything that adds one up.
+ *
+ * A `useLiveQuery` over the cached copy rather than a module-level store,
+ * because unlike `useBook` this is not a lens: it belongs to the household, it
+ * arrives from the server on every pull, and the pull is what has to be able to
+ * change it under a screen that is already on. Dexie's liveness gives that for
+ * free — the other person moves payday on their phone and this one re-counts
+ * within the minute.
+ *
+ * It is never undefined. A screen that had to wait for the rule before it could
+ * add anything up would flash empty on every load, and the default is the
+ * behaviour the app had before the setting existed.
+ */
+export function useMonthRule(): MonthRule {
+  const raw = useLiveQuery(async () => (await db.meta.get(MONTH_RULE_KEY))?.value ?? '', [], undefined)
+  return useMemo(() => parseMonthRule(raw), [raw])
 }
 
 const BOOK_KEY = 'book'

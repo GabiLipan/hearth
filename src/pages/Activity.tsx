@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, Check, X, ArrowLeftRight, HandCoins, HelpCircle, Layers, Shapes, MoreHorizontal } from 'lucide-react'
+import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet, CalendarDays, CalendarClock, Check, X, ArrowLeftRight, HandCoins, HelpCircle, Layers, Shapes, MoreHorizontal } from 'lucide-react'
 import type { Account, Category, Transaction } from '../lib/db'
 import { paintOf } from '../lib/palette'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
@@ -699,6 +699,7 @@ export default function Activity() {
                                     </p>
                                     <p className="flex items-center gap-1 truncate text-sm text-ink-3">
                                       {!transfer && (looksLikeTransfer(t) || isAsking(t)) && <MaybeTransfer txn={t} />}
+                                      <CountedIn txn={t} />
                                       {forHousehold && <HouseholdMark book={book} payer={payerOf(t)} />}
                                       <span className="truncate">
                                         {/* A tagged arrival takes the place of
@@ -811,6 +812,9 @@ export default function Activity() {
                             editor={<DateEditor value={t.date} commit={(p, then) => commitCell(t, p, then)} />}
                           >
                             {fmtFullDate(t.date)}
+                            {/* Beside the date, because the date is precisely
+                                what it contradicts. */}
+                            <CountedIn txn={t} className="ml-1.5 mr-0" />
                           </EditableCell>
                           {/* Note rides on the same line as the payee — a second
                               line would make row heights uneven and harder to scan. */}
@@ -1138,6 +1142,38 @@ function transferLine(
   const other = partner && accMap.get(partner.accountId)?.name
   if (!other) return 'Transfer'
   return txn.amountMinor < 0 ? `Transfer to ${other}` : `Transfer from ${other}`
+}
+
+/**
+ * A row that is counted in a month other than the one it happened in.
+ *
+ * The list is a LEDGER — it runs by date, and a row moved to another month
+ * stays where the statement puts it, because that is the only order in which
+ * this page can be reconciled against a bank. But the figures on every other
+ * screen then disagree with it, and a difference nobody can see is the sort
+ * this app tries hardest not to have. So the row says so, where it sits.
+ *
+ * Only a month somebody TYPED. The household's cutoffs move rows too, but
+ * whether a cutoff applies to a given row depends on its flow, which depends on
+ * its far leg — an index this page does not build and would be paying for on
+ * every render. What is marked here is exactly what a person chose, which is
+ * also the half that has no other explanation on screen.
+ */
+function CountedIn({ txn, className }: { txn: Transaction; className?: string }) {
+  if (!txn.bookMonth || txn.bookMonth === monthKey(txn.date)) return null
+  return (
+    <span
+      title={`Counted in ${monthLabel(txn.bookMonth)}, not the month it happened in. Open it to change that.`}
+      aria-label={`Counted in ${monthLabel(txn.bookMonth)}`}
+      className={cx(
+        'mr-1.5 inline-flex shrink-0 items-center gap-0.5 rounded-full bg-surface-2 px-1.5 py-0.5 align-middle text-[11px] text-ink-2',
+        className,
+      )}
+    >
+      <CalendarClock size={11} />
+      {monthLabel(txn.bookMonth, 'short')}
+    </span>
+  )
 }
 
 /**

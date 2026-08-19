@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
-import { Sun, Moon, MonitorSmartphone, ArrowDownToLine, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Wand2, ArrowLeftRight, Undo2, Users, Wallet, Shapes, Palette, Database, type LucideIcon } from 'lucide-react'
+import { Sun, Moon, MonitorSmartphone, ArrowDownToLine, Download, Upload, Trash2, Sparkles, Plus, Cloud, CloudOff, RefreshCw, LogOut, Copy, Lock, Eye, EyeOff, Crown, Pencil, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, Wand2, ArrowLeftRight, Banknote, Undo2, Users, Wallet, Shapes, Palette, Database, type LucideIcon } from 'lucide-react'
 import { db, type AccountGrant, type Category, type Account, type GrantLevel, type HouseholdMember } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import {
@@ -30,6 +30,7 @@ import {
   useIsAdmin,
   useMemberMap,
   useMembers,
+  useMonthRule,
   useMyLevels,
   useBooks,
   useFlag,
@@ -56,7 +57,9 @@ import {
 import { FREQ_WORD, type TransferRoute } from '../lib/routes'
 import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
 import { rpc } from '../lib/api'
-import { fmtFullDate, fmtTime } from '../lib/dates'
+import { fmtFullDate, fmtTime, monthLabel, shiftMonth, thisMonthKey } from '../lib/dates'
+import { saveMonthRule } from '../lib/monthRule'
+import type { MonthRule } from '../lib/books'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import { alertAction, confirmAction } from '../components/confirm'
@@ -603,6 +606,162 @@ function OwedSection() {
   )
 }
 
+/** 1st, 2nd, 3rd, 4th — for a day of the month, so 11th to 13th are not "11st". */
+function ordinal(n: number) {
+  const teen = n % 100 >= 11 && n % 100 <= 13
+  const suffix = teen ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')
+  return `${n}${suffix}`
+}
+
+const MONTH_RULE_INFO = (
+  <p>
+    We are paid at the end of one month and spend it during the next, so money arriving late counts towards the
+    month it funds rather than the month it landed in. Without that, a month reads as having spent thousands
+    against nothing until payday turns up. Spending is never moved — it keeps the date it happened on, so
+    statements still reconcile.
+  </p>
+)
+
+/**
+ * When this household's month starts, for money coming in.
+ *
+ * Filed with the household rather than with the theme, and for a stronger
+ * reason than the currency: the household book is complete and IDENTICAL on
+ * both our screens, and a cutoff kept per device would break that in the one
+ * way nobody could see — the same contribution landing in July on one phone and
+ * August on the other, with both screens confident.
+ *
+ * Two rows because they are two events. The salary arrives when the employer
+ * says, and moves to the 23rd when the 25th is a Sunday; the contribution moves
+ * when one of us gets round to it. Each row says what its rule DOES, with a
+ * real date in it, because "cut-off day: 24" is a number and "a transfer on
+ * 24th August counts towards September" is the thing you are actually deciding.
+ */
+function MonthRuleSection() {
+  const rule = useMonthRule()
+  const change = (next: MonthRule) => void saveMonthRule(next)
+
+  return (
+    <section>
+      <SectionTitle>When a month's money arrives</SectionTitle>
+      <Card className="divide-y divide-hairline">
+        <CutoffRow
+          icon={<ArrowLeftRight size={16} />}
+          title="Money moved into the household"
+          info={MONTH_RULE_INFO}
+          noun="A transfer"
+          day={rule.contributionDay}
+          onChange={(d) => change({ ...rule, contributionDay: d })}
+        />
+        <CutoffRow
+          icon={<Banknote size={16} />}
+          title="Salary and other income"
+          info={MONTH_RULE_INFO}
+          noun="Pay"
+          day={rule.incomeDay}
+          onChange={(d) => change({ ...rule, incomeDay: d })}
+        />
+      </Card>
+      <p className="mt-2 px-1 text-xs text-ink-3">
+        One transaction can be counted somewhere else on its own — open it and use “Counts in”.
+      </p>
+    </section>
+  )
+}
+
+/**
+ * One cutoff: whether it applies at all, and from which day.
+ *
+ * The checkbox and the day are one decision presented as two controls, so the
+ * common case — "yes, from the 24th" — is a tick and a number rather than a
+ * scroll through twenty-eight sentences. Turning it off keeps the day it had,
+ * so changing your mind twice does not lose it.
+ *
+ * 28 is the last day offered. A cutoff of 30 has no meaning in February, and a
+ * rule that quietly does nothing for one month a year is worse than one you
+ * cannot set.
+ */
+function CutoffRow({
+  icon,
+  title,
+  info,
+  noun,
+  day,
+  onChange,
+}: {
+  icon: ReactNode
+  title: string
+  info: ReactNode
+  /** How the example sentence names this money: "A transfer", "Pay". */
+  noun: string
+  day: number | null
+  onChange: (day: number | null) => void
+}) {
+  const note = useInfoNote(title, info)
+  /** What the day box shows while the rule is off, so turning it on has an answer ready. */
+  const [remembered, setRemembered] = useState(day ?? 25)
+
+  const set = (d: number) => {
+    setRemembered(d)
+    onChange(d)
+  }
+
+  // A real date rather than an ordinal on its own, using the month we are in,
+  // so the sentence is about a day you can picture. No year: it is noise in a
+  // sentence about which month something lands in.
+  const bare = (key: string) => monthLabel(key).replace(/ \d{4}$/, '')
+  const example = `${ordinal(remembered)} ${bare(thisMonthKey())}`
+  const lands = bare(shiftMonth(thisMonthKey(), 1))
+
+  return (
+    <div className="px-4 py-3 md:px-3 desktop:py-2.5">
+      <div className="flex items-center gap-3 md:gap-2.5">
+        <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 md:size-8">
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium md:text-sm">{title}</p>
+        </div>
+        {note.toggle}
+      </div>
+      {note.body && <div className="mt-2 pl-12 md:pl-[42px]">{note.body}</div>}
+      <div className="mt-2.5 pl-12 md:pl-[42px]">
+        <label className="flex cursor-pointer items-center gap-2.5">
+          <input
+            type="checkbox"
+            checked={day !== null}
+            onChange={(e) => onChange(e.target.checked ? remembered : null)}
+            className="size-5 shrink-0 accent-[var(--accent)]"
+          />
+          <span className="text-sm">Late in the month, count it towards the next one</span>
+        </label>
+        {day !== null && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-sm text-ink-2">From the</span>
+            {/* The width goes on a wrapper: `Select` carries `w-full`, so one
+                passed to it does nothing. */}
+            <div className="w-24">
+              <Select value={String(day)} onChange={(e) => set(Number(e.target.value))}>
+                {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                  <option key={d} value={d}>
+                    {ordinal(d)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <span className="text-sm text-ink-2">onwards</span>
+          </div>
+        )}
+        <p className="mt-1.5 text-xs text-ink-3">
+          {day === null
+            ? `${noun} counts in the month it arrives, whenever that is.`
+            : `${noun} on ${example} counts towards ${lands}.`}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function CategoriesSection() {
   const categories = useCategories()
   const [editing, setEditing] = useState<Category | 'new' | null>(null)
@@ -937,7 +1096,7 @@ const GROUPS: Group[] = [
       const admins = members.filter((m) => m.role === 'admin').length
       return members.length === 0
         ? 'Who you share with, and what they can reach'
-        : `${members.length} ${members.length === 1 ? 'person' : 'people'} · ${admins} ${admins === 1 ? 'admin' : 'admins'}`
+        : `${members.length} ${members.length === 1 ? 'person' : 'people'} · ${admins} ${admins === 1 ? 'admin' : 'admins'} · when a month starts`
     },
     Body: () => (
       <div className="space-y-6 md:space-y-5">
@@ -949,6 +1108,7 @@ const GROUPS: Group[] = [
           <SectionTitle>People</SectionTitle>
           <MembersCard />
         </section>
+        <MonthRuleSection />
       </div>
     ),
   },

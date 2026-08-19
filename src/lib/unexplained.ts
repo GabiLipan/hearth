@@ -1,5 +1,5 @@
 import type { Transaction } from './db'
-import { accountsInBook, effectiveMonth, type BookMap, type Flow } from './books'
+import { accountsInBook, effectiveMonth, type BookMap, type Flow, type MonthRule } from './books'
 import { rpc } from './api'
 
 /**
@@ -80,6 +80,7 @@ export function looksLikeTransfer(txn: Transaction): boolean {
 export function unexplainedLegs(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   books: BookMap,
   month?: string,
 ): UnexplainedLeg[] {
@@ -96,7 +97,7 @@ export function unexplainedLegs(
     // Only the two flows this is about. Anything already understood as a
     // contribution or a withdrawal has been linked and needs no explaining.
     if (flow !== 'external-income' && flow !== 'household-spend') continue
-    if (month && effectiveMonth(t, flow) !== month) continue
+    if (month && effectiveMonth(t, flow, rule) !== month) continue
     out.push({ txn: t, direction: t.amountMinor > 0 ? 'in' : 'out' })
   }
 

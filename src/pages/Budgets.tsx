@@ -5,7 +5,7 @@ import { paintOf } from '../lib/palette'
 import { create, update, remove } from '../lib/data'
 import { rpc } from '../lib/api'
 import { syncNow } from '../lib/session'
-import { useAllTransactions, useBook, useBooks, useBudgets, useCategories, useFlows, useCacheReady } from '../lib/cache'
+import { useMonthRule, useAllTransactions, useBook, useBooks, useBudgets, useCategories, useFlows, useCacheReady } from '../lib/cache'
 import { bookMonthlySpendByCategory, bookSpendByCategory } from '../lib/books'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { styleOf, topLevel } from '../lib/categories'
@@ -67,6 +67,7 @@ export default function Budgets() {
   const mine = book === 'mine' && !!userId
   const books = useBooks()
   const flows = useFlows(txns, books)
+  const rule = useMonthRule()
   const isCurrent = month === thisMonthKey()
 
   const owned = useCallback(
@@ -109,19 +110,19 @@ export default function Budgets() {
    * was paid from — which is what migration 19 made visible to both people.
    */
   const history = useMemo(
-    () => bookMonthlySpendByCategory(txns, flows, categories, book, books, months),
-    [txns, flows, categories, book, books, months],
+    () => bookMonthlySpendByCategory(txns, flows, rule, categories, book, books, months),
+    [txns, flows, rule, categories, book, books, months],
   )
 
   const spentThisMonth = useMemo(
     () =>
       new Map(
-        bookSpendByCategory(txns, flows, categories, book, month, books).map((r) => [
+        bookSpendByCategory(txns, flows, rule, categories, book, month, books).map((r) => [
           r.categoryId,
           r.totalMinor,
         ]),
       ),
-    [txns, flows, categories, book, month, books],
+    [txns, flows, rule, categories, book, month, books],
   )
 
   const rows: Row[] = useMemo(() => {

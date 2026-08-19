@@ -1,6 +1,10 @@
 import type { Category, Transaction } from './db'
 import { budgetCategoryId, styleOf } from './categories'
 import { monthKey, shiftMonth, thisMonthKey, monthLabel } from './dates'
+// `bookedMonth`, not `monthKey`, wherever a row is being put IN a month: a row
+// somebody has moved counts where they said. `monthKey` stays for questions
+// about the calendar itself, like how far back the history runs.
+import { bookedMonth } from './books'
 
 /**
  * Moving your own money between accounts is neither spending nor income, so
@@ -34,7 +38,7 @@ export function spendByCategory(txns: Transaction[], categories: Category[], mon
   for (const t of txns) {
     // A transaction can point at a category this device has not pulled yet, or
     // one the other person deleted; it simply does not count towards a slice.
-    if (t.amountMinor >= 0 || !t.categoryId || isTransfer(t) || monthKey(t.date) !== month) continue
+    if (t.amountMinor >= 0 || !t.categoryId || isTransfer(t) || bookedMonth(t) !== month) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
     // Subcategory spending rolls up: "Insurance" shows under "Home & utilities".
@@ -92,7 +96,7 @@ export function monthlySeries(txns: Transaction[], categories: Category[], n: nu
   const byKey = new Map(keys.map((k) => [k, { spend: 0, income: 0 }]))
   for (const t of txns) {
     if (isTransfer(t)) continue
-    const k = monthKey(t.date)
+    const k = bookedMonth(t)
     const agg = byKey.get(k)
     if (!agg) continue
     if (t.amountMinor < 0) agg.spend -= t.amountMinor
@@ -113,7 +117,7 @@ export function monthTotals(txns: Transaction[], month: string) {
   let spend = 0
   let income = 0
   for (const t of txns) {
-    if (isTransfer(t) || monthKey(t.date) !== month) continue
+    if (isTransfer(t) || bookedMonth(t) !== month) continue
     if (t.amountMinor < 0) spend -= t.amountMinor
     else income += t.amountMinor
   }
@@ -152,7 +156,7 @@ export function monthlySpendByCategory(
 
   for (const t of txns) {
     if (t.amountMinor >= 0 || !t.categoryId || isTransfer(t)) continue
-    const i = index.get(monthKey(t.date))
+    const i = index.get(bookedMonth(t))
     if (i === undefined) continue
     const key = budgetCategoryId(catMap.get(t.categoryId))
     if (!key) continue

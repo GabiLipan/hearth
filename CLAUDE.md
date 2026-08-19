@@ -69,6 +69,7 @@ read-only detector that reports which are present — run it when unsure.
 | `22-rule-edits.sql` | `upsert_rule` looks before it inserts, so a rule's CONDITIONS can be edited — its payee, an amount, an account. Same signature as 21's, body only |
 | `23-custom-colours.sql` | `categories.color` / `accounts.color` / `goals.color` — a `#rrggbb` of your own, laid OVER the slot rather than replacing it. Null is the ordinary case |
 | `24-goal-allocations.sql` | `goal_entries` — a goal is a CLAIM on money already in an account, not a pot you move money into. `assign_to_goal` puts some of what an account holds towards a goal and refuses to let the goals on one account claim more than it has; `settle_goals` takes a withdrawal off what is unassigned first and then off the largest pot |
+| `25-month-rule.sql` | `households.contribution_cutoff_day` + `income_cutoff_day` (null = never shift) and `set_month_rule` — the 25th stops being a constant and becomes two settings; `transactions.book_month` is one row's own answer, and the only thing that can move spending |
 
 All are re-runnable, with **five ordering traps**, and three of them are the
 same trap. The rule migrations stack: `20` drops the three-argument
@@ -150,7 +151,7 @@ list means, and what it writes),
 `layout.ts` (which sections a page shows, in what order, how wide, in which
 shape, and what else each one lets you decide — home and Reports share it),
 `drill.ts` (out of a figure and into the rows behind it, and the way back),
-`sticky.ts` (a filter that outlives leaving the page and dies with the tab), `sankey.ts` (a period as one balanced flow,
+`sticky.ts` (a filter that outlives leaving the page and dies with the tab), `monthRule.ts` (when this household's month starts, and how that reaches both devices), `sankey.ts` (a period as one balanced flow,
 and where every band goes), `scale.ts` (a value axis with round numbers, shared
 by a scrolling chart and the axis pinned beside it),
 `reimbursements.ts` (what the household owes you — computed always, shown only
@@ -1642,6 +1643,27 @@ the single place a level comes from.
   deletion does not; that undo captures the previous `categoryId` of every row
   BEFORE writing, including the rows that had none, since `undefined` is what
   clears a field rather than leaving it alone.
+- **Which month a row counts in is never `monthKey(t.date)`.** Two things move
+  it. The household's cutoffs (`MonthRule`, migration 25) shift money ARRIVING
+  late in the month into the one it funds — separately for contributions and
+  for income, because payday and the transfer that follows it are two events
+  with two dates and a single number has to be wrong about one of them. And
+  `transactions.bookMonth` is one row's own answer, which beats the cutoff and
+  is the only thing that can move SPENDING. Ask `effectiveMonth(t, flow, rule)`
+  where a flow is to hand and `bookedMonth(t)` where one is not (`stats.ts`) —
+  never the date. `rule` is a required parameter rather than a defaulted one
+  precisely so a new caller cannot quietly count months the old way. The
+  `*InRange` functions are the deliberate exception and still count by real
+  date: "the month this money was for" is not a question a fortnight in the
+  middle of March can answer.
+- **The month rule is the household's, not the device's.** It rides on
+  `households` beside the currency, is cached in `meta` on every pull, and is
+  written by an RPC. Kept per device it would break the one property the books
+  exist for — the household book being complete and IDENTICAL on both screens —
+  by landing the same contribution in July on one phone and August on the
+  other, with nothing on either to say why. It bumps no epoch: nobody's access
+  changed, so `checkEpoch`'s unconditional rewrite of the cached copy is the
+  only thing carrying a change to the other device.
 - **Transfer pairing is the one matcher with no tolerance.** Every other
   comparison in the app is fuzzy — `payeeSimilar`, the bill amount window, the
   duplicate check. `findTransferCandidates` requires `out === -in` exactly, and
@@ -1728,6 +1750,14 @@ the single place a level comes from.
   ARE recoverable as of migration 12 — `prior_category_id` holds them between
   link and unlink, and a newer answer set while linked wins over the remembered
   one.
+- Activity is a LEDGER and runs by date, so a row counted in another month —
+  by a cutoff or by `bookMonth` — is still listed where the statement puts it,
+  and a drill-down from a report slice can therefore miss it. Deliberate: date
+  order is the only order that page can be reconciled against a bank in. The
+  divergence is marked rather than hidden (`CountedIn` draws the month on the
+  row), but only for a month somebody typed — deciding whether a cutoff applies
+  needs the flow, and that needs an index of transfer legs this page does not
+  build.
 - **Asking about a row needs LESS than changing it.** `request_explanation`
   (migration 16) takes `view`, deliberately below the `transactions_update` bar,
   because the person who can see a puzzling row is by definition the one who

@@ -11,6 +11,7 @@ import {
   useBudgetsForMonth,
   useCategories,
   useFlows,
+  useMonthRule,
   useRemoteBalances,
   useMyLevels,
   OWED_FLAG,
@@ -151,6 +152,7 @@ export default function Dashboard() {
   const [book, setBook] = useBook()
   const books = useBooks()
   const flows = useFlows(txns, books)
+  const rule = useMonthRule()
   const [seeding, setSeeding] = useState(false)
   const columnCount = useColumnCount(COLUMN_STEPS)
   const showOwed = useFlag(OWED_FLAG)
@@ -238,6 +240,7 @@ export default function Dashboard() {
     book,
     books,
     flows,
+    rule,
   }
   return (
     <div>

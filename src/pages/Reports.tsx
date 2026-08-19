@@ -9,6 +9,7 @@ import {
   useCategories,
   useCategoryMap,
   useFlows,
+  useMonthRule,
   useMemberMap,
   useMyLevels,
 } from '../lib/cache'
@@ -317,6 +318,7 @@ export default function Reports() {
   const catMap = useCategoryMap()
   const books = useBooks()
   const flows = useFlows(txns, books)
+  const rule = useMonthRule()
   const { userId } = useSyncState()
   const memberMap = useMemberMap()
 
@@ -356,17 +358,17 @@ export default function Reports() {
       period === 'custom'
         ? contributionSplitInRange(txns ?? [], flows, books, from, to, userId)
         : sumContributionSplits(
-            inView.map((m) => contributionSplit(txns ?? [], flows, m, books, userId)),
+            inView.map((m) => contributionSplit(txns ?? [], flows, rule, m, books, userId)),
           ),
-    [txns, flows, inView, books, userId, period, from, to],
+    [txns, flows, rule, inView, books, userId, period, from, to],
   )
 
   const slices = useMemo(
     () =>
       period === 'custom'
         ? rangeSlices(txns ?? [], flows, categories, book, books, from, to, drill ?? undefined, sliceLimit)
-        : bookSlices(txns ?? [], flows, categories, book, inView, books, drill ?? undefined, sliceLimit),
-    [txns, flows, categories, book, inView, books, drill, period, from, to, sliceLimit],
+        : bookSlices(txns ?? [], flows, rule, categories, book, inView, books, drill ?? undefined, sliceLimit),
+    [txns, flows, rule, categories, book, inView, books, drill, period, from, to, sliceLimit],
   )
   /**
    * The same breakdown, never drilled into — what the flow diagram is built
@@ -378,21 +380,21 @@ export default function Reports() {
     () =>
       period === 'custom'
         ? rangeSlices(txns ?? [], flows, categories, book, books, from, to, undefined, flowLimit)
-        : bookSlices(txns ?? [], flows, categories, book, inView, books, undefined, flowLimit),
-    [txns, flows, categories, book, inView, books, period, from, to, flowLimit],
+        : bookSlices(txns ?? [], flows, rule, categories, book, inView, books, undefined, flowLimit),
+    [txns, flows, rule, categories, book, inView, books, period, from, to, flowLimit],
   )
   /** The same breakdown, split into each book's share. Everything only. */
   const splitSlices = useMemo(
     () =>
       book !== 'all' || period === 'custom'
         ? []
-        : bookSplitByCategory(txns ?? [], flows, categories, books, inView, sliceLimit),
+        : bookSplitByCategory(txns ?? [], flows, rule, categories, books, inView, sliceLimit),
     [book, period, txns, flows, categories, books, inView, sliceLimit],
   )
 
   const series = useMemo(
-    () => bookSeries(txns ?? [], flows, book, Number(range), books, month),
-    [txns, flows, book, range, books, month],
+    () => bookSeries(txns ?? [], flows, rule, book, Number(range), books, month),
+    [txns, flows, rule, book, range, books, month],
   )
   /**
    * The same series, but as far back as there is anything to show.
@@ -406,15 +408,15 @@ export default function Reports() {
    */
   const history = useMemo(() => monthsOfHistory(txns ?? [], month), [txns, month])
   const longSeries = useMemo(
-    () => bookSeries(txns ?? [], flows, book, Math.max(history, Number(range)), books, month),
-    [txns, flows, book, history, range, books, month],
+    () => bookSeries(txns ?? [], flows, rule, book, Math.max(history, Number(range)), books, month),
+    [txns, flows, rule, book, history, range, books, month],
   )
   const totals = useMemo(
     () =>
       period === 'custom'
         ? bookTotalsInRange(txns ?? [], flows, book, books, from, to)
-        : sumBookTotals(inView.map((m) => bookTotals(txns ?? [], flows, book, m, books))),
-    [txns, flows, book, inView, books, period, from, to],
+        : sumBookTotals(inView.map((m) => bookTotals(txns ?? [], flows, rule, book, m, books))),
+    [txns, flows, rule, book, inView, books, period, from, to],
   )
 
   /**
@@ -428,11 +430,11 @@ export default function Reports() {
    */
   const lastYear = useMemo(() => {
     const before = sumBookTotals(
-      inView.map((m) => bookTotals(txns ?? [], flows, book, shiftMonth(m, -12), books)),
+      inView.map((m) => bookTotals(txns ?? [], flows, rule, book, shiftMonth(m, -12), books)),
     )
     if (before.spend === 0) return undefined
     return { spendMinor: before.spend, deltaMinor: totals.spend - before.spend }
-  }, [txns, flows, book, inView, books, totals.spend])
+  }, [txns, flows, rule, book, inView, books, totals.spend])
 
   /**
    * The months the range covers, shared by every series below so they all line
@@ -441,36 +443,36 @@ export default function Reports() {
   const monthKeys = useMemo(() => series.map((p) => p.key), [series])
 
   const waterfall = useMemo(
-    () => householdWaterfall(txns ?? [], flows, books, accounts, month),
-    [txns, flows, books, accounts, month],
+    () => householdWaterfall(txns ?? [], flows, rule, books, accounts, month),
+    [txns, flows, rule, books, accounts, month],
   )
   const salary = useMemo(
-    () => salaryBars(txns ?? [], flows, books, monthKeys),
-    [txns, flows, books, monthKeys],
+    () => salaryBars(txns ?? [], flows, rule, books, monthKeys),
+    [txns, flows, rule, books, monthKeys],
   )
   const committed = useMemo(
-    () => fixedVsVariable(txns ?? [], flows, book, books, monthKeys),
-    [txns, flows, book, books, monthKeys],
+    () => fixedVsVariable(txns ?? [], flows, rule, book, books, monthKeys),
+    [txns, flows, rule, book, books, monthKeys],
   )
   const kept = useMemo(
-    () => savingsRate(txns ?? [], flows, book, books, monthKeys),
-    [txns, flows, book, books, monthKeys],
+    () => savingsRate(txns ?? [], flows, rule, book, books, monthKeys),
+    [txns, flows, rule, book, books, monthKeys],
   )
   const payees = useMemo(
-    () => topPayees(txns ?? [], flows, categories, book, books, month, payeeLimit),
-    [txns, flows, categories, book, books, month, payeeLimit],
+    () => topPayees(txns ?? [], flows, rule, categories, book, books, month, payeeLimit),
+    [txns, flows, rule, categories, book, books, month, payeeLimit],
   )
   const heatmap = useMemo(
-    () => categoryHeatmap(txns ?? [], flows, categories, book, books, monthKeys, heatmapRows),
-    [txns, flows, categories, book, books, monthKeys, heatmapRows],
+    () => categoryHeatmap(txns ?? [], flows, rule, categories, book, books, monthKeys, heatmapRows),
+    [txns, flows, rule, categories, book, books, monthKeys, heatmapRows],
   )
   const pacePoints = useMemo(
-    () => pace(txns ?? [], flows, book, books, month),
-    [txns, flows, book, books, month],
+    () => pace(txns ?? [], flows, rule, book, books, month),
+    [txns, flows, rule, book, books, month],
   )
   const deltas = useMemo(
-    () => categoryDeltas(txns ?? [], flows, categories, book, books, monthKeys, month),
-    [txns, flows, categories, book, books, monthKeys, month],
+    () => categoryDeltas(txns ?? [], flows, rule, categories, book, books, monthKeys, month),
+    [txns, flows, rule, categories, book, books, monthKeys, month],
   )
 
   /**
@@ -496,7 +498,7 @@ export default function Reports() {
     return period === 'custom'
       ? savedIntoRange(txns ?? [], flows, book, books, ids, from, to)
       : savedInto(txns ?? [], flows, book, books, ids, inView)
-  }, [txns, flows, book, books, accounts, inView, period, from, to])
+  }, [txns, flows, rule, book, books, accounts, inView, period, from, to])
 
   /**
    * Who paid in, as rows — the two halves of each person's contribution kept
@@ -553,8 +555,8 @@ export default function Reports() {
 
   const bridge = useMemo(
     () =>
-      bookBridge(txns ?? [], flows, books, period === 'custom' ? inView : inView),
-    [txns, flows, books, inView, period],
+      bookBridge(txns ?? [], flows, rule, books, period === 'custom' ? inView : inView),
+    [txns, flows, rule, books, inView, period],
   )
 
   /**
@@ -619,8 +621,8 @@ export default function Reports() {
     return booksFlow({
       bridge,
       split,
-      householdSlices: bookSlices(txns ?? [], flows, categories, 'household', inView, books, undefined, crossingLimit),
-      mineSlices: bookSlices(txns ?? [], flows, categories, 'mine', inView, books, undefined, crossingLimit),
+      householdSlices: bookSlices(txns ?? [], flows, rule, categories, 'household', inView, books, undefined, crossingLimit),
+      mineSlices: bookSlices(txns ?? [], flows, rule, categories, 'mine', inView, books, undefined, crossingLimit),
       partner: partner ?? undefined,
     })
   }, [book, bridge, split, txns, flows, categories, inView, books, crossingLimit, partner])
@@ -674,8 +676,8 @@ export default function Reports() {
    * honest version of a number it cannot get right on its own.
    */
   const unexplained = useMemo(
-    () => unexplainedTotals(inView.flatMap((m) => unexplainedLegs(txns ?? [], flows, books, m))),
-    [txns, flows, books, inView],
+    () => unexplainedTotals(inView.flatMap((m) => unexplainedLegs(txns ?? [], flows, rule, books, m))),
+    [txns, flows, rule, books, inView],
   )
 
   /** What the figures on this page cover, in words. */
@@ -778,7 +780,7 @@ export default function Reports() {
 
   const canDrill = (categoryId: string) =>
     categoryId !== OTHER_SLICE_ID &&
-    hasBreakdown(categoryId, txns ?? [], flows, categories, book, inView, books)
+    hasBreakdown(categoryId, txns ?? [], flows, rule, categories, book, inView, books)
 
   /**
    * Out of a figure and into the rows behind it.

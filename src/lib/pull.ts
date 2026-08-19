@@ -2,6 +2,7 @@ import { db, clearCache, getSetting, setSetting, rowKey, SYNCED_TABLES, type Syn
 import { fromDb, type DbRow } from './mapping'
 import { fetchBalances, fetchChecksums, fetchHousehold, pullPage } from './api'
 import { pendingKeys } from './outbox'
+import { cacheMonthRule, ruleFromRemote } from './monthRule'
 
 /**
  * Reading from the server into the cache.
@@ -212,6 +213,12 @@ async function checkEpoch(): Promise<boolean> {
   if (!household) return false
   const known = await getSetting('visibilityEpoch')
   await setSetting('currency', household.currency)
+  // Same reasoning as the currency: a fact about the household's money that
+  // every screen needs before it can add anything up, cached so it survives
+  // going offline. Written on every pull, not only on an epoch change — the
+  // rule changing alters nobody's access, so it bumps no epoch and this is the
+  // only thing that carries it to the other device.
+  await cacheMonthRule(ruleFromRemote(household))
   if (known !== undefined && Number(known) === household.visibility_epoch) return false
 
   await setSetting('visibilityEpoch', String(household.visibility_epoch))

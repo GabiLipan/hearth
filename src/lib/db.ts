@@ -74,6 +74,12 @@ export interface Transaction {
    */
   explainRequestedAt?: string
   explainRequestedBy?: string
+  /**
+   * The month this row counts towards, `yyyy-MM`, overriding both its date and
+   * the household's cutoffs. Undefined — the ordinary case — means "work it
+   * out", which is what `effectiveMonth` does. See migration 25.
+   */
+  bookMonth?: string
   date: string // yyyy-MM-dd (server column `occurred_on`)
   /** Exactly what the bank wrote. Everything that matches, pairs or de-duplicates reads this. */
   payee: string

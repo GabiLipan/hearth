@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, AccountGrant, Category, Transaction } from './db'
-import { classifyAccounts, classifyFlows, type BookMap } from './books'
+import { classifyAccounts, classifyFlows, DEFAULT_MONTH_RULE, type BookMap } from './books'
 import {
   categoryDeltas,
   categoryHeatmap,
@@ -11,6 +11,9 @@ import {
   savingsRate,
   topPayees,
 } from './insights'
+
+/** What these tests count months under, unless one of them varies it. */
+const RULE = DEFAULT_MONTH_RULE
 
 /**
  * The same household as books.test.ts, seen from Gabi's device: he is on both
@@ -107,7 +110,7 @@ const flowsOf = (rows: Transaction[]) => classifyFlows(rows, books)
 describe('the household waterfall', () => {
   it('walks paid in → spent → saved → left, and the steps reconcile', () => {
     const rows = march()
-    const steps = householdWaterfall(rows, flowsOf(rows), books, accounts, '2026-03')
+    const steps = householdWaterfall(rows, flowsOf(rows), RULE, books, accounts, '2026-03')
     const by = Object.fromEntries(steps.map((s) => [s.key, s]))
 
     expect(by.in.deltaMinor).toBe(380000) // both contributions
@@ -123,13 +126,13 @@ describe('the household waterfall', () => {
     // Both legs are inside the household book and net to zero, so counting the
     // pair would show nothing moving at all.
     const rows = march()
-    const steps = householdWaterfall(rows, flowsOf(rows), books, accounts, '2026-03')
+    const steps = householdWaterfall(rows, flowsOf(rows), RULE, books, accounts, '2026-03')
     expect(steps.find((s) => s.key === 'savings')!.deltaMinor).toBe(-100000)
   })
 
   it('leaves the withdrawal step out when there is none', () => {
     const rows = march()
-    const steps = householdWaterfall(rows, flowsOf(rows), books, accounts, '2026-03')
+    const steps = householdWaterfall(rows, flowsOf(rows), RULE, books, accounts, '2026-03')
     expect(steps.map((s) => s.key)).toEqual(['in', 'spend', 'savings', 'left'])
   })
 })
@@ -137,7 +140,7 @@ describe('the household waterfall', () => {
 describe('what a salary turned into', () => {
   it('splits the month into contributed, spent and left over', () => {
     const rows = march()
-    const [bar] = salaryBars(rows, flowsOf(rows), books, ['2026-03'])
+    const [bar] = salaryBars(rows, flowsOf(rows), RULE, books, ['2026-03'])
 
     expect(bar.earnedMinor).toBe(300000)
     expect(bar.contributedMinor).toBe(200000)
@@ -154,7 +157,7 @@ describe('what a salary turned into', () => {
       txn({ accountId: 'myPrivate', amountMinor: 100000, date: '2026-03-01', categoryId: 'salary' }),
       txn({ accountId: 'myPrivate', amountMinor: -150000, date: '2026-03-05', categoryId: 'fun' }),
     ]
-    const [bar] = salaryBars(rows, flowsOf(rows), books, ['2026-03'])
+    const [bar] = salaryBars(rows, flowsOf(rows), RULE, books, ['2026-03'])
 
     expect(bar.leftMinor).toBe(0)
     expect(bar.spentMinor).toBe(150000)
@@ -164,7 +167,7 @@ describe('what a salary turned into', () => {
 describe('fixed against variable', () => {
   it('counts spending recorded against a bill as fixed', () => {
     const rows = march()
-    const [m] = fixedVsVariable(rows, flowsOf(rows), 'household', books, ['2026-03'])
+    const [m] = fixedVsVariable(rows, flowsOf(rows), RULE, 'household', books, ['2026-03'])
 
     expect(m.fixedMinor).toBe(145000) // mortgage + insurance
     expect(m.variableMinor).toBe(75000) // groceries twice + cinema
@@ -172,7 +175,7 @@ describe('fixed against variable', () => {
 
   it('gives a month with no rows two zeroes rather than dropping it', () => {
     const rows = march()
-    const series = fixedVsVariable(rows, flowsOf(rows), 'household', books, ['2026-01', '2026-03'])
+    const series = fixedVsVariable(rows, flowsOf(rows), RULE, 'household', books, ['2026-01', '2026-03'])
     expect(series).toHaveLength(2)
     expect(series[0]).toMatchObject({ key: '2026-01', fixedMinor: 0, variableMinor: 0 })
   })
@@ -181,7 +184,7 @@ describe('fixed against variable', () => {
 describe('the savings rate', () => {
   it('is what did not go out again, over what came in', () => {
     const rows = march()
-    const [m] = savingsRate(rows, flowsOf(rows), 'household', books, ['2026-03'])
+    const [m] = savingsRate(rows, flowsOf(rows), RULE, 'household', books, ['2026-03'])
 
     expect(m.incomeMinor).toBe(380000)
     expect(m.savedMinor).toBe(160000)
@@ -192,7 +195,7 @@ describe('the savings rate', () => {
     // A rate is a fraction of something. Plotting an absence as 0% draws a
     // collapse where there is only silence.
     const rows = [txn({ accountId: 'joint', amountMinor: -5000, date: '2026-03-04', categoryId: 'food' })]
-    const [m] = savingsRate(rows, flowsOf(rows), 'household', books, ['2026-03'])
+    const [m] = savingsRate(rows, flowsOf(rows), RULE, 'household', books, ['2026-03'])
     expect(m.rate).toBeNull()
   })
 })
@@ -202,7 +205,7 @@ describe('top payees', () => {
     // TESCO STORES 3456 and TESCO EXPRESS 88 are one merchant, and this uses
     // the same normalisation the rules engine learns on.
     const rows = march()
-    const top = topPayees(rows, flowsOf(rows), categories, 'household', books, '2026-03')
+    const top = topPayees(rows, flowsOf(rows), RULE, categories, 'household', books, '2026-03')
 
     const tesco = top.find((p) => p.payee.toLowerCase().startsWith('tesco'))
     expect(tesco).toBeDefined()
@@ -212,7 +215,7 @@ describe('top payees', () => {
 
   it('is biggest first, and stops where it is told', () => {
     const rows = march()
-    const top = topPayees(rows, flowsOf(rows), categories, 'household', books, '2026-03', 2)
+    const top = topPayees(rows, flowsOf(rows), RULE, categories, 'household', books, '2026-03', 2)
 
     expect(top).toHaveLength(2)
     expect(top[0].totalMinor).toBeGreaterThanOrEqual(top[1].totalMinor)
@@ -226,7 +229,7 @@ describe('top payees', () => {
       txn({ accountId: 'joint', amountMinor: -300, date: '2026-03-03', payee: 'AMAZON', categoryId: 'food' }),
       txn({ accountId: 'joint', amountMinor: -300, date: '2026-03-04', payee: 'AMAZON', categoryId: 'food' }),
     ]
-    const [amazon] = topPayees(rows, flowsOf(rows), categories, 'household', books, '2026-03')
+    const [amazon] = topPayees(rows, flowsOf(rows), RULE, categories, 'household', books, '2026-03')
     expect(amazon.slot).toBe(3) // Fun, not Groceries
   })
 })
@@ -237,7 +240,7 @@ describe('the category heatmap', () => {
   it('rolls a subcategory up to its parent', () => {
     // Insurance is under Home, and a heatmap of forty subcategories is a wall.
     const rows = march()
-    const grid = categoryHeatmap(rows, flowsOf(rows), categories, 'household', books, months)
+    const grid = categoryHeatmap(rows, flowsOf(rows), RULE, categories, 'household', books, months)
 
     const home = grid.rows.find((r) => r.categoryId === 'home')!
     expect(home.cells[2]).toBe(145000) // mortgage + insurance, in March
@@ -248,13 +251,13 @@ describe('the category heatmap', () => {
     // Per row makes the £8 category and the £800 one both run pale to solid,
     // and comparing categories is the whole point.
     const rows = march()
-    const grid = categoryHeatmap(rows, flowsOf(rows), categories, 'household', books, months)
+    const grid = categoryHeatmap(rows, flowsOf(rows), RULE, categories, 'household', books, months)
     expect(grid.peakMinor).toBe(145000)
   })
 
   it('is biggest first and gives every row a cell per month', () => {
     const rows = march()
-    const grid = categoryHeatmap(rows, flowsOf(rows), categories, 'household', books, months)
+    const grid = categoryHeatmap(rows, flowsOf(rows), RULE, categories, 'household', books, months)
 
     expect(grid.rows.every((r) => r.cells.length === months.length)).toBe(true)
     expect([...grid.rows].sort((a, b) => b.totalMinor - a.totalMinor)).toEqual(grid.rows)
@@ -268,7 +271,7 @@ describe('the pace line', () => {
       txn({ accountId: 'joint', amountMinor: -10000, date: '2026-02-20', categoryId: 'food' }),
       txn({ accountId: 'joint', amountMinor: -30000, date: '2026-03-05', categoryId: 'food' }),
     ]
-    const points = pace(rows, flowsOf(rows), 'household', books, '2026-03')
+    const points = pace(rows, flowsOf(rows), RULE, 'household', books, '2026-03')
 
     const at = (day: number) => points.find((p) => p.day === day)!
     expect(at(4).thisMonthMinor).toBe(0)
@@ -283,7 +286,7 @@ describe('the pace line', () => {
     // The truncation is for the month we are IN. A month in the past is whole,
     // and stopping it early would invent a slowdown.
     const rows = [txn({ accountId: 'joint', amountMinor: -10000, date: '2026-03-28', categoryId: 'food' })]
-    const points = pace(rows, flowsOf(rows), 'household', books, '2026-03')
+    const points = pace(rows, flowsOf(rows), RULE, 'household', books, '2026-03')
     expect(points[30].thisMonthMinor).toBe(10000)
   })
 })
@@ -296,7 +299,7 @@ describe('how this month compares with normal', () => {
 
   it('measures against the median of the months before it', () => {
     const rows = [groceries('2026-01', 40000), groceries('2026-02', 50000), groceries('2026-03', 45000), groceries('2026-04', 62000)]
-    const d = categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04')!.get('food')!
+    const d = categoryDeltas(rows, flowsOf(rows), RULE, categories, 'household', books, months, '2026-04')!.get('food')!
 
     expect(d.typicalMinor).toBe(45000)
     expect(d.thisMonthMinor).toBe(62000)
@@ -307,7 +310,7 @@ describe('how this month compares with normal', () => {
   it('uses the median, so one annual bill does not become the norm', () => {
     // A mean would put "typical" at £262 and call every ordinary month a saving.
     const rows = [groceries('2026-01', 10000), groceries('2026-02', 10000), groceries('2026-03', 90000), groceries('2026-04', 11000)]
-    const d = categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04')!.get('food')!
+    const d = categoryDeltas(rows, flowsOf(rows), RULE, categories, 'household', books, months, '2026-04')!.get('food')!
 
     expect(d.typicalMinor).toBe(10000)
     expect(d.deltaMinor).toBe(1000)
@@ -316,7 +319,7 @@ describe('how this month compares with normal', () => {
   it('drops months with no spending rather than counting them as zero', () => {
     // A category you did not touch says nothing about what is normal for it.
     const rows = [groceries('2026-01', 40000), groceries('2026-04', 44000)]
-    const d = categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04')!.get('food')!
+    const d = categoryDeltas(rows, flowsOf(rows), RULE, categories, 'household', books, months, '2026-04')!.get('food')!
 
     expect(d.typicalMinor).toBe(40000)
     expect(d.basis).toBe(1)
@@ -324,7 +327,7 @@ describe('how this month compares with normal', () => {
 
   it('never counts the month being looked at towards its own typical', () => {
     const rows = [groceries('2026-04', 90000)]
-    expect(categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04').get('food')).toBeUndefined()
+    expect(categoryDeltas(rows, flowsOf(rows), RULE, categories, 'household', books, months, '2026-04').get('food')).toBeUndefined()
   })
 
   it('rolls a subcategory up to its parent, like everything else here', () => {
@@ -332,7 +335,7 @@ describe('how this month compares with normal', () => {
       txn({ accountId: 'joint', amountMinor: -20000, date: '2026-01-05', categoryId: 'insurance' }),
       txn({ accountId: 'joint', amountMinor: -30000, date: '2026-04-05', categoryId: 'home' }),
     ]
-    const d = categoryDeltas(rows, flowsOf(rows), categories, 'household', books, months, '2026-04')!.get('home')!
+    const d = categoryDeltas(rows, flowsOf(rows), RULE, categories, 'household', books, months, '2026-04')!.get('home')!
     expect(d.typicalMinor).toBe(20000)
     expect(d.deltaMinor).toBe(10000)
   })
@@ -347,7 +350,7 @@ describe('what a salary turned into, split by how it got there', () => {
       txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'm' }),
       txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true, createdBy: ME }),
     ]
-    const [bar] = salaryBars(rows, classifyFlows(rows, books), books, ['2026-03'])
+    const [bar] = salaryBars(rows, classifyFlows(rows, books), RULE, books, ['2026-03'])
 
     expect(bar.contributedMovedMinor).toBe(200000)
     expect(bar.contributedPaidMinor).toBe(9000)
@@ -360,7 +363,7 @@ describe('what a salary turned into, split by how it got there', () => {
       txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-02', transferId: 'm' }),
       txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'm' }),
     ]
-    const [bar] = salaryBars(rows, classifyFlows(rows, books), books, ['2026-03'])
+    const [bar] = salaryBars(rows, classifyFlows(rows, books), RULE, books, ['2026-03'])
     expect(bar.contributedPaidMinor).toBe(0)
     expect(bar.contributedMovedMinor).toBe(bar.contributedMinor)
   })

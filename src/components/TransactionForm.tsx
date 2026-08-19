@@ -14,7 +14,7 @@ import { canAddTransactions, canEditTransaction, canManageAccount, levelOn } fro
 import { grouped, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
-import { dateWindow, todayISO } from '../lib/dates'
+import { dateWindow, monthKey, monthLabel, shiftMonth, todayISO } from '../lib/dates'
 import {
   learnRule,
   matchKey,
@@ -95,6 +95,10 @@ export function TransactionForm({
   const [accountId, setAccountId] = useState<string | undefined>()
   const [note, setNote] = useState('')
   const [forHousehold, setForHousehold] = useState(false)
+  /** `yyyy-MM` this row is pinned to, or '' for "work it out from the date". */
+  const [bookMonth, setBookMonth] = useState('')
+  /** Whether the "Counts in" control is on screen at all. See `MonthOverride`. */
+  const [showMonth, setShowMonth] = useState(false)
   const [contributorId, setContributorId] = useState<string | undefined>()
   /** Whether the contributor on screen was proposed rather than chosen. */
   const [contributorGuessed, setContributorGuessed] = useState(false)
@@ -134,6 +138,11 @@ export function TransactionForm({
       setNote(editing.note ?? '')
       setForHousehold(!!editing.paidForHousehold)
       setContributorId(editing.contributorId)
+      setBookMonth(editing.bookMonth ?? '')
+      // Open on a row that has been moved, so the reason its date and its month
+      // disagree is the first thing visible rather than something to go hunting
+      // for behind a link.
+      setShowMonth(!!editing.bookMonth)
     } else {
       setKind('expense')
       setAmount('')
@@ -145,6 +154,8 @@ export function TransactionForm({
       setNote('')
       setForHousehold(false)
       setContributorId(undefined)
+      setBookMonth('')
+      setShowMonth(false)
       setTimeout(() => amountRef.current?.focus(), 60)
     }
     setSuggested(false)
@@ -527,6 +538,9 @@ export function TransactionForm({
         // actually clears it — and gated on the offer, so switching a row from
         // income to expense drops a tag that would no longer mean anything.
         contributorId: offerContributor ? contributorId : undefined,
+        // Undefined rather than omitted for the same reason: that is what
+        // CLEARS a month somebody set and then changed their mind about.
+        bookMonth: bookMonth || undefined,
       })
     } else {
       await create('transactions', {
@@ -542,6 +556,7 @@ export function TransactionForm({
         // actually clears it — and gated on the offer, so switching a row from
         // income to expense drops a tag that would no longer mean anything.
         contributorId: offerContributor ? contributorId : undefined,
+        bookMonth: bookMonth || undefined,
         createdBy: userId,
         createdAt: new Date().toISOString(),
       })
@@ -962,6 +977,14 @@ export function TransactionForm({
           <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" />
         </Field>
 
+        <MonthOverride
+          date={date}
+          value={bookMonth}
+          onChange={setBookMonth}
+          shown={showMonth}
+          onShow={() => setShowMonth(true)}
+        />
+
         {editing && editable && <Linkage txn={editing} onDone={onClose} />}
       </fieldset>
     </Sheet>
@@ -1247,5 +1270,82 @@ function Linkage({ txn, onDone }: { txn: Transaction; onDone: () => void }) {
         Cancel
       </Button>
     </div>
+  )
+}
+
+/**
+ * "This one belongs to a different month."
+ *
+ * The escape hatch under the household's two cutoffs in Settings. Those handle
+ * the ordinary case — payday, and the transfer that follows it — and cannot
+ * handle the rest: a bonus paid in November that is really December's, a
+ * deposit paid in advance, a January invoice settled in the December lull.
+ * Unlike a cutoff it also moves SPENDING, which no cutoff does.
+ *
+ * Folded away by default, and that is the whole design decision. Every
+ * transaction has a month and almost none of them need arguing with, so a
+ * permanent "Counts in" field would be a control that is wrong to touch
+ * ninety-nine times out of a hundred, sitting among the ones people do use. It
+ * unfolds on demand — and unfolds ITSELF on a row that has already been moved,
+ * because a date and a month that disagree with no visible reason is exactly
+ * the quiet wrongness this app tries not to have.
+ *
+ * Two months either side rather than a full calendar. Anything further is a
+ * transaction filed under the wrong date, which is a different fix.
+ */
+function MonthOverride({
+  date,
+  value,
+  onChange,
+  shown,
+  onShow,
+}: {
+  date: string
+  /** `yyyy-MM`, or '' for "work it out". */
+  value: string
+  onChange: (v: string) => void
+  shown: boolean
+  onShow: () => void
+}) {
+  const here = monthKey(date)
+  const options = useMemo(() => {
+    const keys = [-2, -1, 0, 1, 2].map((d) => shiftMonth(here, d))
+    // A month the row was pinned to before its date moved is still an answer
+    // somebody gave, so it stays offered rather than silently vanishing.
+    if (value && !keys.includes(value)) keys.push(value)
+    return keys.sort()
+  }, [here, value])
+
+  if (!shown) {
+    return (
+      <button
+        type="button"
+        onClick={onShow}
+        className="flex items-center gap-1.5 self-start text-sm text-ink-3 transition hover:text-ink"
+      >
+        <CalendarClock size={14} />
+        Count it in another month
+      </button>
+    )
+  }
+
+  return (
+    <Field
+      label="Counts in"
+      hint={
+        value
+          ? `Counted in ${monthLabel(value)} wherever it appears, whatever its date says.`
+          : 'From the date, and your household’s settings for when a month’s money arrives.'
+      }
+    >
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Work it out from the date</option>
+        {options.map((m) => (
+          <option key={m} value={m}>
+            {monthLabel(m)}
+          </option>
+        ))}
+      </Select>
+    </Field>
   )
 }

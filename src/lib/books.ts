@@ -351,7 +351,13 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
 /* ---------- which month a contribution belongs to ---------- */
 
 /**
- * Money ARRIVING on or after this day of the month counts towards the NEXT one.
+ * When this household's month starts, for money coming in.
+ *
+ * Each field is a day of the month, 1..28, or `null` for "do not shift this at
+ * all". Money of that sort dated on or after the day counts towards the NEXT
+ * month.
+ *
+ * ## Why anything shifts
  *
  * We are paid at the end of one month and spend it during the next. Every
  * calendar month does therefore contain one salary, one contribution and one
@@ -369,56 +375,57 @@ export function classifyFlows(txns: Transaction[], books: BookMap): Map<string, 
  * moves; only the money that was always *for* the following month is counted
  * there.
  *
- * ## Why it is every arrival and not only a contribution
+ * ## Why it is a setting, and why there are two of them
  *
- * It used to shift contributions alone, and that is half a rule. It works on
- * the household book, which is what it was written for: the contribution and
- * the spending it funds land in the same month. On the PERSONAL book it breaks
- * the pairing it exists to fix, because a salary paid on the 31st is an arrival
- * too. July then held the salary and no contribution; August held the
- * contribution and no salary — so the personal book read
+ * It was one hard-coded 25, and 25 is a guess about a payday. Paydays move: a
+ * salary that lands on the 23rd because the 25th is a Sunday falls back into
+ * the month it was meant to leave, and takes its whole month's funding with it.
+ * A number that is right eleven months a year is a figure nobody can trust in
+ * the twelfth, and nothing on the screen says which month you are looking at.
  *
- *     Earned £0 · To our household £2,909 · Left with me −£3,065
+ * Two days rather than one because they are two events with two dates. The
+ * salary arrives when the employer says; the contribution moves when one of us
+ * gets round to it, which may be the same day or three days later. A single
+ * cutoff has to be wrong about one of them — set it to catch the transfer and
+ * it drags an earlier salary with it; set it to catch the salary and it lets a
+ * later transfer fall back a month. They are separately switchable for the same
+ * reason: they land in different books, contributions in the household's "Paid
+ * in" and income in the personal book's "Earned".
  *
- * every single month, and Everything's "money in" was the other person's
- * contribution and nothing else. Both months were wrong, in opposite
- * directions, and the figure that made it obvious was a salary of zero.
+ * Both default to 25, which is the constant they replace — so nothing moved for
+ * anybody on the day this shipped.
  *
- * So the rule is stated once and applied to everything that ARRIVES: a
- * contribution, a salary, interest, a refund. Money going OUT is never shifted
- * — a withdrawal is a response to something rather than a regular advance, and
- * spending on the 29th was spending on the 29th.
+ * ## Why 28 is the ceiling
+ *
+ * A cutoff of 30 has no meaning in February, and a rule that quietly does
+ * nothing for one month a year is worse than one you cannot set.
+ *
+ * ## Why it belongs to the household
+ *
+ * See `monthRule.ts`. The household book is complete and IDENTICAL on both our
+ * screens — that property is most of why the books exist — and a cutoff kept
+ * per device would break it in the one way nobody could see: the same
+ * contribution landing in July on one phone and August on the other, with both
+ * screens confident.
  */
-export const CONTRIBUTION_CUTOFF_DAY = 25
-
-/**
- * The month a transaction counts towards, which is not always the month it
- * happened in.
- *
- * Applied to both legs of a contribution, so my book and the household's agree
- * about when it happened — the same event must not land in different months on
- * either side of it. Each month still contains exactly one salary and exactly
- * one contribution; the pairing is simply corrected by one.
- *
- * NOT applied to withdrawals. Money coming back out of the household is a
- * response to something, not a regular advance, so there is no next month it is
- * obviously "for".
- */
-export function effectiveMonth(t: Transaction, flow: Flow | undefined): string {
-  if (!shifts(t, flow)) return monthKey(t.date)
-  const day = Number(t.date.slice(8, 10))
-  if (day < CONTRIBUTION_CUTOFF_DAY) return monthKey(t.date)
-  return shiftMonth(monthKey(t.date), 1)
+export interface MonthRule {
+  /** Money moved into the household on or after this day is next month's. */
+  contributionDay: number | null
+  /** Income arriving on or after this day is next month's. */
+  incomeDay: number | null
 }
 
+/** What a household that has never opened the setting gets: the constant this replaced. */
+export const DEFAULT_MONTH_RULE: MonthRule = { contributionDay: 25, incomeDay: 25 }
+
 /**
- * Whether a row is an ARRIVAL, and so counts towards the month it funds.
+ * The cutoff that governs one row, or null for a row nothing shifts.
  *
  * Both readings of a contribution, so the shift does not depend on whether the
  * other person happens to use the app — exactly the accident this whole
  * mechanism exists to stop mattering — and both kinds of outside income, since
  * a salary landing on the 31st is the same event as the contribution it pays
- * for and has to move with it.
+ * for and has to be able to move with it.
  *
  * Note what is NOT here. A `withdrawal` is money coming back out in response to
  * something rather than a regular advance, so there is no next month it is
@@ -427,13 +434,56 @@ export function effectiveMonth(t: Transaction, flow: Flow | undefined): string {
  * it left, so it belongs to that month on both sides of the book — shifting it
  * would move a purchase away from the statement line it reconciles against.
  */
-function shifts(t: Transaction, flow: Flow | undefined): boolean {
-  if (flow === 'contribution' || flow === 'contribution-unpaired') return true
+function cutoffFor(t: Transaction, flow: Flow | undefined, rule: MonthRule): number | null {
+  if (flow === 'contribution' || flow === 'contribution-unpaired') return rule.contributionDay
   // The arriving half only. A `contribution` is one flow seen from two ends,
   // and the leg LEAVING a personal account is not an arrival — but it is the
   // same event, so it is shifted above regardless of sign, which is what keeps
   // my book and the household's agreeing about when it happened.
-  return (flow === 'personal-income' || flow === 'external-income') && t.amountMinor > 0
+  if ((flow === 'personal-income' || flow === 'external-income') && t.amountMinor > 0) return rule.incomeDay
+  return null
+}
+
+/**
+ * The month a transaction counts towards, which is not always the month it
+ * happened in.
+ *
+ * Three answers, in the order of who is the more likely to be right:
+ *
+ *   1. `bookMonth` — somebody said so. A bonus paid in November that is really
+ *      December's; a January invoice settled in the December lull. It wins
+ *      outright, because an answer a person typed is never overridden by one
+ *      the app inferred, and it is the only one of the three that can move
+ *      SPENDING.
+ *   2. The household's cutoff for this kind of arrival, if it has one.
+ *   3. The month it happened in.
+ *
+ * The cutoff is applied to both legs of a contribution, so my book and the
+ * household's agree about when it happened — the same event must not land in
+ * different months on either side of it. Each month still contains exactly one
+ * salary and exactly one contribution; the pairing is simply corrected by one.
+ */
+export function effectiveMonth(t: Transaction, flow: Flow | undefined, rule: MonthRule): string {
+  if (t.bookMonth) return t.bookMonth
+  const cutoff = cutoffFor(t, flow, rule)
+  if (cutoff === null) return monthKey(t.date)
+  const day = Number(t.date.slice(8, 10))
+  if (day < cutoff) return monthKey(t.date)
+  return shiftMonth(monthKey(t.date), 1)
+}
+
+/**
+ * The same question for a row no cutoff can reach — spending, and everything
+ * else the rule leaves alone.
+ *
+ * Exists so the screens that count spending WITHOUT classifying flows — the
+ * budgets, and the sparklines in stats.ts — do not each hand-roll
+ * `t.bookMonth ?? monthKey(t.date)` and drift from what `effectiveMonth`
+ * answers. A budget that ignored a moved row would disagree with the donut
+ * above it about the same month.
+ */
+export function bookedMonth(t: Transaction): string {
+  return t.bookMonth ?? monthKey(t.date)
 }
 
 /* ---------- aggregates ---------- */
@@ -498,6 +548,7 @@ const EMPTY: BookTotals = {
 export function bookTotals(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   book: BookId,
   month: string,
   books: BookMap,
@@ -533,7 +584,7 @@ export function bookTotals(
      * somebody chose rather than the only one available.
      */
     if (flow === 'paid-for-household') {
-      if (effectiveMonth(row, flow) !== month) continue
+      if (effectiveMonth(row, flow, rule) !== month) continue
       const amount = -row.amountMinor
       if (book === 'household') {
         // Received and spent in the same breath: net unchanged, but the
@@ -557,7 +608,7 @@ export function bookTotals(
     if (!flow || flow === 'internal' || flow === 'ignored') continue
     // Not `monthKey(row.date)`: a contribution counts towards the month it was
     // FOR, which for money moved at the end of one month is the next one.
-    if (effectiveMonth(row, flow) !== month) continue
+    if (effectiveMonth(row, flow, rule) !== month) continue
     // Under `all`, my private account and the joint account are one pool, so a
     // contribution is internal again and both its legs are present. Counting it
     // would be exactly the double count the books exist to prevent.
@@ -916,6 +967,7 @@ export interface ContributionSplit {
 export function contributionSplit(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   month: string,
   books: BookMap,
   /** Needed to tell "I tagged this as mine" from "I tagged this as theirs". */
@@ -924,7 +976,7 @@ export function contributionSplit(
   // Not `monthKey(t.date)`: a contribution counts towards the month it was FOR.
   // `bookTotals` files it in the same month, which is what keeps this split
   // adding up to the figure above it.
-  return splitCore(txns, flows, books, userId, (t, flow) => effectiveMonth(t, flow) === month)
+  return splitCore(txns, flows, books, userId, (t, flow) => effectiveMonth(t, flow, rule) === month)
 }
 
 /**
@@ -1149,7 +1201,7 @@ export function savedInto(
   for (const t of txns) {
     if (!savingsAccountIds.has(t.accountId) || !ids.has(t.accountId)) continue
     if (t.amountMinor <= 0 || flows.get(t.id) !== 'internal') continue
-    if (!want.has(monthKey(t.date))) continue
+    if (!want.has(bookedMonth(t))) continue
     saved += t.amountMinor
   }
   return saved
@@ -1236,11 +1288,12 @@ export interface BookBridge {
 export function bookBridge(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   books: BookMap,
   month: string | string[],
 ): BookBridge {
   const months = Array.isArray(month) ? month : [month]
-  const of = (book: BookId) => sumBookTotals(months.map((m) => bookTotals(txns, flows, book, m, books)))
+  const of = (book: BookId) => sumBookTotals(months.map((m) => bookTotals(txns, flows, rule, book, m, books)))
 
   const household = of('household')
   const mine = of('mine')
@@ -1253,10 +1306,10 @@ export function bookBridge(
   for (const row of txns) {
     const flow = flows.get(row.id)
     if (flow === 'paid-for-household' && !visible.has(row.accountId)) {
-      if (want.has(effectiveMonth(row, flow))) unheldSpendMinor -= row.amountMinor
+      if (want.has(effectiveMonth(row, flow, rule))) unheldSpendMinor -= row.amountMinor
       continue
     }
-    if (books.others.has(row.accountId) && want.has(monthKey(row.date))) unbookedCount += 1
+    if (books.others.has(row.accountId) && want.has(bookedMonth(row))) unbookedCount += 1
   }
 
   return {
@@ -1280,6 +1333,7 @@ export interface BookMonth extends BookTotals {
 export function bookSeries(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   book: BookId,
   n: number,
   books: BookMap,
@@ -1294,7 +1348,7 @@ export function bookSeries(
     // The month we are in has not finished. Anything comparing it against the
     // months either side of it has to say so — see `MonthPoint.partial`.
     partial: key === now,
-    ...bookTotals(txns, flows, book, key, books),
+    ...bookTotals(txns, flows, rule, book, key, books),
   }))
 }
 
@@ -1355,6 +1409,7 @@ export function bookBalances(
 export function bookSpendByCategory(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   categories: Category[],
   book: BookId,
   /** One month, or several — a year view asks the same question of twelve. */
@@ -1368,8 +1423,13 @@ export function bookSpendByCategory(
   const want = new Set(Array.isArray(month) ? month : [month])
 
   for (const t of txns) {
-    if (!spendsIn(flows.get(t.id), book, t.accountId, ids)) continue
-    if (!t.categoryId || !want.has(monthKey(t.date))) continue
+    const flow = flows.get(t.id)
+    if (!spendsIn(flow, book, t.accountId, ids)) continue
+    // `effectiveMonth`, not `monthKey`: no cutoff moves spending, so the two
+    // differ only where somebody has moved this row by hand — and that is
+    // exactly what keeps the donut adding up to the heading above it, which
+    // reads the same rows through `bookTotals`.
+    if (!t.categoryId || !want.has(effectiveMonth(t, flow, rule))) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
 
@@ -1408,6 +1468,7 @@ export function bookSpendByCategory(
 export function bookMonthlySpendByCategory(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   categories: Category[],
   book: BookId,
   books: BookMap,
@@ -1422,11 +1483,10 @@ export function bookMonthlySpendByCategory(
     if (!t.categoryId) continue
     const flow = flows.get(t.id)
     if (!spendsIn(flow, book, t.accountId, ids)) continue
-    // Equal to `monthKey(t.date)` for every flow `spendsIn` admits — the 25th
-    // cut-off only ever moves a contribution, and a contribution is not
-    // spending. Written this way to match the other monthly series in
-    // `lib/insights.ts` rather than to make a difference here.
-    const i = index.get(effectiveMonth(t, flow))
+    // Equal to `monthKey(t.date)` for every flow `spendsIn` admits UNLESS
+    // somebody has moved this row by hand: no cutoff shifts spending, and
+    // `bookMonth` is the one thing that does.
+    const i = index.get(effectiveMonth(t, flow, rule))
     if (i === undefined) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
@@ -1468,6 +1528,7 @@ export interface SplitSlice extends CategorySlice {
 export function bookSplitByCategory(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   categories: Category[],
   books: BookMap,
   month: string | string[],
@@ -1480,10 +1541,13 @@ export function bookSplitByCategory(
 
   const parts = new Map<string, { household: number; mine: number }>()
   for (const t of txns) {
-    if (!t.categoryId || !want.has(monthKey(t.date))) continue
+    if (!t.categoryId) continue
+    const flow = flows.get(t.id)
+    // See `bookSpendByCategory`: a row somebody has moved counts where they
+    // said, on both sides of this split.
+    if (!want.has(effectiveMonth(t, flow, rule))) continue
     const cat = catMap.get(t.categoryId)
     if (!cat || cat.kind !== 'expense') continue
-    const flow = flows.get(t.id)
     const inHousehold = spendsIn(flow, 'household', t.accountId, householdIds)
     const inMine = spendsIn(flow, 'mine', t.accountId, mineIds)
     if (!inHousehold && !inMine) continue
@@ -1497,7 +1561,7 @@ export function bookSplitByCategory(
   // The combined figure comes from `bookSpendByCategory` under Everything, not
   // from adding the halves — see the note above.
   const combined = new Map(
-    bookSpendByCategory(txns, flows, categories, 'all', month, books).map((r) => [r.categoryId, r.totalMinor]),
+    bookSpendByCategory(txns, flows, rule, categories, 'all', month, books).map((r) => [r.categoryId, r.totalMinor]),
   )
   const rows = [...new Set([...parts.keys(), ...combined.keys()])].map((categoryId) => ({
     categoryId,
@@ -1554,6 +1618,7 @@ export function bookSplitByCategory(
 export function bookSlices(
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   categories: Category[],
   book: BookId,
   month: string | string[],
@@ -1562,7 +1627,7 @@ export function bookSlices(
   maxSlices = 8,
 ): CategorySlice[] {
   return toSlices(
-    bookSpendByCategory(txns, flows, categories, book, month, books, drillInto),
+    bookSpendByCategory(txns, flows, rule, categories, book, month, books, drillInto),
     categories,
     drillInto,
     maxSlices,
@@ -1642,10 +1707,11 @@ export function hasBreakdown(
   categoryId: string,
   txns: Transaction[],
   flows: Map<string, Flow>,
+  rule: MonthRule,
   categories: Category[],
   book: BookId,
   month: string | string[],
   books: BookMap,
 ): boolean {
-  return bookSpendByCategory(txns, flows, categories, book, month, books, categoryId).length > 1
+  return bookSpendByCategory(txns, flows, rule, categories, book, month, books, categoryId).length > 1
 }

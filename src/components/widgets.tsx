@@ -20,6 +20,7 @@ import {
   type BookId,
   type BookMap,
   type Flow,
+  type MonthRule,
 } from '../lib/books'
 import { spendFlow } from '../lib/sankey'
 import { openDrill, type Drill } from '../lib/drill'
@@ -89,6 +90,8 @@ export interface HomeData {
   book: BookId
   books: BookMap
   flows: Map<string, Flow>
+  /** When this household's months start — see `MonthRule`. */
+  rule: MonthRule
 }
 
 /**
@@ -195,16 +198,16 @@ export function HeroWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const words = BOOK_WORDS[data.book]
   const totals = useMemo(
-    () => bookTotals(data.allTxns, data.flows, data.book, month(), data.books),
-    [data.allTxns, data.flows, data.book, data.books],
+    () => bookTotals(data.allTxns, data.flows, data.rule, data.book, month(), data.books),
+    [data.allTxns, data.flows, data.rule, data.book, data.books],
   )
   const savedMinor = useMemo(() => {
     const ids = savingsAccounts(data.allAccounts, data.book, data.books)
     return ids.size === 0 ? 0 : savedInto(data.allTxns, data.flows, data.book, data.books, ids, month())
-  }, [data.allAccounts, data.allTxns, data.flows, data.book, data.books])
+  }, [data.allAccounts, data.allTxns, data.flows, data.rule, data.book, data.books])
   const split = useMemo(
-    () => contributionSplit(data.allTxns, data.flows, month(), data.books, data.userId),
-    [data.allTxns, data.flows, data.books, data.userId],
+    () => contributionSplit(data.allTxns, data.flows, data.rule, month(), data.books, data.userId),
+    [data.allTxns, data.flows, data.rule, data.books, data.userId],
   )
   const boughtDirect = split.minePaidMinor + split.theirsPaidMinor
   const budgetTotal = data.budgets.reduce((s, b) => s + b.amountMinor, 0)
@@ -337,8 +340,8 @@ export function BudgetGlanceWidget({ data }: WidgetProps) {
   // the personal book it counted that same row as spending when the book files
   // it as a contribution. Same selection rule as the Budgets page.
   const history = useMemo(
-    () => bookMonthlySpendByCategory(data.allTxns, data.flows, data.categories, data.book, data.books, months),
-    [data.allTxns, data.flows, data.categories, data.book, data.books, months],
+    () => bookMonthlySpendByCategory(data.allTxns, data.flows, data.rule, data.categories, data.book, data.books, months),
+    [data.allTxns, data.flows, data.rule, data.categories, data.book, data.books, months],
   )
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   // Budgets follow the book: the household's shared ones under "Our household",
@@ -497,8 +500,8 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
 
   const count = Number(options?.count ?? 6)
   const slices = useMemo(
-    () => bookSlices(data.allTxns, data.flows, data.categories, data.book, month(), data.books, drill ?? undefined, count),
-    [data.allTxns, data.flows, data.categories, data.book, data.books, drill, count],
+    () => bookSlices(data.allTxns, data.flows, data.rule, data.categories, data.book, month(), data.books, drill ?? undefined, count),
+    [data.allTxns, data.flows, data.rule, data.categories, data.book, data.books, drill, count],
   )
   // Changing book empties the breadcrumb: it would otherwise point at a
   // category that is no longer on this screen.
@@ -507,7 +510,7 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   const canDrill = (categoryId: string) =>
     categoryId !== OTHER_SLICE_ID &&
-    hasBreakdown(categoryId, data.allTxns, data.flows, data.categories, data.book, month(), data.books)
+    hasBreakdown(categoryId, data.allTxns, data.flows, data.rule, data.categories, data.book, month(), data.books)
 
   /**
    * Deeper while there is a deeper, and the transactions when there is not —
@@ -605,8 +608,8 @@ export function TrendWidget({ data, variant, options, controls }: WidgetProps) {
   const openRows = useHomeDrill(data.book)
   const months = useMemo(() => monthsOfHistory(data.txns), [data.txns])
   const series = useMemo(
-    () => bookSeries(data.allTxns, data.flows, data.book, months, data.books),
-    [data.allTxns, data.flows, data.book, months, data.books],
+    () => bookSeries(data.allTxns, data.flows, data.rule, data.book, months, data.books),
+    [data.allTxns, data.flows, data.rule, data.book, months, data.books],
   )
   return (
     <Card className="p-4 md:p-3">
@@ -651,17 +654,17 @@ export function FlowWidget({ data, options, controls }: WidgetProps) {
   // band against a contributions figure that was missing everything bought off
   // a personal card, and said nothing about having done so.
   const totals = useMemo(
-    () => bookTotals(data.allTxns, data.flows, data.book, month(), data.books),
-    [data.allTxns, data.flows, data.book, data.books],
+    () => bookTotals(data.allTxns, data.flows, data.rule, data.book, month(), data.books),
+    [data.allTxns, data.flows, data.rule, data.book, data.books],
   )
   const count = Number(options?.count ?? 8)
   const slices = useMemo(
-    () => bookSlices(data.allTxns, data.flows, data.categories, data.book, month(), data.books, undefined, count),
-    [data.allTxns, data.flows, data.categories, data.book, data.books, count],
+    () => bookSlices(data.allTxns, data.flows, data.rule, data.categories, data.book, month(), data.books, undefined, count),
+    [data.allTxns, data.flows, data.rule, data.categories, data.book, data.books, count],
   )
   const split = useMemo(
-    () => contributionSplit(data.allTxns, data.flows, month(), data.books, data.userId),
-    [data.allTxns, data.flows, data.books, data.userId],
+    () => contributionSplit(data.allTxns, data.flows, data.rule, month(), data.books, data.userId),
+    [data.allTxns, data.flows, data.rule, data.books, data.userId],
   )
   const partner = useMemo(() => {
     const others = [...memberMap.values()].filter((m) => m.userId !== data.userId)
@@ -673,7 +676,7 @@ export function FlowWidget({ data, options, controls }: WidgetProps) {
   const savedMinor = useMemo(() => {
     const ids = savingsAccounts(data.allAccounts, data.book, data.books)
     return ids.size === 0 ? 0 : savedInto(data.allTxns, data.flows, data.book, data.books, ids, month())
-  }, [data.allAccounts, data.allTxns, data.flows, data.book, data.books])
+  }, [data.allAccounts, data.allTxns, data.flows, data.rule, data.book, data.books])
 
   const graph = useMemo(
     () => spendFlow({ book: data.book, totals, slices, split, partner, savedMinor }),
@@ -765,7 +768,7 @@ export function ReimbursementWidget({ data }: WidgetProps) {
   const [paying, setPaying] = useState(false)
   const s = useMemo(
     () => settlement(data.allTxns, data.flows, data.books),
-    [data.allTxns, data.flows, data.books],
+    [data.allTxns, data.flows, data.rule, data.books],
   )
 
   if (s.paidMinor === 0) return null
@@ -1037,12 +1040,12 @@ export function PaidInWidget({ data, variant, controls }: WidgetProps) {
   const memberMap = useMemberMap()
   const openRows = useHomeDrill(data.book)
   const split = useMemo(
-    () => contributionSplit(data.allTxns, data.flows, month(), data.books, data.userId),
-    [data.allTxns, data.flows, data.books, data.userId],
+    () => contributionSplit(data.allTxns, data.flows, data.rule, month(), data.books, data.userId),
+    [data.allTxns, data.flows, data.rule, data.books, data.userId],
   )
   const totals = useMemo(
-    () => bookTotals(data.allTxns, data.flows, data.book, month(), data.books),
-    [data.allTxns, data.flows, data.book, data.books],
+    () => bookTotals(data.allTxns, data.flows, data.rule, data.book, month(), data.books),
+    [data.allTxns, data.flows, data.rule, data.book, data.books],
   )
   const partner = useMemo(() => {
     const others = [...memberMap.values()].filter((m) => m.userId !== data.userId)
@@ -1126,8 +1129,8 @@ export function PaidInWidget({ data, variant, controls }: WidgetProps) {
  */
 export function BridgeWidget({ data, variant, controls }: WidgetProps) {
   const bridge = useMemo(
-    () => bookBridge(data.allTxns, data.flows, data.books, month()),
-    [data.allTxns, data.flows, data.books],
+    () => bookBridge(data.allTxns, data.flows, data.rule, data.books, month()),
+    [data.allTxns, data.flows, data.rule, data.books],
   )
   const lines = useMemo<BridgeLine[]>(() => {
     const out: BridgeLine[] = [

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, AccountGrant, Transaction } from './db'
-import { classifyAccounts, classifyFlows, type BookMap } from './books'
+import { classifyAccounts, classifyFlows, DEFAULT_MONTH_RULE, type BookMap } from './books'
 import { askedOfMe, isAsking, looksLikeTransfer, unexplainedLegs, unexplainedTotals } from './unexplained'
+
+/** What these tests count months under, unless one of them varies it. */
+const RULE = DEFAULT_MONTH_RULE
 
 /**
  * Same household as books.test.ts, seen from Gabi's device: he is on both joint
@@ -51,7 +54,7 @@ const txn = (over: Partial<Transaction> & { accountId: string; amountMinor: numb
 })
 
 const legsOf = (txns: Transaction[], month?: string) =>
-  unexplainedLegs(txns, classifyFlows(txns, books), books, month)
+  unexplainedLegs(txns, classifyFlows(txns, books), RULE, books, month)
 
 describe('spotting a movement only the other person can confirm', () => {
   it('flags money leaving the joint account that reads as a transfer', () => {
