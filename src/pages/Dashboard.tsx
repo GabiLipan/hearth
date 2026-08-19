@@ -24,9 +24,12 @@ import { Arrange, useLayout } from '../components/Arrange'
 import type { SectionDef } from '../lib/layout'
 import { SLICE_SHAPES, TREND_SHAPES, monthWindow, rowCount, sliceCount } from '../components/charts'
 import { Button, Empty, Toolbar, useColumnCount } from '../components/ui'
+import { BRIDGE_SHAPES, PAID_IN_SHAPES } from '../components/insights'
 import {
   HeroWidget,
+  BridgeWidget,
   BudgetGlanceWidget,
+  PaidInWidget,
   AccountsWidget,
   DonutWidget,
   FlowWidget,
@@ -82,6 +85,11 @@ const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
     variants: TREND_SHAPES,
     options: [monthWindow('6')],
   },
+  // Each of these belongs to ONE book and renders nothing in the others, which
+  // is what lets all three sit in one catalogue: the card is hidden rather than
+  // empty, and comes back when the lens does.
+  { id: 'paidin', label: 'Who paid in', component: PaidInWidget, variants: PAID_IN_SHAPES },
+  { id: 'bridge', label: 'How the books add up', component: BridgeWidget, defaultSpan: 'full', variants: BRIDGE_SHAPES },
   { id: 'accounts', label: 'Accounts', component: AccountsWidget },
   { id: 'recent', label: 'Recent activity', component: RecentWidget, options: [rowCount('5', 'Rows')] },
   // Wide and detailed, so it waits to be asked for rather than turning up on

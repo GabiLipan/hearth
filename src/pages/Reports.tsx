@@ -22,6 +22,7 @@ import { thisMonthKey, monthLabel, shiftMonth, todayISO, fmtFullDate } from '../
 import { OTHER_SLICE_ID } from '../lib/stats'
 import {
   bookBalances,
+  bookBridge,
   bookSeries,
   bookSlices,
   bookTotals,
@@ -39,14 +40,14 @@ import {
   type BookId,
 } from '../lib/books'
 import { useApp } from '../state/AppContext'
-import { Card, Fill, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, useColumnCount, cx } from '../components/ui'
+import { Card, CardHeading, useInfoNote, Fill, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, useColumnCount, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { Arrange, useLayout } from '../components/Arrange'
-import { optionValue, type SectionDef } from '../lib/layout'
+import { currentVariant, optionValue, setVariant, type SectionDef } from '../lib/layout'
 import { openDrill, pathWithState, type Drill } from '../lib/drill'
 import { Sankey, sankeyHeight } from '../components/Sankey'
-import { spendFlow } from '../lib/sankey'
+import { booksFlow, spendFlow } from '../lib/sankey'
 import { monthsOfHistory } from '../lib/stats'
 import {
   CategoryBars,
@@ -65,8 +66,14 @@ import {
   type TrendShape,
 } from '../components/charts'
 import {
+  BooksBridge,
+  BRIDGE_SHAPES,
   CategoryHeatmap,
   FixedVariableBars,
+  PaidIn,
+  PAID_IN_SHAPES,
+  type BridgeLine,
+  type PaidInRow,
   PaceLine,
   SalaryStack,
   SavingsRateLine,
@@ -103,6 +110,13 @@ const RANGE_OPTIONS: { value: ReportRange; label: string }[] = [
   { value: '6', label: '6 mo' },
   { value: '12', label: '12 mo' },
 ]
+/** The month list is a table by default; these are the ways out of it. */
+const MONTHS_SHAPES: { value: 'table' | 'bars' | 'lines'; label: string }[] = [
+  { value: 'table', label: 'Table' },
+  { value: 'bars', label: 'Bars' },
+  { value: 'lines', label: 'Lines' },
+]
+
 const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
   { value: 'month', label: 'Month' },
   { value: 'year', label: 'Year' },
@@ -131,6 +145,14 @@ const SECTIONS: SectionDef[] = [
   { id: 'inout', label: 'In vs out', variants: IN_OUT_SHAPES },
   { id: 'net', label: 'Kept each month', defaultSpan: 'full', variants: NET_SHAPES },
   { id: 'flow', label: 'The whole flow', defaultSpan: 'full', options: [sliceCount('8')] },
+  // Household only, and the one figure this whole model makes newly possible:
+  // neither of us can see the other's salary, but every contribution ARRIVES in
+  // a joint account, which we can both read.
+  { id: 'paidin', label: 'Who paid in', variants: PAID_IN_SHAPES },
+  // Everything only. These two are what that book is FOR, now that it has
+  // stopped being the other two poured into one pool.
+  { id: 'bridge', label: 'How the books add up', defaultSpan: 'full', variants: BRIDGE_SHAPES },
+  { id: 'crossings', label: 'Between our books', defaultSpan: 'full', options: [sliceCount('6')] },
   { id: 'waterfall', label: 'Step by step', defaultSpan: 'full' },
   { id: 'salary', label: 'What each salary turned into', defaultSpan: 'full' },
   { id: 'committed', label: 'Committed vs chosen' },
@@ -218,6 +240,8 @@ export default function Reports() {
   const [from, setFrom] = useState(() => `${thisMonthKey()}-01`)
   const [to, setTo] = useState(() => todayISO())
   const [view, setView] = useState<ReportView>('charts')
+  /** How the table view's month list is drawn. Session state, like the view. */
+  const [monthsShape, setMonthsShape] = useState<'table' | 'bars' | 'lines'>('table')
   const [book, setBook] = useBook()
   /** The category being drilled into, or null for the top level. */
   const [drill, setDrill] = useState<string | null>(null)
@@ -241,6 +265,7 @@ export default function Reports() {
     ) ?? fallback
   const sliceLimit = Number(sectionOption('categories', 'count', '8'))
   const flowLimit = Number(sectionOption('flow', 'count', '8'))
+  const crossingLimit = Number(sectionOption('crossings', 'count', '6'))
   const payeeLimit = Number(sectionOption('payees', 'rows', '10'))
   const heatmapRows = Number(sectionOption('heatmap', 'rows', '10'))
 
@@ -449,6 +474,133 @@ export default function Reports() {
       : savedInto(txns ?? [], flows, book, books, ids, inView)
   }, [txns, flows, book, books, accounts, inView, period, from, to])
 
+  /**
+   * Who paid in, as rows — the two halves of each person's contribution kept
+   * apart, which is the whole reason the card exists.
+   *
+   * The unattributed band is a person-shaped absence rather than a person, so
+   * it is muted: an unattributed figure must not wear somebody's colour. Outside
+   * income is not a contribution at all and is listed last, quietly, because
+   * leaving it out would make the shares add up to something other than what
+   * came in.
+   */
+  const paidIn = useMemo<PaidInRow[]>(() => {
+    const rows: PaidInRow[] = [
+      {
+        key: 'mine',
+        name: 'You',
+        movedMinor: Math.max(0, split.mineMinor - split.minePaidMinor),
+        boughtMinor: split.minePaidMinor,
+        count: split.mineCount,
+        slot: 2,
+      },
+      {
+        key: 'theirs',
+        name: partner ?? 'Someone else',
+        movedMinor: Math.max(0, split.theirsMinor - split.theirsPaidMinor),
+        boughtMinor: split.theirsPaidMinor,
+        count: split.theirsCount,
+        slot: 5,
+      },
+      {
+        key: 'unnamed',
+        name: 'Paid in — not sure by whom',
+        movedMinor: split.unattributedMinor,
+        boughtMinor: 0,
+        count: 0,
+        slot: 0,
+        muted: true,
+      },
+      {
+        key: 'external',
+        name: 'Other income',
+        movedMinor: split.externalMinor,
+        boughtMinor: 0,
+        count: 0,
+        slot: 0,
+        muted: true,
+      },
+    ]
+    return rows.filter((r) => r.movedMinor + r.boughtMinor > 0)
+  }, [split, partner])
+
+  /** How much of the household's spending never passed through a joint account. */
+  const boughtDirect = split.minePaidMinor + split.theirsPaidMinor
+
+  const bridge = useMemo(
+    () =>
+      bookBridge(txns ?? [], flows, books, period === 'custom' ? inView : inView),
+    [txns, flows, books, inView, period],
+  )
+
+  /**
+   * The bridge, as lines.
+   *
+   * Two of the three identities are exact and one is not, and all three are
+   * printed rather than the difference being rounded away — see `bookBridge`.
+   * The two correction lines are shown only when they are non-zero, because a
+   * row of dashes explaining an adjustment that did not happen is noise.
+   */
+  const bridgeLines = useMemo<BridgeLine[]>(() => {
+    const lines: BridgeLine[] = [
+      {
+        key: 'outside',
+        label: 'From outside',
+        household: bridge.household.externalIncome,
+        mine: bridge.mine.externalIncome + bridge.mine.returned,
+        all: bridge.all.externalIncome,
+      },
+    ]
+    if (bridge.crossingMinor > 0) {
+      lines.push({
+        key: 'between',
+        label: 'Put in between us',
+        household: bridge.household.contributions,
+        mine: bridge.crossingMinor,
+        all: undefined,
+        negative: false,
+      })
+    }
+    lines.push({
+      key: 'spent',
+      label: 'Spent',
+      household: bridge.household.spend,
+      mine: bridge.mine.spend,
+      all: bridge.all.spend,
+    })
+    if (bridge.unheldSpendMinor > 0) {
+      lines.push({
+        key: 'unheld',
+        label: 'Bought for us from an account you cannot see',
+        household: bridge.unheldSpendMinor,
+        mine: undefined,
+        all: undefined,
+        negative: true,
+      })
+    }
+    lines.push({
+      key: 'left',
+      label: 'Left',
+      household: bridge.household.net,
+      mine: bridge.mine.net,
+      all: bridge.all.net,
+      total: true,
+    })
+    return lines
+  }, [bridge])
+
+  /** The two books' spending, kept apart, for the four-column diagram. */
+  const crossingGraph = useMemo(() => {
+    if (book !== 'all') return { nodes: [], links: [], totalMinor: 0 }
+    return booksFlow({
+      bridge,
+      split,
+      householdSlices: bookSlices(txns ?? [], flows, categories, 'household', inView, books, undefined, crossingLimit),
+      mineSlices: bookSlices(txns ?? [], flows, categories, 'mine', inView, books, undefined, crossingLimit),
+      partner: partner ?? undefined,
+    })
+  }, [book, bridge, split, txns, flows, categories, inView, books, crossingLimit, partner])
+
   const flowGraph = useMemo(
     () =>
       spendFlow({
@@ -506,6 +658,23 @@ export default function Reports() {
   const periodLabel =
     period === 'year' ? year : period === 'custom' ? `${fmtFullDate(from)} – ${fmtFullDate(to)}` : monthLabel(month)
   const words = BOOK_WORDS[book]
+  /**
+   * What the figures on this card mean, and the one way a hand-drawn range
+   * behaves differently. Both are worth saying and neither is worth saying
+   * every time the page opens.
+   */
+  const summaryNote = useInfoNote(
+    `${periodLabel} in figures`,
+    <>
+      <p>{words.netHint}</p>
+      {period === 'custom' && (
+        <p>
+          A range counts money on the day it moved. Contributions are not shifted into the month they fund, the
+          way they are under Month and Year.
+        </p>
+      )}
+    </>,
+  )
   const drillName = drill ? (catMap.get(drill)?.name ?? 'Category') : null
   /**
    * The period we are in has not finished — a part-month, or a year still
@@ -554,6 +723,23 @@ export default function Reports() {
   }
 
   const columnCount = useColumnCount(COLUMN_STEPS)
+
+  /**
+   * The breakdown's shape picker, for the table view.
+   *
+   * `Arrange` builds this for every section it lays out, and the table view is
+   * the one place a card is rendered OUTSIDE it — so the one view that contains
+   * a table was the one view with no way to switch away from a table. Built by
+   * hand here from the same layout the grid reads.
+   */
+  const tableControls = (
+    <Segmented
+      value={currentVariant(SECTIONS[0], layout.find((i) => i.id === 'categories')) ?? 'donut'}
+      onChange={(v) => setLayout(setVariant(layout, 'categories', v))}
+      className="w-44"
+      options={SLICE_SHAPES}
+    />
+  )
 
   // Changing book or month while inside a category would leave the breadcrumb
   // pointing at a slice that is no longer on screen.
@@ -863,15 +1049,17 @@ export default function Reports() {
     </Card>
   )
 
-  /** A card's heading, with room for the chart-shape picker on the end of it. */
-  const heading = (title: string, controls: ReactNode, hint?: string) => (
-    <div className="mb-3 md:mb-2">
-      <div className="flex items-start gap-2">
-        <h3 className="min-w-0 flex-1 font-semibold md:text-sm">{title}</h3>
-        {controls}
-      </div>
-      {hint && <p className="mt-1 text-sm text-ink-3 md:text-xs">{hint}</p>}
-    </div>
+  /**
+   * A card's heading, with room for the chart-shape picker on the end of it.
+   *
+   * The third argument used to be a `hint` that rendered as a permanently
+   * visible paragraph. Eleven cards each carried two sentences of it, which is
+   * three lines above every chart on a phone and the rule in CLAUDE.md broken
+   * eleven times over. It is an `info` now — same words, behind the ⓘ, read
+   * once rather than re-read on every visit.
+   */
+  const heading = (title: string, controls: ReactNode, info?: ReactNode, hint?: ReactNode) => (
+    <CardHeading title={title} controls={controls} info={info} hint={hint} />
   )
 
   /**
@@ -931,10 +1119,118 @@ export default function Reports() {
           </Card>
         )
 
+      /* Household only. Neither of us can see the other's salary, but every
+         contribution ARRIVES in a joint account and joint accounts are readable
+         by both — so this is one figure that is complete and identical on both
+         screens, and the only place it can be. */
+      case 'paidin':
+        return book !== 'household' || paidIn.length === 0 ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              `Who paid in · ${periodLabel}`,
+              controls,
+              <>
+                <p>
+                  Money reaches the household two ways: it is moved into a joint account, or something is bought
+                  for us straight off somebody&rsquo;s own card. Both are putting money in, and only the first is
+                  a decision you make once a month.
+                </p>
+                <p>
+                  A contribution nobody has linked cannot be put on a name — an arrival on its own cannot say who
+                  sent it — so it sits under &ldquo;not sure by whom&rdquo; until somebody says.
+                </p>
+              </>,
+            )}
+            <PaidIn
+              rows={paidIn}
+              totalMinor={totals.income}
+              shape={variant}
+              onPick={(row) => (row.muted ? seeTransactions() : seeTransactions())}
+            />
+            {boughtDirect > 0 && (
+              <p className="mt-3 text-sm text-ink-2 md:text-xs">
+                <span className="font-semibold tabular">{money(boughtDirect)}</span> of this period&rsquo;s household
+                spending was bought straight from personal cards.
+              </p>
+            )}
+          </Card>
+        )
+
+      /* Everything only, and the reason that book exists at all now: it stops
+         being a fourth filter over the same rows and becomes the view that
+         explains the other two. */
+      case 'bridge':
+        return book !== 'all' || bridge.all.income + bridge.all.spend === 0 ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              `How the books add up · ${periodLabel}`,
+              controls,
+              <>
+                <p>
+                  Money moved between our books is counted once in each book and in neither under Everything — the
+                  two legs are the same event, so counting either would be counting it twice. That is why
+                  Everything&rsquo;s income is not the two figures above it added together.
+                </p>
+                <p>
+                  What is left always adds up exactly, whatever the crossings did and whoever paid for what.
+                </p>
+                {bridge.unheldSpendMinor > 0 && (
+                  <p>
+                    Household shopping bought on a card this device cannot see belongs to the household book and to
+                    no account here, so Everything is short by it. That is a fact about who can see what, not a
+                    rounding error.
+                  </p>
+                )}
+                {bridge.unbookedCount > 0 && (
+                  <p>
+                    {bridge.unbookedCount} {bridge.unbookedCount === 1 ? 'row is' : 'rows are'} in an account that is
+                    in neither book — one somebody shared with you. Those are yours to read and not yours to count,
+                    so they are in no figure here, including Everything&rsquo;s.
+                  </p>
+                )}
+              </>,
+            )}
+            <BooksBridge
+              lines={bridgeLines}
+              shape={variant}
+              partner={partner ?? undefined}
+              onPick={() => seeTransactions()}
+            />
+          </Card>
+        )
+
+      case 'crossings':
+        return book !== 'all' || crossingGraph.totalMinor === 0 ? null : (
+          <Card className="p-5 md:p-4">
+            {heading(
+              `Between our books · ${periodLabel}`,
+              controls,
+              <p>
+                Where the money came from, whose it became, and what it turned into. The two columns in the middle
+                are the crossing: everything one of us put into the household, moved across or bought straight off
+                a card, and anything taken back out again.
+              </p>,
+            )}
+            <Fill min={sankeyHeight(crossingGraph)}>
+              {(height) => (
+                <Sankey
+                  graph={crossingGraph}
+                  height={height}
+                  caption="Left to right: where it came from, whose it became, and what it turned into."
+                  canPick={(n) => n.id.includes(':cat:')}
+                  onPick={(n) => seeTransactions({ category: n.id.split(':cat:')[1] })}
+                />
+              )}
+            </Fill>
+          </Card>
+        )
+
       case 'spend':
         return !monthly ? null : (
           <Card className="p-5 md:p-4">
-            {heading(`${words.spend} each month`, controls, scrollHint)}
+            {/* A one-liner about what is on screen right now stays on screen:
+                nobody opens a ⓘ to find out that a chart scrolls. */}
+            {heading(`${words.spend} each month`, controls, undefined, scrollHint)}
             <Fill min={220}>
               {(height) => (
                 <SpendBars
@@ -1160,6 +1456,10 @@ export default function Reports() {
             `flex-wrap` with `divide-x` was neither: the item that wrapped kept
             its left border, so the second line began with a divider attached to
             nothing and the figures no longer lined up under their headings. */}
+        {/* Everything this card has to explain sits behind one ⓘ, rather than
+            as three paragraphs stacked under the figures — which is what it
+            was, and on a phone it pushed the first chart off the screen. */}
+        <div className="mb-1.5 flex items-start justify-end">{summaryNote.toggle}</div>
         <div className="grid grid-cols-2 gap-x-5 gap-y-3 md:flex md:flex-nowrap md:items-start md:gap-0 md:divide-x md:divide-hairline">
           <Stat label={words.income} value={money(totals.income)} />
           {book === 'household' && totals.contributions > 0 && (
@@ -1175,7 +1475,7 @@ export default function Reports() {
             tone={totals.net < 0 ? 'bad' : 'good'}
           />
         </div>
-        <p className="mt-2 text-xs text-ink-3">{words.netHint}</p>
+
 
         {/* The balances, for the month that has not finished. Deliberately
             below the figures rather than beside them: it is the sentence that
@@ -1191,6 +1491,7 @@ export default function Reports() {
             </span>
           </p>
         )}
+        {summaryNote.body}
         {partial && !balances && (
           <p className="mt-1.5 text-xs text-ink-3">
             {periodLabel} runs to today, so these figures are still moving.
@@ -1200,15 +1501,6 @@ export default function Reports() {
         {/* Only where there is a real figure behind it. A tenth either way is
             not a change worth a sentence, and saying so anyway trains people to
             ignore the line. */}
-        {period === 'custom' && (
-          /* The one place a range behaves differently, so it is stated rather
-             than left to be discovered. See `bookTotalsInRange`. */
-          <p className="mt-1.5 text-xs text-ink-3">
-            A range counts money on the day it moved. Contributions are not shifted into the month they fund,
-            the way they are under Month and Year.
-          </p>
-        )}
-
         {period !== 'custom' && lastYear && Math.abs(lastYear.deltaMinor) >= Math.max(lastYear.spendMinor * 0.1, 1000) && (
           <p className="mt-1.5 text-xs text-ink-2">
             <span className={lastYear.deltaMinor > 0 ? 'font-medium text-critical-text' : 'font-medium text-good-text'}>
@@ -1264,44 +1556,6 @@ export default function Reports() {
           </div>
         )}
 
-        {book === 'household' && totals.contributions > 0 && (
-          <div className="mt-3 border-t border-hairline pt-3">
-            <p className="mb-1.5 text-xs text-ink-3">Who paid in</p>
-            {/* A stack, so the segments are held apart and each is a rounded
-                object of its own — colour alone is what fails first on the
-                thinnest band, which is the one a split exists to show. The
-                items shrink to pay for the gaps rather than overflowing. */}
-            <div className="flex h-2 gap-0.5 overflow-hidden rounded-full bg-surface-2">
-              {[
-                { key: 'mine', value: split.mineMinor, color: 'var(--series-2)' },
-                { key: 'theirs', value: split.theirsMinor, color: 'var(--series-5)' },
-                { key: 'other', value: split.otherMinor, color: 'var(--ink-3)' },
-              ]
-                .filter((s) => s.value > 0)
-                .map((s) => (
-                  <span
-                    key={s.key}
-                    className="rounded-full"
-                    style={{ width: `${(s.value / Math.max(1, totals.income)) * 100}%`, background: s.color }}
-                  />
-                ))}
-            </div>
-            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-              {split.mineMinor > 0 && <Legend color="var(--series-2)" label="You" value={money(split.mineMinor)} />}
-              {split.theirsMinor > 0 && (
-                <Legend color="var(--series-5)" label={partner ?? 'Someone else'} value={money(split.theirsMinor)} />
-              )}
-              {split.otherMinor > 0 && (
-                <Legend
-                  color="var(--ink-3)"
-                  label="Not linked to anyone"
-                  value={money(split.otherMinor)}
-                  hint="Interest, refunds, and any transfer nobody has confirmed yet — an arrival on its own cannot say who sent it."
-                />
-              )}
-            </div>
-          </div>
-        )}
       </Card>
 
       {/* Every chart below is a card somebody can move, resize or put away.
@@ -1318,14 +1572,43 @@ export default function Reports() {
           carries `overflow-x: clip` the excess is silently cut off. */}
       {view === 'table' ? (
         <div className="grid gap-3 md:gap-2.5 xl:grid-cols-2 [&>*]:min-w-0">
-          <div className="xl:col-span-2">{categoriesCard(null)}</div>
+          {/* The picker travels into the table view too. The section's variant
+              decides which DRAWING; hiding the control here meant the one view
+              with a table in it was the one where you could not switch away
+              from it. */}
+          <div className="xl:col-span-2">{categoriesCard(tableControls)}</div>
           <Card className="p-5 md:p-4 xl:col-span-2">
             <div className="mb-3 flex items-center justify-between gap-2 md:mb-2">
               <h3 className="font-semibold md:text-sm">Month by month</h3>
-              <Button size="sm" variant="ghost" onClick={exportMonths} title="Download this table as CSV">
-                <Download size={13} /> CSV
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* The one table on this page with no chart beside it. The
+                    figures ARE the point of the table view, so it stays the
+                    default — but a column of twelve numbers is a shape you
+                    cannot see, and this is the way to see it. */}
+                <Segmented
+                  value={monthsShape}
+                  onChange={setMonthsShape}
+                  className="w-44"
+                  options={MONTHS_SHAPES}
+                />
+                <Button size="sm" variant="ghost" onClick={exportMonths} title="Download this table as CSV">
+                  <Download size={13} /> CSV
+                </Button>
+              </div>
             </div>
+            {monthsShape !== 'table' ? (
+              <Fill min={240}>
+                {(height) => (
+                  <IncomeSpendBars
+                    data={longSeries}
+                    height={height}
+                    visible={monthsShown}
+                    shape={monthsShape === 'lines' ? 'lines' : 'bars'}
+                    onPickMonth={(m) => seeMonth(m)}
+                  />
+                )}
+              </Fill>
+            ) : (
             <ScrollTable minWidth={560}>
               <thead>
                 <tr className={table.head}>
@@ -1363,6 +1646,7 @@ export default function Reports() {
                 ))}
               </tbody>
             </ScrollTable>
+            )}
           </Card>
         </div>
       ) : (
@@ -1393,15 +1677,6 @@ export default function Reports() {
   )
 }
 
-function Legend({ color, label, value, hint }: { color: string; label: string; value: string; hint?: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5" title={hint}>
-      <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
-      <span className="text-ink-2">{label}</span>
-      <span className="font-medium tabular">{value}</span>
-    </span>
-  )
-}
 
 function Stat({
   label,

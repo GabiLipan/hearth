@@ -28,7 +28,7 @@ import type {
 } from '../lib/insights'
 import { CategoryIcon } from './CategoryIcon'
 import { roundedBar, stackedBar } from './charts'
-import { cx } from './ui'
+import { ScrollTable, table, cx } from './ui'
 
 /**
  * The report views that are not a donut.
@@ -726,5 +726,316 @@ function Legend({
       ))}
       {partial && <span className="text-ink-3">Faded = this month so far</span>}
     </div>
+  )
+}
+
+/* ---------- 9. Who paid in ---------- */
+
+export interface PaidInRow {
+  key: string
+  name: string
+  /** Moved into a joint account. */
+  movedMinor: number
+  /** Bought for the household straight off a personal card. */
+  boughtMinor: number
+  count: number
+  /** The palette slot the person wears — the same one the flow diagram uses. */
+  slot: number
+  /** Not a person: outside income, or an arrival with no name on it. */
+  muted?: boolean
+}
+
+export const PAID_IN_SHAPES = [
+  { value: 'bars', label: 'Bars' },
+  { value: 'split', label: 'Shares' },
+  { value: 'table', label: 'Table' },
+]
+
+/**
+ * What each of us put into the household, and HOW.
+ *
+ * The two halves are the point of the card. Money moved across is a decision —
+ * a figure we agreed, arriving every month; money spent off a personal card is
+ * an accident of which card was in the wallet, and it is the half that quietly
+ * turns into somebody being owed. The household book could always say £3,934
+ * came in and never which of those it was, and the only route to the breakdown
+ * was hovering one band of the flow diagram.
+ *
+ * One row per person, two segments each: the solid part is moved, the lighter
+ * step of the SAME hue is bought. A different hue would read as a third person.
+ */
+export function PaidIn({
+  rows,
+  totalMinor,
+  shape = 'bars',
+  onPick,
+}: {
+  rows: PaidInRow[]
+  /** What the bars are a share of — money in, so the bars are comparable. */
+  totalMinor: number
+  shape?: string
+  /** Where a person goes when pressed. Rows are inert without it. */
+  onPick?: (row: PaidInRow) => void
+}) {
+  const { money } = useApp()
+  const c = useChartColors()
+  if (rows.length === 0) return null
+
+  const paint = (r: PaidInRow) => (r.muted ? c.ink3 : c.slot(r.slot))
+  const soft = (r: PaidInRow) => `color-mix(in oklab, ${paint(r)} 45%, var(--surface))`
+  const total = Math.max(1, totalMinor)
+
+  if (shape === 'table') {
+    return (
+      <ScrollTable minWidth={420}>
+        <thead>
+          <tr className={table.head}>
+            <th className={cx(table.th, table.pinned)}>Who</th>
+            <th className={cx(table.th, 'text-right')}>Moved across</th>
+            <th className={cx(table.th, 'text-right')}>Bought for us</th>
+            <th className={cx(table.th, 'text-right')}>Total</th>
+            <th className={cx(table.th, 'text-right')}>Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const sum = r.movedMinor + r.boughtMinor
+            return (
+              <tr
+                key={r.key}
+                className={cx(table.row, onPick && 'cursor-pointer')}
+                onClick={onPick ? () => onPick(r) : undefined}
+              >
+                <td className={cx(table.cell, table.pinned)}>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="size-2.5 shrink-0 rounded-full" style={{ background: paint(r) }} />
+                    {r.name}
+                  </span>
+                </td>
+                <td className={cx(table.cell, 'text-right tabular')}>
+                  {r.movedMinor > 0 ? money(r.movedMinor) : <span className="text-ink-3">—</span>}
+                </td>
+                <td className={cx(table.cell, 'text-right tabular')}>
+                  {r.boughtMinor > 0 ? money(r.boughtMinor) : <span className="text-ink-3">—</span>}
+                </td>
+                <td className={cx(table.cell, 'text-right font-semibold tabular')}>{money(sum)}</td>
+                <td className={cx(table.cell, 'text-right text-ink-3 tabular')}>
+                  {Math.round((sum / total) * 100)}%
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </ScrollTable>
+    )
+  }
+
+  // "Shares" is one stacked bar rather than one per person: the question there
+  // is what proportion of the household's money each of us put in, and separate
+  // bars answer "how much" and leave you to do the division.
+  if (shape === 'split') {
+    return (
+      <div>
+        <div className="flex h-4 gap-0.5 overflow-hidden rounded-full bg-surface-2">
+          {rows.flatMap((r) =>
+            [
+              { id: `${r.key}:moved`, value: r.movedMinor, fill: paint(r) },
+              { id: `${r.key}:bought`, value: r.boughtMinor, fill: soft(r) },
+            ]
+              .filter((part) => part.value > 0)
+              .map((part) => (
+                <button
+                  key={part.id}
+                  type="button"
+                  title={`${r.name} — ${money(part.value)}`}
+                  onClick={onPick ? () => onPick(r) : undefined}
+                  className="rounded-full"
+                  style={{ width: `${(part.value / total) * 100}%`, background: part.fill }}
+                />
+              )),
+          )}
+        </div>
+        <ul className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
+          {rows.map((r) => (
+            <li key={r.key} className="flex items-center gap-1.5 text-xs">
+              <span className="size-2 shrink-0 rounded-full" style={{ background: paint(r) }} />
+              <span className="text-ink-2">{r.name}</span>
+              <span className="font-medium tabular">{money(r.movedMinor + r.boughtMinor)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+
+  const peak = rows.reduce((m, r) => Math.max(m, r.movedMinor + r.boughtMinor), 0)
+  return (
+    <ul className="space-y-2">
+      {rows.map((r) => {
+        const sum = r.movedMinor + r.boughtMinor
+        const width = peak > 0 ? (sum / peak) * 100 : 0
+        return (
+          <li key={r.key}>
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="min-w-0 truncate text-sm font-medium">{r.name}</span>
+              <span className="shrink-0 text-sm font-semibold tabular">{money(sum)}</span>
+            </div>
+            <button
+              type="button"
+              disabled={!onPick}
+              onClick={onPick ? () => onPick(r) : undefined}
+              aria-label={`${r.name}, ${money(sum)}`}
+              className={cx('mt-1 flex h-3 w-full gap-0.5 rounded-full', onPick && 'cursor-pointer')}
+            >
+              <span
+                className="h-full rounded-full"
+                style={{ width: `${width * (sum > 0 ? r.movedMinor / sum : 0)}%`, background: paint(r) }}
+              />
+              <span
+                className="h-full rounded-full"
+                style={{ width: `${width * (sum > 0 ? r.boughtMinor / sum : 0)}%`, background: soft(r) }}
+              />
+            </button>
+            {/* The breakdown in words, because the lighter segment on a thin bar
+                is the one thing nobody will read off the picture. */}
+            <p className="mt-1 text-xs text-ink-3">
+              {r.boughtMinor > 0 && r.movedMinor > 0
+                ? `${money(r.movedMinor)} moved · ${money(r.boughtMinor)} bought for us`
+                : r.boughtMinor > 0
+                  ? `all of it bought for us, off a personal card`
+                  : `moved across`}
+              {r.count > 0 && ` · ${r.count} ${r.count === 1 ? 'payment' : 'payments'}`}
+            </p>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/* ---------- 10. How the books add up ---------- */
+
+export interface BridgeLine {
+  key: string
+  label: string
+  /** Undefined where the column has nothing to say on this line. */
+  household?: number
+  mine?: number
+  all?: number
+  /** A line that is subtracted rather than added — shown in brackets. */
+  negative?: boolean
+  /** The bottom line, which is the one that always reconciles. */
+  total?: boolean
+}
+
+// The table is the default here, and deliberately: the whole point of this
+// card is the arithmetic, and a bar chart of a reconciliation is a picture of
+// numbers you then have to go and read anyway. The bars are the alternative for
+// somebody who wants the shape of it at a glance.
+export const BRIDGE_SHAPES = [
+  { value: 'table', label: 'Table' },
+  { value: 'bars', label: 'Bars' },
+]
+
+/**
+ * The three sets of books side by side, and the lines that reconcile them.
+ *
+ * It does not ASSERT that the numbers match — it shows the arithmetic,
+ * including the lines that do not add up and why. Everything up to now has been
+ * a figure you were asked to trust; this is the working.
+ */
+export function BooksBridge({
+  lines,
+  shape = 'table',
+  partner,
+  onPick,
+}: {
+  lines: BridgeLine[]
+  shape?: string
+  partner?: string
+  onPick?: (line: BridgeLine, book: 'household' | 'mine' | 'all') => void
+}) {
+  const { money } = useApp()
+  const c = useChartColors()
+  const cell = (v: number | undefined, negative?: boolean) =>
+    v === undefined ? <span className="text-ink-3">—</span> : negative ? `(${money(v)})` : money(v)
+
+  if (shape === 'bars') {
+    // Every line as a trio of bars on one scale, so "spending adds up and
+    // income does not" is something you can SEE rather than something you have
+    // to subtract in your head.
+    const peak = Math.max(1, ...lines.flatMap((l) => [l.household ?? 0, l.mine ?? 0, l.all ?? 0]))
+    const books = [
+      { key: 'household' as const, name: 'Ours', fill: c.slot(1) },
+      { key: 'mine' as const, name: 'Mine', fill: c.slot(2) },
+      { key: 'all' as const, name: 'Everything', fill: c.ink2 },
+    ]
+    return (
+      <div className="space-y-3">
+        {lines.map((line) => (
+          <div key={line.key}>
+            <p className={cx('text-xs', line.total ? 'font-semibold text-ink' : 'text-ink-2')}>{line.label}</p>
+            <div className="mt-1 space-y-1">
+              {books.map((b) => {
+                const v = line[b.key]
+                if (v === undefined) return null
+                return (
+                  <button
+                    key={b.key}
+                    type="button"
+                    disabled={!onPick}
+                    onClick={onPick ? () => onPick(line, b.key) : undefined}
+                    className="flex w-full items-center gap-2 text-left"
+                  >
+                    <span className="w-16 shrink-0 text-[0.6875rem] text-ink-3">{b.name}</span>
+                    <span className="h-2.5 min-w-0 flex-1 rounded-full bg-surface-2">
+                      <span
+                        className="block h-full rounded-full"
+                        style={{ width: `${(Math.abs(v) / peak) * 100}%`, background: b.fill }}
+                      />
+                    </span>
+                    <span className="w-24 shrink-0 text-right text-xs tabular">{cell(v, line.negative)}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <ScrollTable minWidth={460}>
+      <thead>
+        <tr className={table.head}>
+          <th className={cx(table.th, table.pinned)}></th>
+          <th className={cx(table.th, 'text-right')}>Ours</th>
+          <th className={cx(table.th, 'text-right')}>{partner ? 'Mine' : 'Mine'}</th>
+          <th className={cx(table.th, 'text-right')}>Everything</th>
+        </tr>
+      </thead>
+      <tbody>
+        {lines.map((line) => (
+          <tr key={line.key} className={cx(table.row, line.total && 'font-semibold')}>
+            <td className={cx(table.cell, table.pinned, !line.total && 'text-ink-2')}>{line.label}</td>
+            {(['household', 'mine', 'all'] as const).map((book) => (
+              <td
+                key={book}
+                className={cx(
+                  table.cell,
+                  'text-right tabular',
+                  line.negative && 'text-ink-3',
+                  onPick && line[book] !== undefined && 'cursor-pointer',
+                )}
+                onClick={onPick && line[book] !== undefined ? () => onPick(line, book) : undefined}
+              >
+                {cell(line[book], line.negative)}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </ScrollTable>
   )
 }

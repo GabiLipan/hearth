@@ -10,6 +10,7 @@ import {
   bookMonthlySpendByCategory,
   bookSeries,
   bookSlices,
+  bookBridge,
   bookTotals,
   contributionSplit,
   savedInto,
@@ -35,10 +36,11 @@ import { parseAmount, currencySymbol } from '../lib/money'
 import { syncNow } from '../lib/session'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
-import { AccountDot, Button, Card, CardHeader, CategoryDot, Field, Fill, Progress, Select, Sheet, TextInput, cx } from './ui'
+import { AccountDot, Button, Card, CardHeader, CardHeading, CategoryDot, Field, Fill, Progress, Select, Sheet, TextInput, cx } from './ui'
 import { BudgetBullet } from './BudgetBullet'
 import { CategoryIcon } from './CategoryIcon'
 import { CategoryBars, CategoryDonut, CategoryMosaic, Sparkline, SpendBars, type TrendShape } from './charts'
+import { BooksBridge, PaidIn, type BridgeLine, type PaidInRow } from './insights'
 
 export interface HomeData {
   /**
@@ -196,6 +198,15 @@ export function HeroWidget({ data }: WidgetProps) {
     () => bookTotals(data.allTxns, data.flows, data.book, month(), data.books),
     [data.allTxns, data.flows, data.book, data.books],
   )
+  const savedMinor = useMemo(() => {
+    const ids = savingsAccounts(data.allAccounts, data.book, data.books)
+    return ids.size === 0 ? 0 : savedInto(data.allTxns, data.flows, data.book, data.books, ids, month())
+  }, [data.allAccounts, data.allTxns, data.flows, data.book, data.books])
+  const split = useMemo(
+    () => contributionSplit(data.allTxns, data.flows, month(), data.books, data.userId),
+    [data.allTxns, data.flows, data.books, data.userId],
+  )
+  const boughtDirect = split.minePaidMinor + split.theirsPaidMinor
   const budgetTotal = data.budgets.reduce((s, b) => s + b.amountMinor, 0)
   const frac = budgetTotal > 0 ? totals.spend / budgetTotal : 0
   const over = frac > 1
@@ -211,6 +222,20 @@ export function HeroWidget({ data }: WidgetProps) {
         <div className="min-w-0">
           <p className="text-sm" style={quiet}>{monthLabel(month())} · {words.spend.toLowerCase()}</p>
           <p className="mt-0.5 truncate text-4xl font-bold tracking-tight tabular">{money(totals.spend)}</p>
+          {/* The two facts the headline figure hides, one line each and only
+              where there is one to tell: how much of the household's spending
+              never passed through a joint account, and — on the personal book —
+              how much of what left was not spending at all. */}
+          {data.book === 'household' && boughtDirect > 0 && (
+            <p className="mt-1 text-sm" style={quiet}>
+              {money(boughtDirect, { compact: true })} of it from personal cards
+            </p>
+          )}
+          {data.book === 'mine' && totals.contributed > 0 && (
+            <p className="mt-1 text-sm" style={quiet}>
+              and {money(totals.contributed, { compact: true })} to our household
+            </p>
+          )}
           {budgetTotal > 0 && (
             <p className="mt-1 text-sm" style={quiet}>
               of {money(budgetTotal, { hideDecimals: true })}
@@ -241,6 +266,7 @@ export function HeroWidget({ data }: WidgetProps) {
           {data.book === 'mine' && totals.contributed > 0 && (
             <Stat label="To household" value={money(totals.contributed)} />
           )}
+          {savedMinor > 0 && <Stat label="To savings" value={money(savedMinor)} />}
           <Stat label={words.net} value={money(totals.net, { sign: true })} />
           {budgetTotal > 0 && <Stat label="Budgeted" value={money(budgetTotal, { hideDecimals: true })} />}
         </div>
@@ -944,6 +970,184 @@ export function RecentWidget({ data, options }: WidgetProps) {
           </li>
         ))}
       </ul>
+    </Card>
+  )
+}
+
+/* ---------- Who paid in ---------- */
+
+/**
+ * What each of us put into the household this month, and how.
+ *
+ * Household book only. It is meaningless anywhere else, and it is the one
+ * figure this whole model makes newly possible: neither of us can see the
+ * other's salary, but every contribution ARRIVES in a joint account and joint
+ * accounts are readable by both.
+ *
+ * The same card Reports carries, over the same `contributionSplit`, so the two
+ * pages cannot come to different answers about who paid what.
+ */
+export function PaidInWidget({ data, variant, controls }: WidgetProps) {
+  const { money } = useApp()
+  const memberMap = useMemberMap()
+  const openRows = useHomeDrill(data.book)
+  const split = useMemo(
+    () => contributionSplit(data.allTxns, data.flows, month(), data.books, data.userId),
+    [data.allTxns, data.flows, data.books, data.userId],
+  )
+  const totals = useMemo(
+    () => bookTotals(data.allTxns, data.flows, data.book, month(), data.books),
+    [data.allTxns, data.flows, data.book, data.books],
+  )
+  const partner = useMemo(() => {
+    const others = [...memberMap.values()].filter((m) => m.userId !== data.userId)
+    return others.length === 1 ? nameOf(others[0]) : undefined
+  }, [memberMap, data.userId])
+
+  const rows = useMemo<PaidInRow[]>(
+    () =>
+      [
+        {
+          key: 'mine',
+          name: 'You',
+          movedMinor: Math.max(0, split.mineMinor - split.minePaidMinor),
+          boughtMinor: split.minePaidMinor,
+          count: split.mineCount,
+          slot: 2,
+        },
+        {
+          key: 'theirs',
+          name: partner ?? 'Someone else',
+          movedMinor: Math.max(0, split.theirsMinor - split.theirsPaidMinor),
+          boughtMinor: split.theirsPaidMinor,
+          count: split.theirsCount,
+          slot: 5,
+        },
+        {
+          key: 'unnamed',
+          name: 'Not sure by whom',
+          movedMinor: split.unattributedMinor,
+          boughtMinor: 0,
+          count: 0,
+          slot: 0,
+          muted: true,
+        },
+        { key: 'external', name: 'Other income', movedMinor: split.externalMinor, boughtMinor: 0, count: 0, slot: 0, muted: true },
+      ].filter((r) => r.movedMinor + r.boughtMinor > 0),
+    [split, partner],
+  )
+
+  const boughtDirect = split.minePaidMinor + split.theirsPaidMinor
+  if (data.book !== 'household' || rows.length === 0) return null
+
+  return (
+    <Card className="p-4 md:p-3">
+      <CardHeading
+        title="Who paid in"
+        controls={controls}
+        info={
+          <>
+            <p>
+              Money reaches the household two ways: it is moved into a joint account, or something is bought for us
+              straight off somebody&rsquo;s own card. Both are putting money in.
+            </p>
+            <p>
+              An arrival nobody has linked cannot be put on a name — a credit on its own cannot say who sent it — so
+              it waits under &ldquo;not sure by whom&rdquo; until somebody says.
+            </p>
+          </>
+        }
+      />
+      <PaidIn rows={rows} totalMinor={totals.income} shape={variant} onPick={() => openRows()} />
+      {boughtDirect > 0 && (
+        <p className="mt-2.5 text-xs text-ink-2">
+          <span className="font-semibold tabular">{money(boughtDirect)}</span> of this month&rsquo;s household spending
+          was bought straight from personal cards.
+        </p>
+      )}
+    </Card>
+  )
+}
+
+/* ---------- How the books add up ---------- */
+
+/**
+ * The three sets of books, and the lines that reconcile them.
+ *
+ * Everything only. That book used to be the other two poured into one pool,
+ * answering nothing they do not answer better while printing an income figure
+ * that is deliberately not their sum — with nothing anywhere to say why. This
+ * is the why, as arithmetic rather than as a claim.
+ */
+export function BridgeWidget({ data, variant, controls }: WidgetProps) {
+  const bridge = useMemo(
+    () => bookBridge(data.allTxns, data.flows, data.books, month()),
+    [data.allTxns, data.flows, data.books],
+  )
+  const lines = useMemo<BridgeLine[]>(() => {
+    const out: BridgeLine[] = [
+      {
+        key: 'outside',
+        label: 'From outside',
+        household: bridge.household.externalIncome,
+        mine: bridge.mine.externalIncome + bridge.mine.returned,
+        all: bridge.all.externalIncome,
+      },
+    ]
+    if (bridge.crossingMinor > 0) {
+      out.push({
+        key: 'between',
+        label: 'Put in between us',
+        household: bridge.household.contributions,
+        mine: bridge.crossingMinor,
+      })
+    }
+    out.push({
+      key: 'spent',
+      label: 'Spent',
+      household: bridge.household.spend,
+      mine: bridge.mine.spend,
+      all: bridge.all.spend,
+    })
+    if (bridge.unheldSpendMinor > 0) {
+      out.push({
+        key: 'unheld',
+        label: 'Bought for us from an account you cannot see',
+        household: bridge.unheldSpendMinor,
+        negative: true,
+      })
+    }
+    out.push({
+      key: 'left',
+      label: 'Left',
+      household: bridge.household.net,
+      mine: bridge.mine.net,
+      all: bridge.all.net,
+      total: true,
+    })
+    return out
+  }, [bridge])
+
+  const openRows = useHomeDrill(data.book)
+  if (data.book !== 'all' || bridge.all.income + bridge.all.spend === 0) return null
+
+  return (
+    <Card className="p-4 md:p-3">
+      <CardHeading
+        title="How the books add up"
+        controls={controls}
+        info={
+          <>
+            <p>
+              Money moved between our books is counted once in each book and in neither under Everything — the two
+              legs are the same event, so counting either would be counting it twice. That is why
+              Everything&rsquo;s income is not the two figures above it added together.
+            </p>
+            <p>What is left always adds up exactly, whatever the crossings did and whoever paid for what.</p>
+          </>
+        }
+      />
+      <BooksBridge lines={lines} shape={variant} onPick={() => openRows()} />
     </Card>
   )
 }

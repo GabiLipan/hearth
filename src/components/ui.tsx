@@ -549,6 +549,56 @@ export function useInfoNote(label: string, info?: ReactNode) {
  * `info` is the paragraph, and it hides behind a ⓘ beside the label. A hint
  * that needs a comma is probably an `info`.
  */
+/**
+ * A card's heading: a title, room for its picker, and everything longer than a
+ * line behind a ⓘ.
+ *
+ * Reports had eleven cards each carrying a two-sentence paragraph under its
+ * title, permanently — which is the rule in CLAUDE.md broken eleven times, and
+ * on a phone it meant every chart began three lines below where you were
+ * looking. The words are worth keeping and worth reading once; they are not
+ * worth re-reading every time the page opens.
+ *
+ * A component rather than a helper function because `useInfoNote` is a hook: a
+ * page cannot call one per card from inside a `switch`. Callers place it
+ * themselves, which is the same contract the `controls` picker has — only the
+ * card knows where its own heading is.
+ */
+export function CardHeading({
+  title,
+  controls,
+  hint,
+  info,
+  className,
+}: {
+  title: ReactNode
+  /** The variant picker, or whatever else belongs on the title's line. */
+  controls?: ReactNode
+  /**
+   * One short line that stays visible — what is TRUE about this card right now,
+   * the same split `CheckRow` draws between `status` and `info`. "Showing the
+   * last six months, scroll back for earlier" is a hint; anything that explains
+   * what the chart MEANS is an info.
+   */
+  hint?: ReactNode
+  /** Anything longer than a line. Omitted, no ⓘ appears at all. */
+  info?: ReactNode
+  className?: string
+}) {
+  const note = useInfoNote(typeof title === 'string' ? title : '', info)
+  return (
+    <div className={cx('mb-3 md:mb-2', className)}>
+      <div className="flex items-start gap-1">
+        <h3 className="min-w-0 flex-1 font-semibold md:text-sm">{title}</h3>
+        {note.toggle}
+        {controls}
+      </div>
+      {hint && <p className="mt-1 text-sm text-ink-3 md:text-xs">{hint}</p>}
+      {note.body}
+    </div>
+  )
+}
+
 export function Field({
   label,
   children,
