@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { layoutFlow, spendFlow, type FlowGraph, type FlowInput } from './sankey'
+import { booksFlow, layoutFlow, spendFlow, type FlowGraph, type FlowInput } from './sankey'
 import type { BookTotals, ContributionSplit } from './books'
 import type { CategorySlice } from './stats'
 
@@ -10,6 +10,8 @@ const totals = (over: Partial<BookTotals> = {}): BookTotals => ({
   returned: 0,
   spend: 0,
   contributed: 0,
+  contributedMoved: 0,
+  contributedPaid: 0,
   withdrawn: 0,
   net: 0,
   ...over,
@@ -26,6 +28,8 @@ const split = (over: Partial<ContributionSplit> = {}): ContributionSplit => ({
   minePaidCount: 0,
   theirsPaidCount: 0,
   otherMinor: 0,
+  externalMinor: 0,
+  unattributedMinor: 0,
   ...over,
 })
 
@@ -269,5 +273,112 @@ describe('layoutFlow', () => {
       boxes: [],
       ribbons: [],
     })
+  })
+})
+
+describe('the personal book says how it reached the household', () => {
+  it('breaks the band into moved across and bought for us', () => {
+    const g = spendFlow({
+      book: 'mine',
+      totals: totals({ externalIncome: 300000, income: 300000, spend: 70000, contributed: 209000, contributedMoved: 200000, contributedPaid: 9000, net: 21000 }),
+      slices: [],
+    })
+    const band = g.nodes.find((n) => n.id === 'out:contributed')!
+
+    expect(band.valueMinor).toBe(209000)
+    expect(band.parts).toEqual([
+      { label: 'Moved across', valueMinor: 200000, count: undefined },
+      { label: 'Bought for the household', valueMinor: 9000, count: undefined },
+    ])
+  })
+
+  it('says nothing where the money only ever moved across', () => {
+    // One part that IS the band says nothing the band did not already say.
+    const g = spendFlow({
+      book: 'mine',
+      totals: totals({ externalIncome: 300000, income: 300000, contributed: 200000, contributedMoved: 200000, net: 100000 }),
+      slices: [],
+    })
+    expect(g.nodes.find((n) => n.id === 'out:contributed')!.parts).toBeUndefined()
+  })
+})
+
+describe('what was left, and what was put by', () => {
+  it('takes the savings band OUT of what is left rather than adding it beside', () => {
+    // Moving money to a savings account inside the book changes nothing about
+    // what the book has, so the two sides would stop balancing.
+    const g = spendFlow({
+      book: 'household',
+      totals: totals({ contributions: 400000, income: 400000, spend: 250000, net: 150000 }),
+      slices: [],
+      savedMinor: 100000,
+    })
+    expect(g.nodes.find((n) => n.id === 'out:saved')!.valueMinor).toBe(100000)
+    expect(g.nodes.find((n) => n.id === 'out:kept')!.valueMinor).toBe(50000)
+    expect(g.nodes.find((n) => n.id === 'out:kept')!.name).toBe('Left in current')
+
+    const out = g.links.filter((l) => l.from === 'hub').reduce((s, l) => s + l.valueMinor, 0)
+    const into = g.links.filter((l) => l.to === 'hub').reduce((s, l) => s + l.valueMinor, 0)
+    expect(out).toBe(into)
+  })
+
+  it('never saves more than was left', () => {
+    const g = spendFlow({
+      book: 'household',
+      totals: totals({ contributions: 100000, income: 100000, spend: 90000, net: 10000 }),
+      slices: [],
+      savedMinor: 50000,
+    })
+    expect(g.nodes.find((n) => n.id === 'out:saved')!.valueMinor).toBe(10000)
+    expect(g.nodes.find((n) => n.id === 'out:kept')).toBeUndefined()
+  })
+})
+
+describe('the books, as four columns', () => {
+  const bridge = {
+    household: totals({ contributions: 393400, externalIncome: 8800, income: 402200, spend: 253400, net: 148800 }),
+    mine: totals({ externalIncome: 300000, income: 300000, spend: 70000, contributed: 209000, contributedMoved: 200000, contributedPaid: 9000, net: 21000 }),
+    all: totals({ externalIncome: 488800, income: 488800, spend: 319000, net: 169800 }),
+    crossingMinor: 209000,
+    unheldSpendMinor: 4400,
+    unbookedCount: 0,
+  }
+  const theSplit = split({ mineMinor: 209000, theirsMinor: 184400, externalMinor: 8800, otherMinor: 8800 })
+  const graph = booksFlow({ bridge, split: theSplit, householdSlices: [], mineSlices: [], partner: 'Sam' })
+
+  const into = (id: string) => graph.links.filter((l) => l.to === id).reduce((s, l) => s + l.valueMinor, 0)
+  const outOf = (id: string) => graph.links.filter((l) => l.from === id).reduce((s, l) => s + l.valueMinor, 0)
+
+  it('balances at every band in the middle', () => {
+    // Not by construction: the outflows come from the book totals and happen to
+    // sum to the inflows, because `spend + net === income − what left the book`
+    // is an identity of `bookTotals`.
+    for (const id of ['in:mine', 'in:ours', 'own:mine', 'own:ours']) {
+      const node = graph.nodes.find((n) => n.id === id)
+      if (!node) continue
+      expect(into(id)).toBe(node.valueMinor)
+      expect(outOf(id)).toBe(node.valueMinor)
+    }
+  })
+
+  it('draws the crossing as one ribbon between the middle columns', () => {
+    const crossing = graph.links.find((l) => l.from === 'in:mine' && l.to === 'own:ours')!
+    expect(crossing.valueMinor).toBe(209000)
+  })
+
+  it('gives every band a column, and links only ever join adjacent ones', () => {
+    const col = new Map(graph.nodes.map((n) => [n.id, n.column!]))
+    expect([...col.values()].every((c) => c !== undefined)).toBe(true)
+    for (const l of graph.links) expect(col.get(l.to)! - col.get(l.from)!).toBe(1)
+  })
+
+  it('lays out four columns with no ribbon thicker than the band it leaves', () => {
+    const out = layoutFlow(graph, { width: 800, height: 360 })
+    const boxes = new Map(out.boxes.map((b) => [b.node.id, b]))
+    expect(new Set(out.boxes.map((b) => b.node.column)).size).toBe(4)
+    for (const r of out.ribbons) {
+      expect(r.thickness).toBeLessThanOrEqual(boxes.get(r.link.from)!.height + 0.001)
+      expect(r.thickness).toBeLessThanOrEqual(boxes.get(r.link.to)!.height + 0.001)
+    }
   })
 })

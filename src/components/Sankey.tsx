@@ -67,9 +67,24 @@ function ribbonPath(x0: number, y0: number, x1: number, y1: number, t: number) {
  * the one thing it must not do is get shorter than this.
  */
 export function sankeyHeight(graph: FlowGraph): number {
-  const ins = graph.nodes.filter((n) => n.side === 'in').length
-  const outs = graph.nodes.filter((n) => n.side === 'out').length
-  return Math.max(280, Math.max(ins, outs) * 42)
+  const perColumn = new Map<number, number>()
+  for (const n of graph.nodes) {
+    const c = columnOf(n)
+    perColumn.set(c, (perColumn.get(c) ?? 0) + 1)
+  }
+  return Math.max(280, Math.max(0, ...perColumn.values()) * 42)
+}
+
+/**
+ * Which column a band stands in — the same derivation `layoutFlow` uses.
+ *
+ * Everything here that used to ask `side` for GEOMETRY asks this instead, so a
+ * diagram with four columns labels and targets its middle bands correctly.
+ * `side` is still what decides the ribbon colour and what a click means, which
+ * is why both exist.
+ */
+function columnOf(n: FlowNode): number {
+  return n.column ?? (n.side === 'in' ? 0 : n.side === 'hub' ? 1 : 2)
 }
 
 export function Sankey({
@@ -77,7 +92,7 @@ export function Sankey({
   caption,
   height: offered,
   onPick,
-  canPick = (n) => n.side !== 'hub',
+  canPick = (n) => n.side !== 'hub' || n.column !== undefined,
 }: {
   graph: FlowGraph
   caption?: string
@@ -191,6 +206,10 @@ export function Sankey({
     () => layoutFlow(graph, { width: width - LABEL * 2, height, nodeWidth: NODE_W, padding: BAND_GAP }),
     [graph, width, height],
   )
+  /** The outermost columns, which are the ones with room for a name beside them. */
+  const columns = useMemo(() => layout.boxes.map((b) => columnOf(b.node)), [layout])
+  const first = columns.length ? Math.min(...columns) : 0
+  const last = columns.length ? Math.max(...columns) : 2
 
   const colourOf = (n: FlowNode) =>
     n.side === 'hub' ? c.ink2
@@ -272,26 +291,36 @@ export function Sankey({
                 for one keeps its colour and its hover; the alternative is two
                 names on top of each other, which is worse than one missing. */}
             {layout.boxes.map((b) => {
-              if (b.node.side === 'hub' || b.height < 13) return null
-              const left = b.node.side === 'in'
-              const x = left ? b.x - 8 : b.x + NODE_W + 8
-              const y = b.y + b.height / 2
+              const col = columnOf(b.node)
+              // A middle column has bands on both sides of it, so a name hung
+              // off either edge would sit on top of a ribbon. It goes ABOVE the
+              // band instead, which needs no room of its own — and a band too
+              // short for that keeps its colour and its hover, the same trade
+              // the outer ones make.
+              const middle = col > first && col < last
+              if (middle && b.height < 22) return null
+              if (!middle && b.height < 13) return null
+              const left = col === last
+              const x = middle ? b.x + NODE_W / 2 : left ? b.x - 8 : b.x + NODE_W + 8
+              const y = middle ? b.y - 6 : b.y + b.height / 2
               return (
                 <text
                   key={`t-${b.node.id}`}
                   x={x}
                   y={y}
-                  textAnchor={left ? 'end' : 'start'}
+                  textAnchor={middle ? 'middle' : left ? 'end' : 'start'}
                   className="pointer-events-none"
                   fill={c.ink2}
                   fontSize={11}
                 >
-                  <tspan x={x} dy={b.height < 30 ? 4 : -2}>
+                  <tspan x={x} dy={middle ? 0 : b.height < 30 ? 4 : -2}>
                     {short(b.node.name)}
                   </tspan>
                   {/* The amount only where the band is tall enough to take two
-                      lines without the second one landing on its neighbour. */}
-                  {b.height >= 30 && (
+                      lines without the second one landing on its neighbour. A
+                      middle band's name is above it, so the figure goes inside
+                      where there is room and is dropped where there is not. */}
+                  {(middle ? b.height >= 34 : b.height >= 30) && (
                     <tspan x={x} dy={13} fill={c.ink3}>
                       {money(b.node.valueMinor, { compact: true, hideDecimals: true })}
                     </tspan>
@@ -317,14 +346,19 @@ export function Sankey({
                 last so it is over the labels; transparent, so it changes
                 nothing about how the diagram looks. */}
             {layout.boxes.map((b) => {
-              if (b.node.side === 'hub') return null
-              const left = b.node.side === 'in'
+              const col = columnOf(b.node)
+              // A middle band claims its own width plus the gaps either side of
+              // it and nothing more: the label strip belongs to the outer
+              // columns, and reaching into it here would take the tap that
+              // belonged to a band in the next column along.
+              const middle = col > first && col < last
+              const left = col === last
               return (
                 <rect
                   key={`h-${b.node.id}`}
-                  x={left ? b.x - LABEL : b.x}
+                  x={middle ? b.x - BAND_GAP : left ? b.x - LABEL : b.x}
                   y={b.y - BAND_GAP / 2}
-                  width={LABEL + NODE_W}
+                  width={middle ? NODE_W + BAND_GAP * 2 : LABEL + NODE_W}
                   height={b.height + BAND_GAP}
                   fill="transparent"
                   className={cx(byClick && 'cursor-pointer')}

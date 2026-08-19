@@ -3,6 +3,7 @@ import type { Account, AccountGrant, Category, Transaction } from './db'
 import {
   accountsInBook,
   bookBalances,
+  bookBridge,
   bookMonthlySpendByCategory,
   bookSpendByCategory,
   bookTotals,
@@ -14,6 +15,8 @@ import {
   contributionSplit,
   contributionSplitInRange,
   sumContributionSplits,
+  savedInto,
+  savingsAccounts,
   showsInBook,
   isHouseholdPaid,
   type BookMap,
@@ -1348,5 +1351,95 @@ describe('spend per category per month, per book', () => {
         expect(cells.every((v) => v < 200000)).toBe(true)
       }
     }
+  })
+})
+
+describe('money put by rather than spent', () => {
+  const rows = march()
+  const flows = classifyFlows(rows, books)
+  const savings = savingsAccounts(accounts, 'household', books)
+
+  it('counts the arriving leg of a transfer into a savings account in the book', () => {
+    expect(savings).toEqual(new Set(['jointSavings']))
+    expect(savedInto(rows, flows, 'household', books, savings, '2026-03')).toBe(100000)
+  })
+
+  it('counts the arriving leg only', () => {
+    // The pair nets to zero across the book, so counting both would show
+    // nothing moving at all.
+    expect(savedInto(rows, flows, 'household', books, savings, '2026-03')).not.toBe(0)
+    expect(savedInto(rows, flows, 'household', books, savings, '2026-02')).toBe(0)
+  })
+
+  it('changes no total — it says which part of what is left stopped being available', () => {
+    const before = bookTotals(rows, flows, 'household', '2026-03', books)
+    expect(before.net).toBe(before.income - before.spend - before.withdrawn)
+    expect(savedInto(rows, flows, 'household', books, savings, '2026-03')).toBeLessThanOrEqual(before.net)
+  })
+
+  it('is nothing at all in a book with no savings account in it', () => {
+    expect(savingsAccounts(accounts, 'mine', books).size).toBe(0)
+    expect(savedInto(rows, flows, 'mine', books, savingsAccounts(accounts, 'mine', books), '2026-03')).toBe(0)
+  })
+})
+
+describe('the bridge between the books', () => {
+  const hers = txn({
+    accountId: 'herCard',
+    amountMinor: -4400,
+    date: '2026-03-11',
+    categoryId: 'groceries',
+    paidForHousehold: true,
+    createdBy: HER,
+  })
+  const rows = [...march(), hers]
+  const flows = classifyFlows(rows, books)
+  const bridge = bookBridge(rows, flows, books, '2026-03')
+
+  it('carries the same figures as asking each book directly', () => {
+    for (const book of ['household', 'mine', 'all'] as const) {
+      expect(bridge[book]).toEqual(bookTotals(rows, flows, book, '2026-03', books))
+    }
+  })
+
+  it('names the crossing, which is why income does not add up', () => {
+    expect(bridge.crossingMinor).toBe(bridge.mine.contributed + bridge.mine.returned)
+    expect(bridge.all.income).toBe(
+      bridge.household.income + bridge.mine.income - bridge.crossingMinor - bridge.unheldSpendMinor,
+    )
+  })
+
+  it('names the spending Everything cannot see, which is why spending does not either', () => {
+    expect(bridge.unheldSpendMinor).toBe(4400)
+    expect(bridge.all.spend).toBe(bridge.household.spend + bridge.mine.spend - bridge.unheldSpendMinor)
+  })
+
+  it('and what is left adds up with nothing named at all', () => {
+    expect(bridge.all.net).toBe(bridge.household.net + bridge.mine.net)
+  })
+
+  it('counts rows in an account that is in neither book rather than totalling them', () => {
+    // Those rows are `ignored`, so they are in no figure on this device — not
+    // even Everything's, despite its name. A column of figures reconciling with
+    // nothing is the exact fault this card exists to remove.
+    const shared = [...accounts, account('hersSharedWithMe')]
+    const g = new Map(grantsByAccount)
+    g.set('hersSharedWithMe', [grant('hersSharedWithMe', ME, 'view')])
+    const b = classifyAccounts(shared, g, ME)
+    // `march()` mints fresh ids on every call, so the base is built once.
+    const base = march()
+    const withRow = [...base, txn({ accountId: 'hersSharedWithMe', amountMinor: -5000, date: '2026-03-04' })]
+    const f = classifyFlows(withRow, b)
+
+    expect(bookBridge(withRow, f, b, '2026-03').unbookedCount).toBe(1)
+    expect(bookTotals(withRow, f, 'all', '2026-03', b).spend).toBe(
+      bookTotals(base, classifyFlows(base, b), 'all', '2026-03', b).spend,
+    )
+  })
+
+  it('adds a year the same way it adds a month', () => {
+    const year = bookBridge(rows, flows, books, ['2026-02', '2026-03'])
+    expect(year.household.spend).toBe(bridge.household.spend)
+    expect(year.all.net).toBe(year.household.net + year.mine.net)
   })
 })

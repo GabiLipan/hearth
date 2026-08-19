@@ -410,6 +410,18 @@ export interface BookTotals {
   spend: number
   /** Mine only: what I moved to the household. Positive, and NOT spending. */
   contributed: number
+  /**
+   * The two halves of `contributed`, which sum to it.
+   *
+   * They are two different acts and only one of them is a decision. Money
+   * MOVED across is a figure somebody agreed and repeats every month; money
+   * paid for the household straight off a personal card is an accident of
+   * which card was in the wallet. Merged into one band on the diagram, the
+   * second is invisible — and it is the half that quietly turns into being
+   * owed.
+   */
+  contributedMoved: number
+  contributedPaid: number
   /** Household only: what was taken back out into a private account. Positive. */
   withdrawn: number
   /**
@@ -427,6 +439,8 @@ const EMPTY: BookTotals = {
   returned: 0,
   spend: 0,
   contributed: 0,
+  contributedMoved: 0,
+  contributedPaid: 0,
   withdrawn: 0,
   net: 0,
 }
@@ -490,7 +504,10 @@ export function bookTotals(
         // joint one are a single pool, so the contribution is internal again
         // and what is left is simply spending.
         if (book === 'all') t.spend += amount
-        else t.contributed += amount
+        else {
+          t.contributed += amount
+          t.contributedPaid += amount
+        }
       }
       continue
     }
@@ -510,7 +527,10 @@ export function bookTotals(
         // Positive on the household side, negative on mine — the same event
         // seen from each end, which is the whole point of the model.
         if (row.amountMinor > 0) t.contributions += row.amountMinor
-        else t.contributed -= row.amountMinor
+        else {
+          t.contributed -= row.amountMinor
+          t.contributedMoved -= row.amountMinor
+        }
         break
       case 'contribution-unpaired':
         // Always positive: `classifyFlows` only sets this on money coming in,
@@ -585,8 +605,11 @@ export function bookTotalsInRange(
         t.contributions += amount
         t.spend += amount
       } else if (ids.has(row.accountId)) {
-        if (book === 'all') t.spend += amount
-        else t.contributed += amount
+          if (book === 'all') t.spend += amount
+        else {
+          t.contributed += amount
+          t.contributedPaid += amount
+        }
       }
       continue
     }
@@ -598,7 +621,10 @@ export function bookTotalsInRange(
     switch (flow) {
       case 'contribution':
         if (row.amountMinor > 0) t.contributions += row.amountMinor
-        else t.contributed -= row.amountMinor
+        else {
+          t.contributed -= row.amountMinor
+          t.contributedMoved -= row.amountMinor
+        }
         break
       // See `bookTotals` for why Everything files this as outside income.
       case 'contribution-unpaired':
@@ -675,6 +701,8 @@ export function sumBookTotals(parts: BookTotals[]): BookTotals {
     t.returned += p.returned
     t.spend += p.spend
     t.contributed += p.contributed
+    t.contributedMoved += p.contributedMoved
+    t.contributedPaid += p.contributedPaid
     t.withdrawn += p.withdrawn
   }
   t.income = t.contributions + t.externalIncome + t.returned
@@ -828,8 +856,20 @@ export interface ContributionSplit {
   theirsCount: number
   minePaidCount: number
   theirsPaidCount: number
-  /** Outside income, plus any arrival nobody has linked yet. See above. */
+  /**
+   * Outside income, plus any arrival nobody has linked yet. See above.
+   *
+   * Kept as the sum of the two below so nothing reading it has to change, but
+   * a screen should prefer them: they are different facts and only one is
+   * something you can act on. Child benefit landing in the joint account is
+   * simply not a contribution; a £900 credit nobody has paired is one whose
+   * owner the app cannot name, and somebody can go and say.
+   */
   otherMinor: number
+  /** Money from outside the household entirely — interest, benefits, a refund. */
+  externalMinor: number
+  /** An arrival that looks like a contribution and has no name on it yet. */
+  unattributedMinor: number
 }
 
 export function contributionSplit(
@@ -891,6 +931,8 @@ export function sumContributionSplits(parts: ContributionSplit[]): ContributionS
     minePaidCount: 0,
     theirsPaidCount: 0,
     otherMinor: 0,
+    externalMinor: 0,
+    unattributedMinor: 0,
   }
   for (const p of parts) {
     out.mineMinor += p.mineMinor
@@ -902,6 +944,8 @@ export function sumContributionSplits(parts: ContributionSplit[]): ContributionS
     out.minePaidCount += p.minePaidCount
     out.theirsPaidCount += p.theirsPaidCount
     out.otherMinor += p.otherMinor
+    out.externalMinor += p.externalMinor
+    out.unattributedMinor += p.unattributedMinor
   }
   return out
 }
@@ -939,6 +983,8 @@ function splitCore(
     minePaidCount: 0,
     theirsPaidCount: 0,
     otherMinor: 0,
+    externalMinor: 0,
+    unattributedMinor: 0,
   }
 
   for (const t of txns) {
@@ -961,7 +1007,10 @@ function splitCore(
       if (!within(t, flow)) continue
       const amount = -t.amountMinor
       if (!t.createdBy) {
+        // Nobody's name on it, and it is spending rather than an arrival — so
+        // it is a contribution whose payer is unknown, not outside income.
         out.otherMinor += amount
+        out.unattributedMinor += amount
       } else if (t.createdBy === userId) {
         out.mineMinor += amount
         out.minePaidMinor += amount
@@ -981,6 +1030,7 @@ function splitCore(
 
     if (flow === 'external-income') {
       out.otherMinor += t.amountMinor
+      out.externalMinor += t.amountMinor
       continue
     }
     if (flow !== 'contribution' && flow !== 'contribution-unpaired') continue
@@ -1006,6 +1056,7 @@ function splitCore(
     // household is somebody else's private account.
     if (!t.transferId) {
       out.otherMinor += t.amountMinor
+      out.unattributedMinor += t.amountMinor
     } else if (!partner) {
       out.theirsMinor += t.amountMinor
       out.theirsCount += 1
@@ -1013,10 +1064,168 @@ function splitCore(
       out.mineMinor += t.amountMinor
       out.mineCount += 1
     } else {
+      // A partner leg in an account belonging to neither book: real money that
+      // crossed, with nobody this device can name on the other end of it.
       out.otherMinor += t.amountMinor
+      out.unattributedMinor += t.amountMinor
     }
   }
   return out
+}
+
+/* ---------- money that stayed, and moved ---------- */
+
+/**
+ * Money moved into a savings account inside the book.
+ *
+ * A transfer between two accounts of one book is `internal` — not an event, and
+ * correctly counted in nothing. That is right for "what did we earn and spend"
+ * and wrong for the question everybody actually asks of a savings account,
+ * which is "did we put anything by this month". Both readings are true at once,
+ * so this is a SECOND pass over the same rows rather than a new flow: nothing
+ * about `bookTotals` moves, `net` is untouched, and what is left over is simply
+ * shown split into the part that went to savings and the part that did not.
+ *
+ * The arriving leg only. The pair nets to zero across the book, so counting
+ * both would show nothing moving at all.
+ *
+ * `householdWaterfall` in insights.ts had this loop inside it, household-only
+ * and one month at a time. It calls this now, so the step on the waterfall and
+ * the band on the diagram cannot come to different figures.
+ */
+export function savedInto(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  book: BookId,
+  books: BookMap,
+  savingsAccountIds: Set<string>,
+  /** One month, or several. A year asks the same question of twelve. */
+  month: string | string[],
+): number {
+  const ids = accountsInBook(book, books)
+  const want = new Set(Array.isArray(month) ? month : [month])
+  let saved = 0
+  for (const t of txns) {
+    if (!savingsAccountIds.has(t.accountId) || !ids.has(t.accountId)) continue
+    if (t.amountMinor <= 0 || flows.get(t.id) !== 'internal') continue
+    if (!want.has(monthKey(t.date))) continue
+    saved += t.amountMinor
+  }
+  return saved
+}
+
+/** The same, over a run of days. See `bookTotalsInRange` for why ranges are separate. */
+export function savedIntoRange(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  book: BookId,
+  books: BookMap,
+  savingsAccountIds: Set<string>,
+  from: string,
+  to: string,
+): number {
+  const ids = accountsInBook(book, books)
+  let saved = 0
+  for (const t of txns) {
+    if (!savingsAccountIds.has(t.accountId) || !ids.has(t.accountId)) continue
+    if (t.amountMinor <= 0 || flows.get(t.id) !== 'internal') continue
+    if (t.date < from || t.date > to) continue
+    saved += t.amountMinor
+  }
+  return saved
+}
+
+/** The accounts a book saves INTO — savings by kind, and in the book. */
+export function savingsAccounts(accounts: Account[], book: BookId, books: BookMap): Set<string> {
+  const ids = accountsInBook(book, books)
+  return new Set(accounts.filter((a) => a.kind === 'savings' && ids.has(a.id)).map((a) => a.id))
+}
+
+/* ---------- how the three books relate ---------- */
+
+/**
+ * The three sets of books side by side, and the lines that reconcile them.
+ *
+ * Everything used to be a fourth filter over the same rows: the same donut, the
+ * same bars, the same diagram, with the household and personal accounts added
+ * together. It answered nothing the other two answer better, and its income
+ * figure is deliberately NOT their sum — with nothing anywhere to say why.
+ *
+ * Two of the three identities are exact and one is not, and the honest thing is
+ * to print all three rather than to quietly round the difference away:
+ *
+ *   net     all.net   === ours.net + mine.net                          always
+ *   spend   all.spend === ours.spend + mine.spend  − unheldSpend
+ *   income  all.income === ours.income + mine.income − crossing − unheldSpend
+ *
+ * `crossing` is a contribution: counted once in each book, because the books
+ * are never summed, and in neither under Everything, because there both legs
+ * are in view and counting either would count it twice.
+ *
+ * `unheldSpend` is the surprising one and it is a fact about the privacy model
+ * rather than a rounding error. A partner's household shopping, bought on her
+ * own card, reaches this device as a single published row: it is spending in
+ * the household's book and it is in no account this device holds, so Everything
+ * — which means "every account I can see" — is short by exactly it. A card that
+ * printed the other two rows and swallowed this one would be a card with a £44
+ * hole in it that the reader has to go and find.
+ */
+export interface BookBridge {
+  household: BookTotals
+  mine: BookTotals
+  all: BookTotals
+  /** What crossed between the books, and so is counted in neither under Everything. */
+  crossingMinor: number
+  /** Household spending bought from an account this device does not hold. */
+  unheldSpendMinor: number
+  /**
+   * How many rows sit in an account that is in NEITHER book — one somebody
+   * shared with me, which is mine to read and not mine to count.
+   *
+   * A count rather than a column of figures, and the difference matters.
+   * `classifyFlows` calls every row in such an account `ignored`, so those rows
+   * are in no total on this device at all — not in Everything either, despite
+   * its name. A fourth column would therefore print figures that reconcile with
+   * nothing, which is precisely the fault this card exists to remove. A
+   * sentence saying they exist and are counted nowhere is the true version.
+   */
+  unbookedCount: number
+}
+
+export function bookBridge(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  books: BookMap,
+  month: string | string[],
+): BookBridge {
+  const months = Array.isArray(month) ? month : [month]
+  const of = (book: BookId) => sumBookTotals(months.map((m) => bookTotals(txns, flows, book, m, books)))
+
+  const household = of('household')
+  const mine = of('mine')
+  const all = of('all')
+  const want = new Set(months)
+  const visible = accountsInBook('all', books)
+
+  let unheldSpendMinor = 0
+  let unbookedCount = 0
+  for (const row of txns) {
+    const flow = flows.get(row.id)
+    if (flow === 'paid-for-household' && !visible.has(row.accountId)) {
+      if (want.has(effectiveMonth(row, flow))) unheldSpendMinor -= row.amountMinor
+      continue
+    }
+    if (books.others.has(row.accountId) && want.has(monthKey(row.date))) unbookedCount += 1
+  }
+
+  return {
+    household,
+    mine,
+    all,
+    crossingMinor: mine.contributed + mine.returned,
+    unheldSpendMinor,
+    unbookedCount,
+  }
 }
 
 export interface BookMonth extends BookTotals {
