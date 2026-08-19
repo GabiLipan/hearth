@@ -4,9 +4,10 @@ import { ArrowLeftRight, ArrowRight, ChevronLeft, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
 import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate, todayISO } from '../lib/dates'
-import { monthlySpendByCategory, monthsEndingAt, monthsOfHistory, OTHER_SLICE_ID } from '../lib/stats'
+import { monthsEndingAt, monthsOfHistory, OTHER_SLICE_ID } from '../lib/stats'
 import {
   accountsInBook,
+  bookMonthlySpendByCategory,
   bookSeries,
   bookSlices,
   bookTotals,
@@ -38,16 +39,28 @@ import { CategoryIcon } from './CategoryIcon'
 import { CategoryBars, CategoryDonut, CategoryMosaic, Sparkline, SpendBars, type TrendShape } from './charts'
 
 export interface HomeData {
+  /**
+   * The book's ROW LIST — what a widget that merely lists or balances rows
+   * wants. Narrowed by `showsInBook`, so the household book includes the one
+   * row type that lives outside its accounts. See Dashboard.
+   */
   txns: Transaction[]
   /**
    * Every transaction this device can see, NOT narrowed to the chosen book.
    *
-   * Almost nothing should want this — `txns` is scoped for a reason, and a
-   * widget adding up rows from outside the book on screen is the double-count
-   * the book model exists to prevent. `ReimbursementWidget` wants it because
-   * what it measures genuinely straddles two books: what I paid out of mine and
-   * what the household has paid back into it. Narrowing to either one would
-   * show half the sum.
+   * **Everything that adds money up wants this**, and handing it `txns` instead
+   * is the bug that made this page disagree with Reports. `bookTotals`,
+   * `bookSlices`, `bookSeries`, `bookMonthlySpendByCategory` and
+   * `contributionSplit` all take `book` and `books` and do their own account
+   * selection — and `paid-for-household` is deliberately admitted from OUTSIDE
+   * the household's accounts, which a pre-narrowed list makes impossible.
+   * Reports passes the whole set to the same functions, which is what makes the
+   * two pages agree.
+   *
+   * `ReimbursementWidget` wants it for a second reason: what it measures
+   * genuinely straddles two books — what I paid out of mine and what the
+   * household has paid back into it — so narrowing to either would show half
+   * the sum.
    */
   allTxns: Transaction[]
   /** Likewise unscoped: paying yourself back moves money between two books. */
@@ -66,8 +79,8 @@ export interface HomeData {
    * Which book is on screen. Dashboard has already narrowed `txns`, `accounts`,
    * `bills` and `budgets` to it, so a widget that only lists rows needs to do
    * nothing — but anything that ADDS money up must go through `bookTotals` and
-   * friends, because a contribution is not income and not spending and only
-   * these know which.
+   * friends, over `allTxns` rather than `txns`, because a contribution is not
+   * income and not spending and only these know which.
    */
   book: BookId
   books: BookMap
@@ -178,8 +191,8 @@ export function HeroWidget({ data }: WidgetProps) {
   const { money } = useApp()
   const words = BOOK_WORDS[data.book]
   const totals = useMemo(
-    () => bookTotals(data.txns, data.flows, data.book, month(), data.books),
-    [data.txns, data.flows, data.book, data.books],
+    () => bookTotals(data.allTxns, data.flows, data.book, month(), data.books),
+    [data.allTxns, data.flows, data.book, data.books],
   )
   const budgetTotal = data.budgets.reduce((s, b) => s + b.amountMinor, 0)
   const frac = budgetTotal > 0 ? totals.spend / budgetTotal : 0
@@ -245,9 +258,14 @@ export function BudgetGlanceWidget({ data }: WidgetProps) {
   // spending up to the parent and excludes transfers — the hand-rolled loop
   // that used to live here did neither, so the two pages disagreed.
   const months = useMemo(() => monthsEndingAt(month(), 6), [])
+  // `bookMonthlySpendByCategory`, not `monthlySpendByCategory`: the latter is
+  // flow-blind, so on the household book it missed the shopping bought off a
+  // personal card that the figure above this card has already counted, and on
+  // the personal book it counted that same row as spending when the book files
+  // it as a contribution. Same selection rule as the Budgets page.
   const history = useMemo(
-    () => monthlySpendByCategory(data.txns, data.categories, months),
-    [data.txns, data.categories, months],
+    () => bookMonthlySpendByCategory(data.allTxns, data.flows, data.categories, data.book, data.books, months),
+    [data.allTxns, data.flows, data.categories, data.book, data.books, months],
   )
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   // Budgets follow the book: the household's shared ones under "Our household",
@@ -406,8 +424,8 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
 
   const count = Number(options?.count ?? 6)
   const slices = useMemo(
-    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, drill ?? undefined, count),
-    [data.txns, data.flows, data.categories, data.book, data.books, drill, count],
+    () => bookSlices(data.allTxns, data.flows, data.categories, data.book, month(), data.books, drill ?? undefined, count),
+    [data.allTxns, data.flows, data.categories, data.book, data.books, drill, count],
   )
   // Changing book empties the breadcrumb: it would otherwise point at a
   // category that is no longer on this screen.
@@ -416,7 +434,7 @@ export function DonutWidget({ data, variant, options, controls }: WidgetProps) {
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories])
   const canDrill = (categoryId: string) =>
     categoryId !== OTHER_SLICE_ID &&
-    hasBreakdown(categoryId, data.txns, data.flows, data.categories, data.book, month(), data.books)
+    hasBreakdown(categoryId, data.allTxns, data.flows, data.categories, data.book, month(), data.books)
 
   /**
    * Deeper while there is a deeper, and the transactions when there is not —
@@ -514,8 +532,8 @@ export function TrendWidget({ data, variant, options, controls }: WidgetProps) {
   const openRows = useHomeDrill(data.book)
   const months = useMemo(() => monthsOfHistory(data.txns), [data.txns])
   const series = useMemo(
-    () => bookSeries(data.txns, data.flows, data.book, months, data.books),
-    [data.txns, data.flows, data.book, months, data.books],
+    () => bookSeries(data.allTxns, data.flows, data.book, months, data.books),
+    [data.allTxns, data.flows, data.book, months, data.books],
   )
   return (
     <Card className="p-4 md:p-3">
@@ -555,14 +573,18 @@ export function TrendWidget({ data, variant, options, controls }: WidgetProps) {
  */
 export function FlowWidget({ data, options, controls }: WidgetProps) {
   const memberMap = useMemberMap()
+  // `allTxns` throughout, and `split` below already used it: with the totals
+  // taken from a list narrowed by account, `spendFlow` clamped the "You put in"
+  // band against a contributions figure that was missing everything bought off
+  // a personal card, and said nothing about having done so.
   const totals = useMemo(
-    () => bookTotals(data.txns, data.flows, data.book, month(), data.books),
-    [data.txns, data.flows, data.book, data.books],
+    () => bookTotals(data.allTxns, data.flows, data.book, month(), data.books),
+    [data.allTxns, data.flows, data.book, data.books],
   )
   const count = Number(options?.count ?? 8)
   const slices = useMemo(
-    () => bookSlices(data.txns, data.flows, data.categories, data.book, month(), data.books, undefined, count),
-    [data.txns, data.flows, data.categories, data.book, data.books, count],
+    () => bookSlices(data.allTxns, data.flows, data.categories, data.book, month(), data.books, undefined, count),
+    [data.allTxns, data.flows, data.categories, data.book, data.books, count],
   )
   const split = useMemo(
     () => contributionSplit(data.allTxns, data.flows, month(), data.books, data.userId),

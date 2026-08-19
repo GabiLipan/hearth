@@ -6,12 +6,12 @@ import { create, update, remove } from '../lib/data'
 import { rpc } from '../lib/api'
 import { syncNow } from '../lib/session'
 import { useAllTransactions, useBook, useBooks, useBudgets, useCategories, useFlows, useCacheReady } from '../lib/cache'
-import { accountsInBook, isSpend } from '../lib/books'
+import { bookMonthlySpendByCategory, bookSpendByCategory } from '../lib/books'
 import { BookSwitcher } from '../components/BookSwitcher'
-import { budgetCategoryId, styleOf, topLevel } from '../lib/categories'
-import { monthlySpendByCategory, monthsEndingAt, typicalSpend } from '../lib/stats'
+import { styleOf, topLevel } from '../lib/categories'
+import { monthsEndingAt, typicalSpend } from '../lib/stats'
 import { budgetSeries, fillBudgets, typicalRange, type FilledBudgets } from '../lib/budgetHistory'
-import { thisMonthKey, monthLabel, monthKey, shiftMonth } from '../lib/dates'
+import { thisMonthKey, monthLabel, shiftMonth } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
@@ -67,7 +67,6 @@ export default function Budgets() {
   const mine = book === 'mine' && !!userId
   const books = useBooks()
   const flows = useFlows(txns, books)
-  const bookAccounts = useMemo(() => accountsInBook(book, books), [book, books])
   const isCurrent = month === thisMonthKey()
 
   const owned = useCallback(
@@ -89,35 +88,41 @@ export default function Budgets() {
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
   /**
-   * A budget is judged against the spending of its own book.
+   * A budget is judged against the spending of its own book, and "spending in a
+   * book" is `spendsIn` — never a hand-rolled pair of conditions.
    *
-   * This used to filter personal budgets by `created_by`, which is a different
-   * question and got both cases wrong: a household budget counted groceries put
-   * on my private card — spending my partner cannot even see, so their screen
-   * showed a different figure against the same shared budget — and a personal
-   * budget counted anything I happened to record on a joint account.
+   * Two earlier versions of this got it wrong in two different directions. The
+   * first filtered personal budgets by `created_by`, which is a different
+   * question: a household budget then counted groceries put on my private card
+   * whether or not they were for the household, and a personal budget counted
+   * anything I happened to record on a joint account. The second filtered by
+   * ACCOUNT and then asked `isSpend`, which is the trap `spendsIn` exists for —
+   * household shopping bought off a personal card is spending in the
+   * household's book while living in an account outside it, so the budget page
+   * was the one screen in the app that did not count it. Worse, `history` below
+   * used the flow-blind `monthlySpendByCategory`, which DID count it: the
+   * six-month "typical" and the current-month figure beside it were computed by
+   * two different rules.
+   *
+   * Both figures now come from the same selection rule as the totals on Home
+   * and Reports, so a household budget counts household spending wherever it
+   * was paid from — which is what migration 19 made visible to both people.
    */
-  const relevantTxns = useMemo(
-    () => txns.filter((t) => bookAccounts.has(t.accountId)),
-    [txns, bookAccounts],
-  )
   const history = useMemo(
-    () => monthlySpendByCategory(relevantTxns, categories, months),
-    [relevantTxns, categories, months],
+    () => bookMonthlySpendByCategory(txns, flows, categories, book, books, months),
+    [txns, flows, categories, book, books, months],
   )
 
-  const spentThisMonth = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const t of relevantTxns) {
-      // `isSpend` rather than "negative and not a transfer": a contribution to
-      // the household leaves my account looking exactly like an expense.
-      if (!isSpend(flows.get(t.id)) || monthKey(t.date) !== month) continue
-      const key = budgetCategoryId(catMap.get(t.categoryId ?? ''))
-      if (!key) continue
-      m.set(key, (m.get(key) ?? 0) - t.amountMinor)
-    }
-    return m
-  }, [relevantTxns, flows, catMap, month])
+  const spentThisMonth = useMemo(
+    () =>
+      new Map(
+        bookSpendByCategory(txns, flows, categories, book, month, books).map((r) => [
+          r.categoryId,
+          r.totalMinor,
+        ]),
+      ),
+    [txns, flows, categories, book, month, books],
+  )
 
   const rows: Row[] = useMemo(() => {
     // Budgets live on top-level categories; subcategory spending rolls up.

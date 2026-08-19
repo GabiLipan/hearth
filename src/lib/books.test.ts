@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, AccountGrant, Category, Transaction } from './db'
 import {
+  accountsInBook,
   bookBalances,
+  bookMonthlySpendByCategory,
   bookSpendByCategory,
   bookTotals,
   sumBookTotals,
@@ -10,6 +12,8 @@ import {
   classifyAccounts,
   classifyFlows,
   contributionSplit,
+  contributionSplitInRange,
+  sumContributionSplits,
   showsInBook,
   isHouseholdPaid,
   type BookMap,
@@ -1055,6 +1059,265 @@ describe('saying who paid in, when there is no far leg to find', () => {
       const total = bookTotals(rows, flows, book, '2026-03', books).spend
       const byCat = bookSpendByCategory(rows, flows, cats, book, '2026-03', books)
       expect(byCat.reduce((s, r) => s + r.totalMinor, 0)).toBe(total)
+    }
+  })
+})
+
+/**
+ * The bug that made Home and Reports print two different household spending
+ * figures, stated as arithmetic so it cannot come back quietly.
+ *
+ * `bookTotals` and `spendsIn` deliberately reach OUTSIDE the book's own
+ * accounts for one row type, so they have to be handed everything this device
+ * can see. Home used to narrow the list by account first, which disables that
+ * branch without erroring, without a warning, and without any figure on either
+ * page saying which of them is the odd one out.
+ */
+describe('handing the aggregates a list that has already been narrowed', () => {
+  const cats: Category[] = [
+    { id: 'groceries', name: 'Groceries', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+  ]
+  const rows = [
+    txn({ accountId: 'joint', amountMinor: -60000, date: '2026-03-06', categoryId: 'groceries' }),
+    txn({
+      accountId: 'myPrivate',
+      amountMinor: -9000,
+      date: '2026-03-10',
+      categoryId: 'groceries',
+      paidForHousehold: true,
+      createdBy: ME,
+    }),
+  ]
+  const flows = classifyFlows(rows, books)
+  /** What `Dashboard.tsx` used to do before calling any of these. */
+  const byAccount = (book: 'household' | 'mine' | 'all') => {
+    const ids = accountsInBook(book, books)
+    return rows.filter((t) => ids.has(t.accountId))
+  }
+
+  it('loses exactly the household spending that was paid from a personal account', () => {
+    const whole = bookTotals(rows, flows, 'household', '2026-03', books)
+    const narrowed = bookTotals(byAccount('household'), flows, 'household', '2026-03', books)
+
+    expect(whole.spend).toBe(69000)
+    expect(narrowed.spend).toBe(60000)
+    expect(whole.spend - narrowed.spend).toBe(9000)
+    // And "Paid in" is short by the same amount, which is why `net` still
+    // agreed and only the two figures either side of it were wrong.
+    expect(whole.contributions - narrowed.contributions).toBe(9000)
+    expect(whole.net).toBe(narrowed.net)
+  })
+
+  it('loses it from the breakdown too, so the donut and its heading still agree', () => {
+    // Both are wrong together, which is the reason nothing on screen looked
+    // broken: £600 over a £600 donut, on a month that spent £690.
+    const narrowed = bookSpendByCategory(byAccount('household'), flows, cats, 'household', '2026-03', books)
+    expect(narrowed).toEqual([{ categoryId: 'groceries', totalMinor: 60000 }])
+    expect(bookSpendByCategory(rows, flows, cats, 'household', '2026-03', books)).toEqual([
+      { categoryId: 'groceries', totalMinor: 69000 },
+    ])
+  })
+
+  it('changes nothing for the books that hold their own rows', () => {
+    // Only the household book reaches outside itself, so `mine` and Everything
+    // were never affected — which is what made the household figure look like
+    // an isolated oddity rather than a rule being broken.
+    for (const book of ['mine', 'all'] as const) {
+      expect(bookTotals(byAccount(book), flows, book, '2026-03', books)).toEqual(
+        bookTotals(rows, flows, book, '2026-03', books),
+      )
+    }
+  })
+
+  it('and `showsInBook` is the filter that keeps a row list honest', () => {
+    // The list a page shows has the same problem as the figure above it: the
+    // heading counted a row the list left out.
+    const ids = accountsInBook('household', books)
+    expect(rows.filter((t) => showsInBook(t, 'household', books, ids))).toHaveLength(2)
+    expect(rows.filter((t) => ids.has(t.accountId))).toHaveLength(1)
+  })
+})
+
+/**
+ * How the three books relate — the arithmetic the Everything book has never
+ * shown and is confusing for the want of.
+ *
+ * Two of the three add up exactly and one deliberately does not, and the one
+ * that does not is the interesting one: a contribution is counted on BOTH sides
+ * under Our household and Mine, because they are never summed. Under Everything
+ * both legs are in view, so counting either would be a double count — which is
+ * why Everything's income is not the other two added together, and why nobody
+ * should ever "fix" it to be.
+ */
+describe('the books reconcile', () => {
+  const rows = march()
+  const flows = classifyFlows(rows, books)
+  const of = (book: 'household' | 'mine' | 'all') => bookTotals(rows, flows, book, '2026-03', books)
+
+  it('adds spending up exactly', () => {
+    expect(of('all').spend).toBe(of('household').spend + of('mine').spend)
+  })
+
+  it('adds what is left up exactly', () => {
+    // The one identity worth printing on the page: whatever the crossings did,
+    // the money still in the accounts is the money still in the accounts.
+    expect(of('all').net).toBe(of('household').net + of('mine').net)
+  })
+
+  it('does not add income up, and the difference is exactly the crossing', () => {
+    // The row the reconciliation card has to carry, as an equation. A
+    // contribution is counted once in each book, because the books are never
+    // summed; under Everything both legs are in view, so it is counted in
+    // neither. Nobody should ever "fix" this to add up.
+    const crossing = of('mine').contributed + of('mine').returned
+
+    expect(of('all').income).toBe(of('household').income + of('mine').income - crossing)
+    expect(of('all').income).toBeLessThan(of('household').income + of('mine').income)
+  })
+
+  it('still adds up once somebody buys the shop on their own card', () => {
+    // The row that belongs to two books at once is the one most likely to break
+    // an identity like this, so it is checked with it in the mix.
+    const withCard = [
+      ...rows,
+      txn({
+        accountId: 'myPrivate',
+        amountMinor: -9000,
+        date: '2026-03-10',
+        categoryId: 'groceries',
+        paidForHousehold: true,
+        createdBy: ME,
+      }),
+    ]
+    const f = classifyFlows(withCard, books)
+    const t = (book: 'household' | 'mine' | 'all') => bookTotals(withCard, f, book, '2026-03', books)
+
+    expect(t('all').spend).toBe(t('household').spend + t('mine').spend)
+    expect(t('all').net).toBe(t('household').net + t('mine').net)
+    // And the income identity survives the row that belongs to two books,
+    // because it left one book as a contribution and arrived in the other as
+    // spending rather than as income.
+    expect(t('all').income).toBe(
+      t('household').income + t('mine').income - t('mine').contributed - t('mine').returned,
+    )
+  })
+})
+
+describe('who paid in, over more than one month', () => {
+  const rows = [
+    txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-02', transferId: 'm1' }),
+    txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'm1' }),
+    txn({ accountId: 'joint', amountMinor: 180000, date: '2026-03-02', transferId: 'h1' }),
+    txn({ accountId: 'myPrivate', amountMinor: -210000, date: '2026-04-02', transferId: 'm2' }),
+    txn({ accountId: 'joint', amountMinor: 210000, date: '2026-04-02', transferId: 'm2' }),
+    txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-04-10', paidForHousehold: true, createdBy: ME }),
+  ]
+  const flows = classifyFlows(rows, books)
+
+  it('adds two months into one split', () => {
+    // Reports asks this of a year. Asking for one month while the totals beside
+    // it covered twelve is how eleven months of attributed money turned into
+    // money with no name on it.
+    const summed = sumContributionSplits([
+      contributionSplit(rows, flows, '2026-03', books, ME),
+      contributionSplit(rows, flows, '2026-04', books, ME),
+    ])
+
+    expect(summed.mineMinor).toBe(200000 + 210000 + 9000)
+    expect(summed.theirsMinor).toBe(180000)
+    expect(summed.minePaidMinor).toBe(9000)
+    expect(summed.mineCount).toBe(3)
+    expect(summed.minePaidCount).toBe(1)
+  })
+
+  it('and agrees with the household totals over the same months', () => {
+    const summed = sumContributionSplits(
+      ['2026-03', '2026-04'].map((m) => contributionSplit(rows, flows, m, books, ME)),
+    )
+    const totals = sumBookTotals(
+      ['2026-03', '2026-04'].map((m) => bookTotals(rows, flows, 'household', m, books)),
+    )
+
+    expect(summed.mineMinor + summed.theirsMinor + summed.otherMinor).toBe(totals.contributions)
+  })
+
+  it('counts a range on the day the money moved, not the month it was for', () => {
+    // The same rule `bookTotalsInRange` follows, and for the same reason: a
+    // fortnight in the middle of March cannot answer "which month was this
+    // for". The two have to agree, or a hand-drawn range shows a split that
+    // does not add up to the figure above it.
+    const late = [
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-28', transferId: 'late' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-28', transferId: 'late' }),
+    ]
+    const f = classifyFlows(late, books)
+
+    // By month it belongs to April — it was moved on the 28th to be spent in it.
+    expect(contributionSplit(late, f, '2026-04', books, ME).mineMinor).toBe(200000)
+    expect(contributionSplit(late, f, '2026-03', books, ME).mineMinor).toBe(0)
+    // By range it belongs to the day it moved.
+    expect(contributionSplitInRange(late, f, books, '2026-03-01', '2026-03-31', ME).mineMinor).toBe(200000)
+    expect(contributionSplitInRange(late, f, books, '2026-04-01', '2026-04-30', ME).mineMinor).toBe(0)
+    expect(contributionSplitInRange(late, f, books, '2026-03-01', '2026-03-31', ME).mineMinor).toBe(
+      bookTotalsInRange(late, f, 'household', books, '2026-03-01', '2026-03-31').contributions,
+    )
+  })
+})
+
+describe('spend per category per month, per book', () => {
+  const cats: Category[] = [
+    { id: 'groceries', name: 'Groceries', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+    { id: 'shopping', name: 'Shopping', kind: 'expense', sortOrder: 1, updatedAt: 'x' },
+  ]
+  const months = ['2026-02', '2026-03']
+  const rows = [
+    txn({ accountId: 'joint', amountMinor: -50000, date: '2026-02-06', categoryId: 'groceries' }),
+    txn({ accountId: 'joint', amountMinor: -60000, date: '2026-03-06', categoryId: 'groceries' }),
+    txn({ accountId: 'myPrivate', amountMinor: -70000, date: '2026-03-08', categoryId: 'shopping' }),
+    txn({
+      accountId: 'myPrivate',
+      amountMinor: -9000,
+      date: '2026-03-10',
+      categoryId: 'groceries',
+      paidForHousehold: true,
+      createdBy: ME,
+    }),
+    // A contribution leg is negative and in my account, and is not spending —
+    // the flow-blind version of this function counted it.
+    txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-02', transferId: 'm1' }),
+    txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'm1' }),
+  ]
+  const flows = classifyFlows(rows, books)
+  const series = (book: 'household' | 'mine' | 'all') =>
+    bookMonthlySpendByCategory(rows, flows, cats, book, books, months)
+
+  it('agrees month by month with the single-month breakdown', () => {
+    // The failure this replaces: Budgets compared a current-month figure
+    // computed one way against a six-month "typical" computed another.
+    for (const book of ['household', 'mine', 'all'] as const) {
+      const byMonth = series(book)
+      months.forEach((m, i) => {
+        const flat = new Map(
+          bookSpendByCategory(rows, flows, cats, book, m, books).map((r) => [r.categoryId, r.totalMinor]),
+        )
+        for (const [categoryId, cells] of byMonth) {
+          expect(cells[i]).toBe(flat.get(categoryId) ?? 0)
+        }
+      })
+    }
+  })
+
+  it('puts a card-paid household shop in the household series and not in mine', () => {
+    expect(series('household').get('groceries')).toEqual([50000, 69000])
+    expect(series('mine').get('groceries')).toBeUndefined()
+    expect(series('mine').get('shopping')).toEqual([0, 70000])
+  })
+
+  it('never counts a contribution leg as spending', () => {
+    for (const book of ['household', 'mine', 'all'] as const) {
+      for (const cells of series(book).values()) {
+        expect(cells.every((v) => v < 200000)).toBe(true)
+      }
     }
   })
 })

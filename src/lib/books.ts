@@ -840,6 +840,87 @@ export function contributionSplit(
   /** Needed to tell "I tagged this as mine" from "I tagged this as theirs". */
   userId?: string,
 ): ContributionSplit {
+  // Not `monthKey(t.date)`: a contribution counts towards the month it was FOR.
+  // `bookTotals` files it in the same month, which is what keeps this split
+  // adding up to the figure above it.
+  return splitCore(txns, flows, books, userId, (t, flow) => effectiveMonth(t, flow) === month)
+}
+
+/**
+ * The same question over an arbitrary run of days.
+ *
+ * Deliberately NOT built out of `contributionSplit`, and for exactly the reason
+ * `bookTotalsInRange` is not built out of `bookTotals`: a range that does not
+ * align to a month cannot use `effectiveMonth`, because "the month this money
+ * was for" is a question a fortnight in the middle of March cannot answer. So
+ * this counts money on the day it actually moved — the same rule the totals
+ * beside it follow, which is what keeps the two agreeing.
+ */
+export function contributionSplitInRange(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  books: BookMap,
+  /** Both inclusive, `yyyy-MM-dd`. */
+  from: string,
+  to: string,
+  userId?: string,
+): ContributionSplit {
+  return splitCore(txns, flows, books, userId, (t) => t.date >= from && t.date <= to)
+}
+
+/**
+ * Several periods as one split — a year, or any run of months.
+ *
+ * Every field here is additive, so unlike `sumBookTotals` there is nothing to
+ * re-derive: no field of a `ContributionSplit` is computed from the others.
+ *
+ * It exists because Reports shows a period and `contributionSplit` answers about
+ * a month. Asking it once with the month while the totals beside it covered a
+ * whole year is how the "Who paid in" bar came to understate every year view,
+ * with the remainder silently landing in "Put in — not sure by whom" — the band
+ * for money that genuinely has no name on it.
+ */
+export function sumContributionSplits(parts: ContributionSplit[]): ContributionSplit {
+  const out: ContributionSplit = {
+    mineMinor: 0,
+    theirsMinor: 0,
+    minePaidMinor: 0,
+    theirsPaidMinor: 0,
+    mineCount: 0,
+    theirsCount: 0,
+    minePaidCount: 0,
+    theirsPaidCount: 0,
+    otherMinor: 0,
+  }
+  for (const p of parts) {
+    out.mineMinor += p.mineMinor
+    out.theirsMinor += p.theirsMinor
+    out.minePaidMinor += p.minePaidMinor
+    out.theirsPaidMinor += p.theirsPaidMinor
+    out.mineCount += p.mineCount
+    out.theirsCount += p.theirsCount
+    out.minePaidCount += p.minePaidCount
+    out.theirsPaidCount += p.theirsPaidCount
+    out.otherMinor += p.otherMinor
+  }
+  return out
+}
+
+/**
+ * The body both of them share, with the period asked as a predicate.
+ *
+ * One copy rather than two, because the two differ in which rows they count and
+ * not at all in how a row is attributed — and the attribution is the delicate
+ * part: three questions in a fixed order, with a documented wrong answer in one
+ * case. A second copy of that would drift.
+ */
+function splitCore(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  books: BookMap,
+  userId: string | undefined,
+  within: (t: Transaction, flow: Flow | undefined) => boolean,
+): ContributionSplit {
   const legs = new Map<string, Transaction[]>()
   for (const t of txns) {
     if (!t.transferId) continue
@@ -877,7 +958,7 @@ export function contributionSplit(
      * which is what keeps this split adding up to the figure above it.
      */
     if (flow === 'paid-for-household') {
-      if (effectiveMonth(t, flow) !== month) continue
+      if (!within(t, flow)) continue
       const amount = -t.amountMinor
       if (!t.createdBy) {
         out.otherMinor += amount
@@ -896,7 +977,7 @@ export function contributionSplit(
     }
 
     if (!books.household.has(t.accountId) || t.amountMinor <= 0) continue
-    if (effectiveMonth(t, flow) !== month) continue
+    if (!within(t, flow)) continue
 
     if (flow === 'external-income') {
       out.otherMinor += t.amountMinor
@@ -1057,6 +1138,59 @@ export function bookSpendByCategory(
   return [...totals.entries()]
     .map(([categoryId, totalMinor]) => ({ categoryId, totalMinor }))
     .sort((a, b) => b.totalMinor - a.totalMinor)
+}
+
+/**
+ * Spend per category per month, one series per category — what a budget is
+ * judged against.
+ *
+ * The book-aware twin of `monthlySpendByCategory` in stats.ts, and it exists
+ * because that one is flow-blind. Handed a personal account's rows it counts a
+ * contribution leg as spending; handed a household book it cannot see the one
+ * row that is household spending from outside the household's accounts. Both of
+ * those were live: the Budgets page compared a current-month figure computed
+ * with `isSpend` against a six-month "typical" computed without it, so a
+ * `paid-for-household` row was in the history and out of the figure beside it.
+ *
+ * `spendsIn` is the whole of the selection rule, exactly as `bookSpendByCategory`
+ * uses it, so the series and the totals above them cannot disagree.
+ */
+export function bookMonthlySpendByCategory(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  categories: Category[],
+  book: BookId,
+  books: BookMap,
+  months: string[],
+): Map<string, number[]> {
+  const catMap = new Map(categories.map((c) => [c.id, c]))
+  const ids = accountsInBook(book, books)
+  const index = new Map(months.map((m, i) => [m, i]))
+  const out = new Map<string, number[]>()
+
+  for (const t of txns) {
+    if (!t.categoryId) continue
+    const flow = flows.get(t.id)
+    if (!spendsIn(flow, book, t.accountId, ids)) continue
+    // Equal to `monthKey(t.date)` for every flow `spendsIn` admits — the 25th
+    // cut-off only ever moves a contribution, and a contribution is not
+    // spending. Written this way to match the other monthly series in
+    // `lib/insights.ts` rather than to make a difference here.
+    const i = index.get(effectiveMonth(t, flow))
+    if (i === undefined) continue
+    const cat = catMap.get(t.categoryId)
+    if (!cat || cat.kind !== 'expense') continue
+    // Subcategory spending rolls up to its parent, the rule budgets, the donut
+    // and the heatmap all share.
+    const key = budgetCategoryId(cat)!
+    let series = out.get(key)
+    if (!series) {
+      series = months.map(() => 0)
+      out.set(key, series)
+    }
+    series[i] -= t.amountMinor
+  }
+  return out
 }
 
 /**

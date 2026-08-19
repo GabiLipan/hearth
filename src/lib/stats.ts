@@ -126,6 +126,20 @@ export function monthTotals(txns: Transaction[], month: string) {
  * Subcategories roll up to their parent, transfers are excluded, and a month
  * with no spending is a zero rather than a gap — a sparkline with holes in it
  * reads as missing data rather than as a quiet month.
+ *
+ * **Flow-blind, and no longer used by any screen.** Use
+ * `bookMonthlySpendByCategory` in books.ts instead.
+ *
+ * "Negative and not a transfer" is not the same question as "spending in this
+ * book", and the two come apart on exactly the row that is hardest to reason
+ * about: household shopping bought off a personal card is spending in the
+ * household's book while living in an account outside it, and this counts it
+ * wherever the rows happen to come from. The Budgets page used this for its
+ * six-month "typical" while computing the current month with `isSpend`, so the
+ * two columns beside each other were computed by two different rules.
+ *
+ * Kept because `categories.test.ts` uses it to check the subcategory rollup,
+ * which is the one thing here that is not about books.
  */
 export function monthlySpendByCategory(
   txns: Transaction[],

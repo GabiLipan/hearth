@@ -15,7 +15,7 @@ import {
   useMyLevels,
   OWED_FLAG,
 } from '../lib/cache'
-import { accountsInBook } from '../lib/books'
+import { accountsInBook, showsInBook } from '../lib/books'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { thisMonthKey } from '../lib/dates'
 import { defaultDemoAccount, seedDemoData } from '../lib/demo'
@@ -192,16 +192,28 @@ export default function Dashboard() {
   }
 
   /**
-   * Everything on this page is narrowed to the chosen book once, here, rather
-   * than in seven widgets. A widget that merely lists rows then needs no
-   * changes at all; only the ones that add money up have to know about flows,
-   * because a contribution is neither income nor spending.
+   * The book's ROW LIST, narrowed once here rather than in seven widgets.
+   *
+   * `showsInBook`, not `ids.has(t.accountId)`, and the difference is the whole
+   * of a bug that made this page disagree with Reports. One row can leave its
+   * account: household shopping paid off a personal card is spending in the
+   * household's book while living in an account outside it. Selecting by
+   * account alone dropped those rows before the widgets ever saw them — so Our
+   * household's spending on this page was short by exactly them, and Recent
+   * activity omitted your own shopping from a list whose heading had already
+   * counted it.
+   *
+   * Anything that ADDS MONEY UP takes `allTxns` instead. Those functions —
+   * `bookTotals`, `bookSlices`, `bookSeries`, `contributionSplit` — do their own
+   * account selection, and one of them deliberately reaches outside the book to
+   * do it. Handing them a list that has already been narrowed silently disables
+   * that. Reports passes them the whole set, which is why the two pages agree
+   * again.
    */
   const ids = accountsInBook(book, books)
-  const scopedTxns = (txns ?? []).filter((t) => ids.has(t.accountId))
+  const scopedTxns = (txns ?? []).filter((t) => showsInBook(t, book, books, ids))
   const data: HomeData = {
     txns: scopedTxns,
-    // Unscoped, for the one widget that straddles two books. See HomeData.
     allTxns: txns ?? [],
     allAccounts: accounts,
     categories,

@@ -29,6 +29,8 @@ import {
   rangeSlices,
   sumBookTotals,
   contributionSplit,
+  contributionSplitInRange,
+  sumContributionSplits,
   hasBreakdown,
   BOOK_WORDS,
   type BookId,
@@ -275,16 +277,6 @@ export default function Reports() {
   const { userId } = useSyncState()
   const memberMap = useMemberMap()
 
-  /**
-   * Who paid in what. Household book only — it is meaningless anywhere else,
-   * and it is the one figure this whole model makes newly possible: neither of
-   * us can see the other's salary, but every contribution ARRIVES in a joint
-   * account, which we can both read.
-   */
-  const split = useMemo(
-    () => contributionSplit(txns ?? [], flows, month, books, userId),
-    [txns, flows, month, books, userId],
-  )
   const partner = useMemo(() => {
     const others = [...memberMap.values()].filter((m) => m.userId !== userId)
     return others.length === 1 ? nameOf(others[0]) : null
@@ -302,6 +294,29 @@ export default function Reports() {
     const last = year === thisMonthKey().slice(0, 4) ? Number(thisMonthKey().slice(5, 7)) : 12
     return Array.from({ length: last }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
   }, [period, month, year])
+
+  /**
+   * Who paid in what. Household book only — it is meaningless anywhere else,
+   * and it is the one figure this whole model makes newly possible: neither of
+   * us can see the other's salary, but every contribution ARRIVES in a joint
+   * account, which we can both read.
+   *
+   * Scoped to the PERIOD, exactly as `totals` below is. It used to be asked for
+   * the selected month whatever the period was, so under Year the person bands
+   * showed one month's contributions against a year's income — and because
+   * `spendFlow` fills the gap with "Put in — not sure by whom", eleven months of
+   * perfectly well attributed money quietly turned into money with no name on
+   * it. Declared after `inView` for that reason: the period is what decides it.
+   */
+  const split = useMemo(
+    () =>
+      period === 'custom'
+        ? contributionSplitInRange(txns ?? [], flows, books, from, to, userId)
+        : sumContributionSplits(
+            inView.map((m) => contributionSplit(txns ?? [], flows, m, books, userId)),
+          ),
+    [txns, flows, inView, books, userId, period, from, to],
+  )
 
   const slices = useMemo(
     () =>
