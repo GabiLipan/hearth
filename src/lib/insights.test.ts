@@ -337,3 +337,31 @@ describe('how this month compares with normal', () => {
     expect(d.deltaMinor).toBe(10000)
   })
 })
+
+describe('what a salary turned into, split by how it got there', () => {
+  it('draws the household share as its two halves, which sum to it', () => {
+    // The half that is a decision, and the half that merely happened at a till.
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-03-01', categoryId: 'salary' }),
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-02', transferId: 'm' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'm' }),
+      txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true, createdBy: ME }),
+    ]
+    const [bar] = salaryBars(rows, classifyFlows(rows, books), books, ['2026-03'])
+
+    expect(bar.contributedMovedMinor).toBe(200000)
+    expect(bar.contributedPaidMinor).toBe(9000)
+    expect(bar.contributedMovedMinor + bar.contributedPaidMinor).toBe(bar.contributedMinor)
+  })
+
+  it('leaves the second segment empty where the money only ever moved across', () => {
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-03-01', categoryId: 'salary' }),
+      txn({ accountId: 'myPrivate', amountMinor: -200000, date: '2026-03-02', transferId: 'm' }),
+      txn({ accountId: 'joint', amountMinor: 200000, date: '2026-03-02', transferId: 'm' }),
+    ]
+    const [bar] = salaryBars(rows, classifyFlows(rows, books), books, ['2026-03'])
+    expect(bar.contributedPaidMinor).toBe(0)
+    expect(bar.contributedMovedMinor).toBe(bar.contributedMinor)
+  })
+})

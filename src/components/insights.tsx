@@ -225,8 +225,24 @@ export function SalaryStack({ data, height = 240 }: { data: SalaryBar[]; height?
    * chart in the app.
    */
   const tip = useTouchTooltip()
+  /**
+   * Two tones of one colour for the two halves of the household share, and
+   * separate hues for the rest. A second hue there would read as a fourth
+   * destination rather than as two ways of reaching one.
+   *
+   * `color-mix` against the surface rather than an opacity, because these bars
+   * are drawn at 45% on an unfinished month — see `PARTIAL_OPACITY` — and a
+   * segment that was already translucent would land at a different lightness
+   * from its neighbour in exactly the month somebody is looking hardest at.
+   */
+  const toUs = c.series[1]
   const parts = [
-    { key: 'contributedMinor' as const, name: 'To the household', colour: c.series[1] },
+    { key: 'contributedMovedMinor' as const, name: 'Moved to our household', colour: toUs },
+    {
+      key: 'contributedPaidMinor' as const,
+      name: 'Bought for the household',
+      colour: `color-mix(in oklab, ${toUs} 45%, var(--surface))`,
+    },
     { key: 'spentMinor' as const, name: 'Spent on me', colour: c.series[0] },
     { key: 'leftMinor' as const, name: 'Left with me', colour: c.series[2] },
   ]

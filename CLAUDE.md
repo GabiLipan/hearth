@@ -68,6 +68,7 @@ read-only detector that reports which are present — run it when unsure.
 | `21-rule-conditions.sql` | `rules.amount_min_minor` / `amount_max_minor` / `account_id` — a rule may ask for more than the payee. Two subscriptions from one vendor at two prices become two rules, so the uniqueness rule moves from the payee to the whole condition set, and `upsert_rule` gains three more arguments |
 | `22-rule-edits.sql` | `upsert_rule` looks before it inserts, so a rule's CONDITIONS can be edited — its payee, an amount, an account. Same signature as 21's, body only |
 | `23-custom-colours.sql` | `categories.color` / `accounts.color` / `goals.color` — a `#rrggbb` of your own, laid OVER the slot rather than replacing it. Null is the ordinary case |
+| `24-goal-allocations.sql` | `goal_entries` — a goal is a CLAIM on money already in an account, not a pot you move money into. `assign_to_goal` puts some of what an account holds towards a goal and refuses to let the goals on one account claim more than it has; `settle_goals` takes a withdrawal off what is unassigned first and then off the largest pot |
 
 All are re-runnable, with **five ordering traps**, and three of them are the
 same trap. The rule migrations stack: `20` drops the three-argument
@@ -141,6 +142,8 @@ than on the way in to the next import),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
 `contributors.ts` (naming the person behind an arrival whose far leg does not
 exist, and remembering the name for next month),
+`goals.ts` (a pot as a claim on money already somewhere: what an account's goals
+have taken, what is left unassigned, and what a withdrawal costs which pot),
 `palette.ts` (the twelve slots, the order they are offered in, and a colour of
 your own over the top of one), `categoryTree.ts` (what a drag on the category
 list means, and what it writes),
@@ -1620,6 +1623,47 @@ the single place a level comes from.
   total in the app. An ambiguous pair (either side has more than one reading) is
   offered but never linked automatically, for the same reason.
 
+- **A goal is a CLAIM, not a container, and the pot is a ledger.** It used to be
+  the sum of transactions carrying `goal_id`, and the only two things that could
+  write that were `create_transfer` — which MOVES money, so it needs somewhere
+  to move it from — and `set_transfer_goal`, which refuses anything that is not
+  half of a transfer. So money already in the savings account could not be put
+  towards a goal at all: not an opening balance, not interest, not a salary that
+  landed straight there. `goal_entries` (migration 24) replaces it, and three
+  things about it are load-bearing. Rows rather than a `savedMinor` column,
+  because the outbox cannot merge two increments of one column and one of two
+  devices' assignments would be silently lost — the same reasoning that keeps
+  `settlement` a view. Every server function is `security definer`, because the
+  other goals on a shared account may be the other person's and `goals_select`
+  hides them: a cap computed from only the goals you can see is not a cap. And
+  the client's `accountAllocation`/`shortfall` mirror the server's rules exactly
+  so the screen can say what is about to happen — a figure that changes on the
+  next sync with nothing to explain it is the failure being avoided.
+- **A same-book transfer is still `internal`, and is now also reportable.**
+  `savedInto` is a SECOND reading of rows `bookTotals` correctly counts in
+  nothing: no flow moves, no total changes, and what is left over is simply
+  drawn split into the part that went to savings and the part that stayed. Any
+  future "and also count this as…" wants that shape rather than a new `Flow` —
+  a flow is what a row IS, and a row can only be one thing.
+- **`layoutFlow` is columns now, and two rules generalised rather than being
+  replaced.** `side` still decides ribbon colour and what a click means;
+  `column` is what the geometry reads, derived from `side` when absent so every
+  three-column graph lays out identically. A ribbon is as thick as the band it
+  UNIQUELY belongs to — a band with a `minBand` floor is fatter than its money
+  and the ribbon has to be fattened with it, or the join reads as money going
+  missing at one end — and an interior band is as tall as the busier of the two
+  stacks it carries, which is exactly "the hub is as tall as the busier side"
+  said for four columns. `sankey.test.ts` asserts the three-column case is
+  unchanged; break either rule and it says so.
+- **A card's prose goes behind the ⓘ, and `CardHeading` is where.** Reports had
+  eleven cards each carrying a two-sentence paragraph under the title,
+  permanently — three lines above every chart on a phone, and the rule about
+  headings-and-one-line broken eleven times over. `CardHeading` takes `hint`
+  (one short line about what is on screen NOW — "scroll back for earlier
+  months") and `info` (everything else). It is a component and not a helper
+  because `useInfoNote` is a hook and a page cannot call one per card from
+  inside a `switch`.
+
 ## Known gaps (not yet fixed)
 
 - `stats.ts` `monthlySeries` has an `else if`/`else` pair with identical bodies —
@@ -1635,10 +1679,10 @@ the single place a level comes from.
 - No end-to-end test covers two users at once; the two-person cases are asserted
   in `supabase/99c-ownership-tests.sql` and `99e-reconcile-tests.sql` at the SQL
   layer only.
-- Unlinking a transfer releases any goal it was funding, and that value is not
-  recoverable. Deliberate: `goalProgress` sums `goal_id` rather than transfers,
-  so a tag left on a leg that is no longer part of one would keep the pot
-  claiming money the app no longer believes was moved into it. The categories
+- Unlinking a transfer still clears `goal_id`, and that no longer means
+  anything: since migration 24 a pot is a `goal_entries` ledger and does not
+  read that column at all. The old tagging path is left installed so nothing
+  queued by an older tab dead-letters; it feeds nothing. The categories
   ARE recoverable as of migration 12 — `prior_category_id` holds them between
   link and unlink, and a newer answer set while linked wins over the remembered
   one.

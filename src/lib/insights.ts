@@ -93,8 +93,12 @@ export interface SalaryBar {
   key: string
   label: string
   partial: boolean
-  /** Moved to the household. Positive. */
+  /** Moved to the household. Positive. The two below sum to it. */
   contributedMinor: number
+  /** Of that, money transferred into a joint account. */
+  contributedMovedMinor: number
+  /** Of that, household things bought straight off a personal card. */
+  contributedPaidMinor: number
   /** Spent on myself. Positive. */
   spentMinor: number
   /** Still sitting in my account. Positive; zero where the month went negative. */
@@ -114,8 +118,17 @@ export interface SalaryBar {
  *
  * A month that went negative — spending more than came in — has nothing left
  * over rather than a negative slice, because a stack cannot draw one without
- * lying about the total. The three parts then exceed the bar, which is honest:
- * more went out than came in.
+ * lying about the total. The parts then exceed the bar, which is honest: more
+ * went out than came in.
+ *
+ * The household share is drawn as TWO segments, in two tones of one colour,
+ * because it is reached two ways and only one of them is a decision: money
+ * moved across is a figure agreed once and repeated every month, while money
+ * bought for the household off a personal card is an accident of which card was
+ * in the wallet. Merged, the second is invisible — and it is the half that
+ * quietly turns into being owed. The question the split makes askable is
+ * whether the share you SEND is steady while the share that merely HAPPENS
+ * grows.
  */
 export function salaryBars(
   txns: Transaction[],
@@ -131,6 +144,8 @@ export function salaryBars(
       label: monthLabel(key, 'short'),
       partial: key === now,
       contributedMinor: t.contributed,
+      contributedMovedMinor: t.contributedMoved,
+      contributedPaidMinor: t.contributedPaid,
       spentMinor: t.spend,
       leftMinor: Math.max(0, t.income - t.spend - t.contributed - t.withdrawn),
       earnedMinor: t.income,
