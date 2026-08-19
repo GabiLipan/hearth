@@ -1154,13 +1154,42 @@ describe('the books reconcile', () => {
   const flows = classifyFlows(rows, books)
   const of = (book: 'household' | 'mine' | 'all') => bookTotals(rows, flows, book, '2026-03', books)
 
-  it('adds spending up exactly', () => {
+  it('adds spending up exactly, while every account is one this device holds', () => {
     expect(of('all').spend).toBe(of('household').spend + of('mine').spend)
   })
 
-  it('adds what is left up exactly', () => {
-    // The one identity worth printing on the page: whatever the crossings did,
-    // the money still in the accounts is the money still in the accounts.
+  it('and short by exactly the rows bought from an account this device does not hold', () => {
+    // The one place spending does NOT add up, and it is not a defect: Everything
+    // means "every account this device can see", and my partner's card is not
+    // one — only the single row she published from it is. So the row is
+    // household spending and is in no account here, which is what the by-account
+    // filter is for. It has to be a LINE on the reconciliation card rather than
+    // a discrepancy the reader is left to find.
+    const hers = txn({
+      accountId: 'herCard',
+      amountMinor: -4400,
+      date: '2026-03-11',
+      categoryId: 'groceries',
+      paidForHousehold: true,
+      createdBy: HER,
+    })
+    const withHers = [...rows, hers]
+    const f = classifyFlows(withHers, books)
+    const t = (book: 'household' | 'mine' | 'all') => bookTotals(withHers, f, book, '2026-03', books)
+
+    expect(f.get(hers.id)).toBe('paid-for-household')
+    expect(accountsInBook('all', books).has('herCard')).toBe(false)
+    expect(t('household').spend + t('mine').spend - t('all').spend).toBe(4400)
+    // Net is untouched, because the row is income and spending in the same
+    // breath on the one side and absent from the other.
+    expect(t('all').net).toBe(t('household').net + t('mine').net)
+  })
+
+  it('adds what is left up exactly, always', () => {
+    // The one identity with no exceptions at all, which is why it is the one
+    // the reconciliation card leads with: whatever the crossings did, and
+    // whoever paid for what out of which account, the money still sitting in
+    // the accounts is the money still sitting in the accounts.
     expect(of('all').net).toBe(of('household').net + of('mine').net)
   })
 

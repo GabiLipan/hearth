@@ -1,0 +1,928 @@
+<title>Three Books, Three Questions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+/* ─────────────────────────────────────────────────────────────
+   Two palettes, deliberately kept apart.
+
+   `--doc-*` is this document: cool neutrals biased a few degrees
+   towards Hearth's own blue, so the page reads as adjacent to the
+   app without imitating its cream-white ground.
+
+   `--h-*`, scoped to `.hearth`, are the app's REAL tokens, copied
+   from src/index.css. Everything inside a mockup frame draws from
+   those and from system-ui, because that is what the app renders in.
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --doc-page: #eceff3;
+  --doc-card: #ffffff;
+  --doc-sunk: #e2e6ec;
+  --doc-ink: #14171c;
+  --doc-ink-2: #565d68;
+  --doc-ink-3: #838b96;
+  --doc-rule: rgba(20, 23, 28, 0.13);
+  --doc-accent: #2a78d6;
+  --doc-accent-soft: rgba(42, 120, 214, 0.1);
+  --doc-fixed: #056b30;
+  --doc-fixed-soft: rgba(5, 107, 48, 0.11);
+  --doc-alarm: #b02020;
+  --doc-alarm-soft: rgba(176, 32, 32, 0.1);
+  --doc-shadow: 0 1px 2px rgba(20, 23, 28, .05), 0 10px 30px -14px rgba(20, 23, 28, .22);
+
+  /* Hearth, light */
+  --h-page: #f9f9f7;
+  --h-surface: #fcfcfb;
+  --h-surface-2: #f0efec;
+  --h-ink: #0b0b0b;
+  --h-ink-2: #52514e;
+  --h-ink-3: #898781;
+  --h-hairline: rgba(11, 11, 11, 0.1);
+  --h-accent: #2a78d6;
+  --h-s1: #3984e4; --h-s2: #169f4b; --h-s3: #a77d00; --h-s4: #0093b3;
+  --h-s5: #8270df; --h-s6: #d55550; --h-s7: #c95492; --h-s8: #c86600;
+  --h-panel-1: #1f5fae; --h-panel-2: #3b2f86; --h-panel-3: #5b2a7d;
+  --h-panel-ink: #ffffff;
+  --h-panel-ink-2: rgba(255, 255, 255, 0.82);
+  --h-panel-line: rgba(255, 255, 255, 0.22);
+  --h-warning-soft: rgba(250, 178, 25, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --doc-page: #0d0f12;
+    --doc-card: #17191e;
+    --doc-sunk: #101216;
+    --doc-ink: #edeff3;
+    --doc-ink-2: #9ba3ae;
+    --doc-ink-3: #767d88;
+    --doc-rule: rgba(237, 239, 243, 0.13);
+    --doc-accent: #6aa6f0;
+    --doc-accent-soft: rgba(106, 166, 240, 0.13);
+    --doc-fixed: #4fc274;
+    --doc-fixed-soft: rgba(79, 194, 116, 0.13);
+    --doc-alarm: #e66767;
+    --doc-alarm-soft: rgba(230, 103, 103, 0.13);
+    --doc-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 14px 34px -16px rgba(0, 0, 0, .7);
+
+    --h-page: #0d0d0d;
+    --h-surface: #1a1a19;
+    --h-surface-2: #262624;
+    --h-ink: #ffffff;
+    --h-ink-2: #c3c2b7;
+    --h-ink-3: #898781;
+    --h-hairline: rgba(255, 255, 255, 0.1);
+    --h-accent: #3987e5;
+    --h-s1: #529af9; --h-s2: #3fb462; --h-s3: #c19100; --h-s4: #00abcf;
+    --h-s5: #9787f5; --h-s6: #eb6d67; --h-s7: #e06ca7; --h-s8: #e27b21;
+    --h-panel-1: #17497f; --h-panel-2: #2e2569; --h-panel-3: #472060;
+    --h-warning-soft: rgba(250, 178, 25, 0.16);
+  }
+}
+
+:root[data-theme="dark"] {
+  --doc-page: #0d0f12;
+  --doc-card: #17191e;
+  --doc-sunk: #101216;
+  --doc-ink: #edeff3;
+  --doc-ink-2: #9ba3ae;
+  --doc-ink-3: #767d88;
+  --doc-rule: rgba(237, 239, 243, 0.13);
+  --doc-accent: #6aa6f0;
+  --doc-accent-soft: rgba(106, 166, 240, 0.13);
+  --doc-fixed: #4fc274;
+  --doc-fixed-soft: rgba(79, 194, 116, 0.13);
+  --doc-alarm: #e66767;
+  --doc-alarm-soft: rgba(230, 103, 103, 0.13);
+  --doc-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 14px 34px -16px rgba(0, 0, 0, .7);
+
+  --h-page: #0d0d0d;
+  --h-surface: #1a1a19;
+  --h-surface-2: #262624;
+  --h-ink: #ffffff;
+  --h-ink-2: #c3c2b7;
+  --h-ink-3: #898781;
+  --h-hairline: rgba(255, 255, 255, 0.1);
+  --h-accent: #3987e5;
+  --h-s1: #529af9; --h-s2: #3fb462; --h-s3: #c19100; --h-s4: #00abcf;
+  --h-s5: #9787f5; --h-s6: #eb6d67; --h-s7: #e06ca7; --h-s8: #e27b21;
+  --h-panel-1: #17497f; --h-panel-2: #2e2569; --h-panel-3: #472060;
+  --h-warning-soft: rgba(250, 178, 25, 0.16);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--doc-page);
+  color: var(--doc-ink);
+  font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .ui, .mono, table, .chip {
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+}
+code {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.86em; font-weight: 500; color: var(--doc-ink);
+}
+.hearth code { color: var(--h-ink-2); }
+.eq code { color: inherit; font-size: 1em; }
+.mono, .fig { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+.fig { font-variant-numeric: tabular-nums; }
+
+/* ── page frame ─────────────────────────────────────────────── */
+.wrap { max-width: 1140px; margin: 0 auto; padding: 0 24px 96px; }
+.col { max-width: 40rem; margin: 0 auto; }
+.wide { max-width: 1040px; margin: 0 auto; }
+
+p { margin: 0 0 1.05em; text-wrap: pretty; }
+p:last-child { margin-bottom: 0; }
+strong { font-weight: 600; }
+em { font-style: italic; }
+a { color: var(--doc-accent); }
+:focus-visible { outline: 2px solid var(--doc-accent); outline-offset: 3px; border-radius: 4px; }
+
+/* ── masthead ───────────────────────────────────────────────── */
+.mast { padding: 84px 0 46px; }
+.eyebrow {
+  font-size: 12px; font-weight: 600; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--doc-ink-3); margin: 0 0 18px;
+  font-family: Archivo, sans-serif;
+}
+h1 {
+  font-size: clamp(38px, 6.4vw, 62px); line-height: 1.03; margin: 0 0 22px;
+  font-weight: 700; letter-spacing: -0.028em; text-wrap: balance;
+}
+.standfirst { font-size: 21px; line-height: 1.55; color: var(--doc-ink-2); max-width: 34rem; }
+
+/* the three books, as the document's spine */
+.spine { display: grid; gap: 12px; margin: 40px auto 0; max-width: 1040px; }
+@media (min-width: 780px) { .spine { grid-template-columns: repeat(3, 1fr); } }
+.book {
+  background: var(--doc-card); border-radius: 14px; padding: 18px 20px 20px;
+  box-shadow: var(--doc-shadow); border-top: 3px solid var(--bk);
+}
+.book .name {
+  font-family: Archivo, sans-serif; font-weight: 700; font-size: 15px;
+  letter-spacing: -0.01em; color: var(--bk); margin: 0 0 6px;
+}
+.book .q { font-size: 16px; line-height: 1.45; color: var(--doc-ink-2); margin: 0; }
+
+/* ── sections ───────────────────────────────────────────────── */
+section { padding-top: 74px; }
+.head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  padding: 4px 11px; border-radius: 999px;
+}
+.chip.book-h { background: var(--doc-accent-soft); color: var(--doc-accent); }
+.chip.book-m { background: color-mix(in srgb, var(--h-s2) 13%, transparent); color: var(--h-s2); }
+.chip.book-a { background: color-mix(in srgb, var(--doc-ink-2) 13%, transparent); color: var(--doc-ink-2); }
+.chip.fixed { background: var(--doc-fixed-soft); color: var(--doc-fixed); }
+.chip.proposed { background: var(--doc-accent-soft); color: var(--doc-accent); }
+h2 {
+  font-size: clamp(27px, 3.5vw, 34px); line-height: 1.15; margin: 0 0 18px;
+  font-weight: 700; letter-spacing: -0.024em; text-wrap: balance;
+}
+h3 {
+  font-size: 19px; margin: 38px 0 12px; font-weight: 600; letter-spacing: -0.012em;
+}
+h4 {
+  font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--doc-ink-3); margin: 0 0 10px;
+}
+.rule { height: 1px; background: var(--doc-rule); border: 0; margin: 0; }
+
+/* ── the mockup canvas ──────────────────────────────────────── */
+.canvas {
+  margin: 30px 0; padding: 26px 22px 22px; border-radius: 18px;
+  background: var(--doc-sunk); border: 1px solid var(--doc-rule);
+}
+.canvas > .cap { margin-top: 16px; }
+.cap {
+  font-family: Archivo, sans-serif; font-size: 13.5px; line-height: 1.5;
+  color: var(--doc-ink-2); margin: 0;
+}
+.cap b { color: var(--doc-ink); font-weight: 600; }
+.pair { display: grid; gap: 18px; }
+@media (min-width: 860px) { .pair { grid-template-columns: 1fr 1fr; } }
+.scroller { overflow-x: auto; }
+
+/* ── Hearth's own surfaces ──────────────────────────────────── */
+.hearth {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--h-ink);
+  font-size: 14px; line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+.hearth .card {
+  background: var(--h-surface); border-radius: 16px; padding: 16px;
+  box-shadow: 0 0 0 1px var(--h-hairline), 0 1px 2px rgba(0,0,0,.04);
+}
+.hearth .panel {
+  border-radius: 16px; padding: 16px; color: var(--h-panel-ink);
+  background: linear-gradient(125deg, var(--h-panel-1) 0%, var(--h-panel-2) 58%, var(--h-panel-3) 100%);
+}
+.hearth .phone { width: 340px; max-width: 100%; }
+.hearth h5 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.hearth .quiet { color: var(--h-ink-3); }
+.hearth .quiet-2 { color: var(--h-ink-2); }
+.hearth .pquiet { color: var(--h-panel-ink-2); }
+.hearth .lab { font-size: 11.5px; }
+.strip { display: flex; align-items: flex-start; margin-top: 6px; }
+.strip > div { flex: 1; min-width: 0; padding: 0 14px; border-left: 1px solid var(--h-panel-line); }
+.strip > div:first-child { padding-left: 0; border-left: 0; }
+.strip .v { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; }
+.strip .v.lead { font-size: 30px; }
+.rstrip { display: flex; flex-wrap: wrap; gap: 0; }
+.rstrip > div { flex: 1; min-width: 116px; padding: 0 14px; border-left: 1px solid var(--h-hairline); }
+.rstrip > div:first-child { padding-left: 0; border-left: 0; }
+.rstrip .v { font-size: 21px; font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; }
+
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.wrong { background: var(--doc-alarm-soft); color: var(--doc-alarm); }
+.right { background: var(--doc-fixed-soft); color: var(--doc-fixed); }
+
+/* who-paid-in bars */
+.prow { display: flex; align-items: center; gap: 12px; padding: 9px 0; }
+.prow + .prow { border-top: 1px solid var(--h-hairline); }
+.pname { width: 74px; flex: none; font-weight: 600; font-size: 13px; }
+.ptrack { flex: 1; min-width: 0; display: flex; gap: 2px; height: 16px; }
+.ptrack span { border-radius: 999px; }
+.pamt { flex: none; text-align: right; }
+.pamt .v { font-weight: 700; font-size: 15px; }
+.pamt .s { font-size: 11px; color: var(--h-ink-3); }
+
+/* bridge table */
+table.bridge { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.bridge th, table.bridge td { padding: 9px 12px; text-align: right; }
+table.bridge th:first-child, table.bridge td:first-child { text-align: left; font-weight: 500; }
+table.bridge thead th { font-size: 11.5px; color: var(--h-ink-3); font-weight: 600; border-bottom: 1px solid var(--h-hairline); }
+table.bridge thead th.tot, table.bridge td.tot { background: var(--h-surface-2); }
+table.bridge thead th.tot { border-radius: 8px 8px 0 0; color: var(--h-ink-2); }
+table.bridge tbody td { border-bottom: 1px solid var(--h-hairline); font-variant-numeric: tabular-nums; }
+table.bridge tr.sum td { font-weight: 700; font-size: 15px; border-bottom: 0; }
+table.bridge tr.sum td.tot { border-radius: 0 0 8px 8px; }
+table.bridge td.neg { color: var(--h-ink-3); }
+.note {
+  margin-top: 12px; padding: 11px 13px; border-radius: 12px;
+  background: var(--h-surface-2); font-size: 12.5px; line-height: 1.5; color: var(--h-ink-2);
+}
+.note b { color: var(--h-ink); }
+
+/* prose devices */
+.callout {
+  border-left: 3px solid var(--bd, var(--doc-accent)); padding: 2px 0 2px 20px;
+  margin: 26px 0; color: var(--doc-ink-2); font-size: 17px;
+}
+.eq {
+  font-family: "IBM Plex Mono", monospace; font-size: 13.5px; line-height: 1.85;
+  background: var(--doc-card); border: 1px solid var(--doc-rule); border-radius: 12px;
+  padding: 16px 18px; margin: 24px 0; overflow-x: auto; white-space: pre; color: var(--doc-ink-2);
+}
+.eq b { color: var(--doc-ink); font-weight: 600; }
+table.doc { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 24px 0; }
+table.doc th { text-align: left; font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--doc-ink-3); padding: 0 14px 8px 0; font-weight: 600; }
+table.doc td { padding: 11px 14px 11px 0; border-top: 1px solid var(--doc-rule); vertical-align: top; color: var(--doc-ink-2); }
+table.doc td:first-child { color: var(--doc-ink); font-weight: 600; white-space: nowrap; }
+.order { counter-reset: step; list-style: none; padding: 0; margin: 24px 0 0; }
+.order li {
+  counter-increment: step; position: relative; padding: 14px 0 14px 46px;
+  border-top: 1px solid var(--doc-rule); font-size: 16px; color: var(--doc-ink-2);
+}
+.order li::before {
+  content: counter(step); position: absolute; left: 0; top: 15px;
+  width: 27px; height: 27px; border-radius: 999px; display: grid; place-items: center;
+  background: var(--doc-accent-soft); color: var(--doc-accent);
+  font-family: Archivo, sans-serif; font-size: 12.5px; font-weight: 700;
+}
+.order li b { color: var(--doc-ink); font-weight: 600; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; font-size: 12px; color: var(--h-ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+
+.foot { margin-top: 78px; padding-top: 22px; border-top: 1px solid var(--doc-rule); font-size: 14px; color: var(--doc-ink-3); font-family: Archivo, sans-serif; }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="col">
+    <p class="eyebrow">Hearth · Home and Reports</p>
+    <h1>Three books, three questions</h1>
+    <p class="standfirst">
+      The books are the right model. What sits on top of them asks all three the
+      same question — and, until this week, got two different answers to it
+      depending on which page you were standing on.
+    </p>
+  </div>
+
+  <div class="spine">
+    <div class="book" style="--bk: var(--doc-accent)">
+      <p class="name">Our household</p>
+      <p class="q">Who put money in, how much of it was a decision, and how much just happened at a till?</p>
+    </div>
+    <div class="book" style="--bk: var(--h-s2)">
+      <p class="name">Mine</p>
+      <p class="q">Of what I earned, how much went to us — deliberately, and as spending that ended up ours?</p>
+    </div>
+    <div class="book" style="--bk: var(--doc-ink-2)">
+      <p class="name">Everything</p>
+      <p class="q">How do the two relate, and do their figures actually reconcile?</p>
+    </div>
+  </div>
+</header>
+
+<hr class="rule">
+
+<!-- ── 1 ─────────────────────────────────────────────────────── -->
+<section>
+  <div class="col">
+    <div class="head">
+      <span class="chip fixed">✓ Fixed on this branch</span>
+    </div>
+    <h2>Why the same month printed two different figures</h2>
+    <p>
+      <code class="mono">bookTotals</code> and <code class="mono">spendsIn</code>
+      deliberately reach <em>outside</em> a book's own accounts for one row type:
+      household shopping bought off a personal card. That is the whole point of
+      <code class="mono">paid_for_household</code> — the row is the household's
+      spending, and it lives in an account the household book is not made of.
+    </p>
+    <p>
+      So both functions have to be handed everything the device can see. Reports
+      did. Home narrowed the list by account first, which switches that branch off
+      with no error and nothing on either screen to say which of them is the odd
+      one out.
+    </p>
+  </div>
+
+  <div class="canvas">
+    <div class="pair hearth">
+      <div>
+        <h4 style="color: var(--doc-alarm)">Home · before</h4>
+        <div class="panel">
+          <p class="lab pquiet" style="margin:0">March</p>
+          <div class="strip">
+            <div>
+              <p class="lab pquiet" style="margin:0">Household spending</p>
+              <p class="v lead">£2,400.00</p>
+            </div>
+            <div>
+              <p class="lab pquiet" style="margin:0">Paid in</p>
+              <p class="v">£3,888.00</p>
+            </div>
+            <div>
+              <p class="lab pquiet" style="margin:0">Left over</p>
+              <p class="v">+£1,488.00</p>
+            </div>
+          </div>
+        </div>
+        <p class="cap" style="margin-top:12px">
+          <span class="pill wrong">£134 missing</span>
+          Both figures short by the shopping bought on a card — so
+          <b>Left over still agreed</b>, and only the two numbers either side of it
+          were wrong.
+        </p>
+      </div>
+
+      <div>
+        <h4 style="color: var(--doc-fixed)">Reports · same month, same book</h4>
+        <div class="card">
+          <div class="rstrip">
+            <div>
+              <p class="lab quiet" style="margin:0">Paid in</p>
+              <p class="v">£4,022.00</p>
+            </div>
+            <div>
+              <p class="lab quiet" style="margin:0">Household spending</p>
+              <p class="v">£2,534.00</p>
+            </div>
+            <div>
+              <p class="lab quiet" style="margin:0">Left over</p>
+              <p class="v" style="color: var(--h-s2)">+£1,488.00</p>
+            </div>
+          </div>
+        </div>
+        <p class="cap" style="margin-top:12px">
+          <span class="pill right">Now both</span>
+          Home hands the aggregates the whole list and filters its
+          <b>row list</b> with <code class="mono">showsInBook</code> — which also
+          gives Recent activity back your own shopping.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p>Three more divergences fell out of tracing it:</p>
+    <table class="doc">
+      <thead><tr><th>Where</th><th>What</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Home's flow</td>
+          <td><code class="mono">split</code> from every row, <code class="mono">totals</code> from the narrowed one. The "You put in" band was clamped against a contributions figure missing everything bought on a card, silently.</td>
+        </tr>
+        <tr>
+          <td>Reports, by year</td>
+          <td>The split was asked for the selected <em>month</em> whatever the period was. Eleven months of well-attributed money quietly became "Put in — not sure by whom".</td>
+        </tr>
+        <tr>
+          <td>Budgets</td>
+          <td>Counted <code class="mono">paid-for-household</code> in no book at all — while its six-month "typical" column, computed by a different rule, <em>did</em> count it.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      All four are one discipline: <strong>anything that adds money up takes the
+      unscoped list and selects for itself; anything that lists rows filters with
+      <code class="mono">showsInBook</code>.</strong> The tests now pin the trap as
+      arithmetic — a narrowed list against a whole one — so it fails rather than
+      drifting back.
+    </p>
+  </div>
+</section>
+
+<!-- ── 2 ─────────────────────────────────────────────────────── -->
+<section>
+  <div class="col">
+    <div class="head">
+      <span class="chip book-h">Our household</span>
+      <span class="chip proposed">Proposed</span>
+    </div>
+    <h2>Put in on purpose, or spent extra</h2>
+    <p>
+      The household book can tell you £3,934 was paid in. It cannot tell you that
+      £134 of that never went near the joint account. Today the only route to that
+      fact is hovering one band of the flow diagram.
+    </p>
+    <div class="callout">
+      Both halves matter, for different reasons. Money <em>moved across</em> is a
+      decision: a figure we agreed, arriving every month. Money spent off a
+      personal card is an accident of which card was in the wallet — and it is
+      the half that quietly turns into somebody being owed.
+    </div>
+  </div>
+
+  <div class="canvas">
+    <div class="hearth" style="max-width: 620px; margin: 0 auto">
+      <div class="card">
+        <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px">
+          <h5>Who paid in</h5>
+          <span class="quiet" style="font-size:12px">March · £4,022.00</span>
+        </div>
+
+        <div style="margin-top:10px">
+          <div class="prow">
+            <span class="pname">You</span>
+            <span class="ptrack">
+              <span style="flex: 2000; background: var(--h-s2)"></span>
+              <span style="flex: 90; background: color-mix(in srgb, var(--h-s2) 45%, var(--h-surface))"></span>
+              <span style="flex: 1932; background: var(--h-surface-2)"></span>
+            </span>
+            <span class="pamt">
+              <span class="v">£2,090.00</span><br>
+              <span class="s">£2,000 moved · £90 bought · 2 payments</span>
+            </span>
+          </div>
+
+          <div class="prow">
+            <span class="pname">Sam</span>
+            <span class="ptrack">
+              <span style="flex: 1800; background: var(--h-s5)"></span>
+              <span style="flex: 44; background: color-mix(in srgb, var(--h-s5) 45%, var(--h-surface))"></span>
+              <span style="flex: 2178; background: var(--h-surface-2)"></span>
+            </span>
+            <span class="pamt">
+              <span class="v">£1,844.00</span><br>
+              <span class="s">£1,800 moved · £44 bought · 2 payments</span>
+            </span>
+          </div>
+
+          <div class="prow">
+            <span class="pname quiet-2">Other income</span>
+            <span class="ptrack">
+              <span style="flex: 88; background: var(--h-ink-3)"></span>
+              <span style="flex: 3934; background: var(--h-surface-2)"></span>
+            </span>
+            <span class="pamt">
+              <span class="v quiet-2">£88.00</span><br>
+              <span class="s">child benefit</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="note" style="background: var(--h-warning-soft)">
+          <b>£134.00</b> of this month's household spending was bought straight from
+          personal cards. &nbsp;<span style="color: var(--h-accent); font-weight:600">See them →</span>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span><i style="background: var(--h-s2)"></i> moved across</span>
+        <span><i style="background: color-mix(in srgb, var(--h-s2) 45%, var(--h-surface))"></i> bought directly</span>
+        <span><i style="background: var(--h-ink-3)"></i> not a contribution</span>
+      </div>
+    </div>
+
+    <p class="cap">
+      One row per person, each bar two segments of that person's own colour — solid
+      for <b>moved across</b>, a lighter step of the same hue for <b>bought
+      directly</b>. Where <code class="mono">showOwed</code> is on, a second line
+      from the existing <code class="mono">settlement</code>: <b>"The household owes
+      you £90."</b>
+    </p>
+  </div>
+
+  <div class="col">
+    <h3>Three changes behind it</h3>
+    <table class="doc">
+      <tbody>
+        <tr>
+          <td>Move it out</td>
+          <td>The "Who paid in" bar leaves the fixed Reports summary card for the arrangeable grid. It is currently the one figure on that page you cannot move, resize or hide — and it has no home at all on the Home page.</td>
+        </tr>
+        <tr>
+          <td>Split <span class="mono">otherMinor</span></td>
+          <td>It merges outside income with arrivals nobody has linked. The card needs them apart: "Other income £88" is a fact, "not sure by whom" is a job. Add <code class="mono">externalMinor</code> and <code class="mono">unattributedMinor</code>, keep <code class="mono">otherMinor</code> as their sum.</td>
+        </tr>
+        <tr>
+          <td>Hero sub-line</td>
+          <td>Under Household spending: <em>"£134 of it from personal cards"</em>.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ── 3 ─────────────────────────────────────────────────────── -->
+<section>
+  <div class="col">
+    <div class="head">
+      <span class="chip book-m">Mine</span>
+      <span class="chip proposed">Proposed</span>
+    </div>
+    <h2>How much of mine went to ours</h2>
+    <p>
+      The personal book already draws a "To the household" band, so this is nearly
+      there. What it does not do is separate the two halves — and they are exactly
+      the two halves worth separating: <strong>£2,000 I decided to send</strong>,
+      and <strong>£90 that happened to me at a till</strong>.
+    </p>
+  </div>
+
+  <div class="canvas">
+    <div class="hearth">
+      <div class="card">
+        <h5 style="margin-bottom:10px">March · where it flowed</h5>
+        <div class="scroller">
+          <svg width="700" height="288" viewBox="0 0 700 288" role="img"
+               aria-label="Earned three thousand pounds, splitting into two thousand and ninety to the household, seven hundred of shopping, and two hundred and ten left over">
+            <g>
+              <!-- ribbons -->
+              <path d="M142,8 C243,8 243,8 344,8 L344,256 C243,256 243,256 142,256 Z" fill="var(--h-s2)" fill-opacity=".32"></path>
+              <path d="M356,8 C457,8 457,8 558,8 L558,180.7 C457,180.7 457,180.7 356,180.7 Z" fill="var(--h-s5)" fill-opacity=".32"></path>
+              <path d="M356,180.7 C457,180.7 457,188.7 558,188.7 L558,246.6 C457,246.6 457,238.6 356,238.6 Z" fill="var(--h-s7)" fill-opacity=".32"></path>
+              <path d="M356,238.6 C457,238.6 457,254.6 558,254.6 L558,272 C457,272 457,256 356,256 Z" fill="var(--h-s4)" fill-opacity=".32"></path>
+              <!-- nodes -->
+              <rect x="130" y="8" width="12" height="248" rx="3" fill="var(--h-s2)"></rect>
+              <rect x="344" y="8" width="12" height="248" rx="3" fill="var(--h-ink-2)"></rect>
+              <rect x="558" y="8" width="12" height="172.7" rx="3" fill="var(--h-s5)"></rect>
+              <rect x="558" y="188.7" width="12" height="57.9" rx="3" fill="var(--h-s7)"></rect>
+              <rect x="558" y="254.6" width="12" height="17.4" rx="3" fill="var(--h-s4)"></rect>
+              <!-- labels -->
+              <text x="122" y="128" text-anchor="end" font-size="11.5" fill="var(--h-ink-2)" font-family="ui-sans-serif, system-ui, sans-serif">
+                <tspan x="122" dy="-2">Earned</tspan><tspan x="122" dy="14" fill="var(--h-ink-3)">£3,000</tspan>
+              </text>
+              <text x="578" y="94" font-size="11.5" fill="var(--h-ink-2)" font-family="ui-sans-serif, system-ui, sans-serif">
+                <tspan x="578" dy="-2" font-weight="600">To our household</tspan><tspan x="578" dy="14" fill="var(--h-ink-3)">£2,090</tspan>
+                <tspan x="586" dy="17" fill="var(--h-ink-3)">moved across £2,000</tspan>
+                <tspan x="586" dy="14" fill="var(--h-ink-3)">bought for us £90</tspan>
+              </text>
+              <text x="578" y="217" font-size="11.5" fill="var(--h-ink-2)" font-family="ui-sans-serif, system-ui, sans-serif">
+                <tspan x="578" dy="-2">Shopping</tspan><tspan x="578" dy="14" fill="var(--h-ink-3)">£700</tspan>
+              </text>
+              <text x="578" y="266" font-size="11.5" fill="var(--h-ink-2)" font-family="ui-sans-serif, system-ui, sans-serif">
+                <tspan x="578" dy="0">Left with me £210</tspan>
+              </text>
+            </g>
+          </svg>
+        </div>
+      </div>
+      <p class="cap" style="margin-top:14px">
+        The band keeps its single ribbon — it is one claim — and gains a
+        <b>parts</b> breakdown in its tooltip, built with the
+        <code class="mono">partsOf</code> helper the household side already uses. It
+        also takes the household's own colour rather than a category slot: it is a
+        <b>destination</b>, not a category.
+      </p>
+    </div>
+  </div>
+
+  <div class="canvas">
+    <div class="hearth">
+      <div class="card">
+        <h5 style="margin-bottom:2px">What each salary turned into</h5>
+        <p class="lab quiet" style="margin:0 0 14px">Each bar is one month's earnings.</p>
+        <div class="scroller">
+          <svg width="640" height="220" viewBox="0 0 640 220" role="img"
+               aria-label="Six months of earnings, each split into moved across, bought for us, spent on myself, and left">
+            <g font-family="ui-sans-serif, system-ui, sans-serif">
+              <line x1="40" y1="176" x2="620" y2="176" stroke="var(--h-hairline)"></line>
+              <!-- Oct -->
+              <g><rect x="52" y="42" width="56" height="86" rx="5" fill="var(--h-s5)"></rect>
+                 <rect x="52" y="130" width="56" height="9" rx="4" fill="color-mix(in srgb, var(--h-s5) 45%, var(--h-surface))"></rect>
+                 <rect x="52" y="141" width="56" height="24" rx="5" fill="var(--h-s7)"></rect>
+                 <rect x="52" y="167" width="56" height="9" rx="4" fill="var(--h-s4)"></rect>
+                 <text x="80" y="194" text-anchor="middle" font-size="11" fill="var(--h-ink-3)">Oct</text></g>
+              <!-- Nov -->
+              <g><rect x="146" y="48" width="56" height="80" rx="5" fill="var(--h-s5)"></rect>
+                 <rect x="146" y="130" width="56" height="5" rx="2.5" fill="color-mix(in srgb, var(--h-s5) 45%, var(--h-surface))"></rect>
+                 <rect x="146" y="137" width="56" height="28" rx="5" fill="var(--h-s7)"></rect>
+                 <rect x="146" y="167" width="56" height="9" rx="4" fill="var(--h-s4)"></rect>
+                 <text x="174" y="194" text-anchor="middle" font-size="11" fill="var(--h-ink-3)">Nov</text></g>
+              <!-- Dec -->
+              <g><rect x="240" y="40" width="56" height="88" rx="5" fill="var(--h-s5)"></rect>
+                 <rect x="240" y="130" width="56" height="17" rx="5" fill="color-mix(in srgb, var(--h-s5) 45%, var(--h-surface))"></rect>
+                 <rect x="240" y="149" width="56" height="27" rx="5" fill="var(--h-s7)"></rect>
+                 <text x="268" y="194" text-anchor="middle" font-size="11" fill="var(--h-ink-3)">Dec</text></g>
+              <!-- Jan -->
+              <g><rect x="334" y="46" width="56" height="82" rx="5" fill="var(--h-s5)"></rect>
+                 <rect x="334" y="130" width="56" height="7" rx="3.5" fill="color-mix(in srgb, var(--h-s5) 45%, var(--h-surface))"></rect>
+                 <rect x="334" y="139" width="56" height="21" rx="5" fill="var(--h-s7)"></rect>
+                 <rect x="334" y="162" width="56" height="14" rx="5" fill="var(--h-s4)"></rect>
+                 <text x="362" y="194" text-anchor="middle" font-size="11" fill="var(--h-ink-3)">Jan</text></g>
+              <!-- Feb -->
+              <g><rect x="428" y="44" width="56" height="84" rx="5" fill="var(--h-s5)"></rect>
+                 <rect x="428" y="130" width="56" height="11" rx="5" fill="color-mix(in srgb, var(--h-s5) 45%, var(--h-surface))"></rect>
+                 <rect x="428" y="143" width="56" height="22" rx="5" fill="var(--h-s7)"></rect>
+                 <rect x="428" y="167" width="56" height="9" rx="4" fill="var(--h-s4)"></rect>
+                 <text x="456" y="194" text-anchor="middle" font-size="11" fill="var(--h-ink-3)">Feb</text></g>
+              <!-- Mar, partial -->
+              <g opacity=".45">
+                 <rect x="522" y="48" width="56" height="80" rx="5" fill="var(--h-s5)"></rect>
+                 <rect x="522" y="130" width="56" height="8" rx="4" fill="color-mix(in srgb, var(--h-s5) 45%, var(--h-surface))"></rect>
+                 <rect x="522" y="140" width="56" height="27" rx="5" fill="var(--h-s7)"></rect>
+                 <rect x="522" y="169" width="56" height="7" rx="3.5" fill="var(--h-s4)"></rect></g>
+              <text x="550" y="194" text-anchor="middle" font-size="11" fill="var(--h-ink-3)">Mar</text>
+              <text x="550" y="208" text-anchor="middle" font-size="10" fill="var(--h-ink-3)">so far</text>
+            </g>
+          </svg>
+        </div>
+        <div class="legend">
+          <span><i style="background: var(--h-s5)"></i> moved to our household</span>
+          <span><i style="background: color-mix(in srgb, var(--h-s5) 45%, var(--h-surface))"></i> bought for us</span>
+          <span><i style="background: var(--h-s7)"></i> spent on myself</span>
+          <span><i style="background: var(--h-s4)"></i> left with me</span>
+        </div>
+      </div>
+      <p class="cap" style="margin-top:14px">
+        The same answer over time, in a chart that already exists — four segments
+        instead of three. The question it starts answering: is the share I
+        <b>send</b> steady, and is the share that merely <b>happens</b> growing?
+      </p>
+    </div>
+  </div>
+
+  <div class="col">
+    <p>
+      Behind both: <code class="mono">BookTotals</code> gains
+      <code class="mono">contributedMovedMinor</code> and
+      <code class="mono">contributedPaidMinor</code>, filled in the same loop
+      <code class="mono">contributed</code> already is. No new pass, and no existing
+      call site has to change.
+    </p>
+  </div>
+</section>
+
+<!-- ── 4 ─────────────────────────────────────────────────────── -->
+<section>
+  <div class="col">
+    <div class="head">
+      <span class="chip book-a">Everything</span>
+      <span class="chip proposed">Proposed</span>
+    </div>
+    <h2>Stop flattening, start explaining</h2>
+    <p>
+      Today "Everything" is the other two books poured into one pool: the same
+      donut, the same monthly bars, the same flow, with the household and personal
+      accounts added together. It answers no question the other two do not answer
+      better — and its income figure genuinely is <em>not</em> the two of them added
+      up, with nothing on screen to say why.
+    </p>
+    <p>
+      But the relationship is exactly describable, and two of its three identities
+      are exact:
+    </p>
+    <div class="eq"><b>Left       </b>  all.net    ==  ours.net + mine.net          <b>always, no exceptions</b>
+<b>Spending   </b>  all.spend  ==  ours.spend + mine.spend
+                                   − bought for us from an account you don't hold
+<b>Money in   </b>  all.income ==  ours.income + mine.income
+                                   − what crossed between us</div>
+    <p>
+      So Everything should stop being a fourth filter and become
+      <strong>the view that explains the other two</strong>.
+    </p>
+  </div>
+
+  <div class="canvas">
+    <div class="hearth" style="max-width: 700px; margin: 0 auto">
+      <div class="card">
+        <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:8px">
+          <h5>How the books add up</h5>
+          <span class="quiet" style="font-size:12px">March</span>
+        </div>
+        <div class="scroller">
+          <table class="bridge">
+            <thead>
+              <tr><th></th><th>Ours</th><th>Mine</th><th class="tot">Everything</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>From outside</td><td>£88.00</td><td>£3,000.00</td><td class="tot">£4,888.00</td></tr>
+              <tr><td>Put in between us</td><td>£3,934.00</td><td class="neg">(£2,090.00)</td><td class="tot quiet">—</td></tr>
+              <tr><td>Spent</td><td>£2,534.00</td><td>£700.00</td><td class="tot">£3,190.00</td></tr>
+              <tr><td>Bought for us on a card you can't see</td><td class="neg">(£44.00)</td><td class="quiet">—</td><td class="tot quiet">—</td></tr>
+              <tr class="sum"><td>Left</td><td>£1,488.00</td><td>£210.00</td><td class="tot">£1,698.00</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note">
+          Money moved between our books is counted <b>once in each book and in
+          neither under Everything</b> — the two legs are the same event, so
+          counting either would be counting it twice. That is why Everything's
+          income is not the two figures above it added together.
+          <b>What is left always adds up exactly.</b>
+        </div>
+      </div>
+    </div>
+    <p class="cap">
+      It does not <b>assert</b> that the numbers match. It shows the arithmetic —
+      including the one line that does not add up, and why. Every cell drills to
+      the rows behind it.
+    </p>
+  </div>
+
+  <div class="col">
+    <div class="callout" style="--bd: var(--doc-ink-3)">
+      The <em>"bought for us on a card you can't see"</em> row is not a rounding
+      note. It is Sam's £44: household spending, in an account this device holds no
+      grant on, of which exactly one row is published. It belongs in the household
+      book and in no account here. Left out of the table it is a £44 discrepancy
+      the reader has to find; in the table it is a fact about the privacy model.
+    </div>
+
+    <h3>And the crossing, as a picture</h3>
+    <p>
+      The flow diagram in four columns rather than three — stages of the money's
+      journey, which is genuinely what happened to it. Columns two to three
+      <em>are</em> the crossing.
+    </p>
+  </div>
+
+  <div class="canvas">
+    <div class="hearth">
+      <div class="card">
+        <h5 style="margin-bottom:2px">Between our books</h5>
+        <p class="lab quiet" style="margin:0 0 12px">March · every ribbon is as wide as the money it carries.</p>
+        <div class="scroller">
+          <svg width="980" height="372" viewBox="0 0 980 372" role="img"
+               aria-label="Four columns: where the money came from, where it landed, where it was spent from, and what it became">
+            <g font-family="ui-sans-serif, system-ui, sans-serif">
+              <!-- column headings -->
+              <text x="140" y="14" text-anchor="end" font-size="10" fill="var(--h-ink-3)" letter-spacing=".06em">CAME FROM</text>
+              <text x="360" y="14" font-size="10" fill="var(--h-ink-3)" letter-spacing=".06em">LANDED IN</text>
+              <text x="580" y="14" font-size="10" fill="var(--h-ink-3)" letter-spacing=".06em">SPENT FROM</text>
+              <text x="800" y="14" font-size="10" fill="var(--h-ink-3)" letter-spacing=".06em">BECAME</text>
+
+              <!-- col0 → col1 -->
+              <path d="M152,22 C256,22 256,25.5 360,25.5 L360,210.9 C256,210.9 256,207.4 152,207.4 Z" fill="var(--h-s2)" fill-opacity=".3"></path>
+              <path d="M152,214.4 C256,214.4 256,217.9 360,217.9 L360,329.1 C256,329.1 256,325.6 152,325.6 Z" fill="var(--h-s5)" fill-opacity=".3"></path>
+              <path d="M152,332.6 C256,332.6 256,329.1 360,329.1 L360,334.5 C256,334.5 256,338 152,338 Z" fill="var(--h-s1)" fill-opacity=".3"></path>
+
+              <!-- col1 → col2 -->
+              <path d="M372,25.5 C476,25.5 476,25.5 580,25.5 L580,87.3 C476,87.3 476,87.3 372,87.3 Z" fill="var(--h-s2)" fill-opacity=".3"></path>
+              <path d="M372,87.3 C476,87.3 476,94.3 580,94.3 L580,217.9 C476,217.9 476,210.9 372,210.9 Z" fill="var(--h-s2)" fill-opacity=".3"></path>
+              <path d="M372,217.9 C476,217.9 476,217.9 580,217.9 L580,334.5 C476,334.5 476,334.5 372,334.5 Z" fill="var(--h-accent)" fill-opacity=".3"></path>
+
+              <!-- col2 → col3 -->
+              <path d="M592,25.5 C696,25.5 696,8 800,8 L800,51.2 C696,51.2 696,68.7 592,68.7 Z" fill="var(--h-s7)" fill-opacity=".3"></path>
+              <path d="M592,68.7 C696,68.7 696,58.2 800,58.2 L800,63.8 C696,63.8 696,74.3 592,74.3 Z" fill="var(--h-s3)" fill-opacity=".3"></path>
+              <path d="M592,74.3 C696,74.3 696,70.8 800,70.8 L800,83.8 C696,83.8 696,87.3 592,87.3 Z" fill="var(--h-s4)" fill-opacity=".3"></path>
+              <path d="M592,94.3 C696,94.3 696,90.8 800,90.8 L800,186.6 C696,186.6 696,190.1 592,190.1 Z" fill="var(--h-s6)" fill-opacity=".3"></path>
+              <path d="M592,190.1 C696,190.1 696,193.6 800,193.6 L800,230.7 C696,230.7 696,227.2 592,227.2 Z" fill="var(--h-s3)" fill-opacity=".3"></path>
+              <path d="M592,227.2 C696,227.2 696,237.7 800,237.7 L800,253.1 C696,253.1 696,242.6 592,242.6 Z" fill="var(--h-s4)" fill-opacity=".3"></path>
+              <path d="M592,242.6 C696,242.6 696,260.1 800,260.1 L800,352 C696,352 696,334.5 592,334.5 Z" fill="var(--h-ink-3)" fill-opacity=".3"></path>
+
+              <!-- nodes -->
+              <rect x="140" y="22" width="12" height="185.4" rx="3" fill="var(--h-s2)"></rect>
+              <rect x="140" y="214.4" width="12" height="111.2" rx="3" fill="var(--h-s5)"></rect>
+              <rect x="140" y="332.6" width="12" height="5.4" rx="2" fill="var(--h-s1)"></rect>
+
+              <rect x="360" y="25.5" width="12" height="185.4" rx="3" fill="var(--h-s2)"></rect>
+              <rect x="360" y="217.9" width="12" height="116.6" rx="3" fill="var(--h-accent)"></rect>
+
+              <rect x="580" y="25.5" width="12" height="61.8" rx="3" fill="var(--h-s2)"></rect>
+              <rect x="580" y="94.3" width="12" height="240.2" rx="3" fill="var(--h-accent)"></rect>
+
+              <rect x="800" y="8" width="12" height="43.2" rx="3" fill="var(--h-s7)"></rect>
+              <rect x="800" y="58.2" width="12" height="5.6" rx="2" fill="var(--h-s3)"></rect>
+              <rect x="800" y="70.8" width="12" height="13" rx="3" fill="var(--h-s4)"></rect>
+              <rect x="800" y="90.8" width="12" height="95.8" rx="3" fill="var(--h-s6)"></rect>
+              <rect x="800" y="193.6" width="12" height="37.1" rx="3" fill="var(--h-s3)"></rect>
+              <rect x="800" y="237.7" width="12" height="15.4" rx="3" fill="var(--h-s4)"></rect>
+              <rect x="800" y="260.1" width="12" height="91.9" rx="3" fill="var(--h-ink-3)"></rect>
+
+              <!-- labels: col0 -->
+              <g font-size="11.5" fill="var(--h-ink-2)">
+                <text x="132" y="112" text-anchor="end"><tspan x="132" dy="-2">You earned</tspan><tspan x="132" dy="14" fill="var(--h-ink-3)">£3,000</tspan></text>
+                <text x="132" y="268" text-anchor="end"><tspan x="132" dy="-2">Sam put in</tspan><tspan x="132" dy="14" fill="var(--h-ink-3)">£1,800</tspan></text>
+                <text x="132" y="339" text-anchor="end" fill="var(--h-ink-3)">Child benefit £88</text>
+              </g>
+
+              <!-- labels: col1 + col2 (above the node, mid columns) -->
+              <g font-size="11.5" font-weight="600">
+                <text x="378" y="118" fill="var(--h-s2)"><tspan x="378" dy="-2">Mine</tspan><tspan x="378" dy="14" fill="var(--h-ink-3)" font-weight="400">£3,000</tspan></text>
+                <text x="378" y="278" fill="var(--h-accent)"><tspan x="378" dy="-2">Ours</tspan><tspan x="378" dy="14" fill="var(--h-ink-3)" font-weight="400">£1,888</tspan></text>
+                <text x="598" y="56" fill="var(--h-s2)"><tspan x="598" dy="0">Mine</tspan><tspan x="598" dy="14" fill="var(--h-ink-3)" font-weight="400">£1,000</tspan></text>
+                <text x="598" y="212" fill="var(--h-accent)"><tspan x="598" dy="-2">Ours</tspan><tspan x="598" dy="14" fill="var(--h-ink-3)" font-weight="400">£3,888</tspan></text>
+              </g>
+
+              <!-- the crossing, named -->
+              <text x="476" y="150" text-anchor="middle" font-size="10.5" fill="var(--h-ink-3)">
+                <tspan x="476" dy="0">£2,000 crosses</tspan><tspan x="476" dy="13">from mine to ours</tspan>
+              </text>
+
+              <!-- labels: col3 -->
+              <g font-size="11.5" fill="var(--h-ink-2)">
+                <text x="820" y="32"><tspan x="820" dy="-2">Shopping</tspan><tspan x="820" dy="14" fill="var(--h-ink-3)">£700</tspan></text>
+                <text x="820" y="64" fill="var(--h-ink-3)">Bought for us £90</text>
+                <text x="820" y="81" fill="var(--h-ink-3)">Left with me £210</text>
+                <text x="820" y="140"><tspan x="820" dy="-2">Home</tspan><tspan x="820" dy="14" fill="var(--h-ink-3)">£1,550</tspan></text>
+                <text x="820" y="214"><tspan x="820" dy="-2">Groceries</tspan><tspan x="820" dy="14" fill="var(--h-ink-3)">£600</tspan></text>
+                <text x="820" y="249" fill="var(--h-ink-3)">Utilities £250</text>
+                <text x="820" y="308"><tspan x="820" dy="-2">Left in ours</tspan><tspan x="820" dy="14" fill="var(--h-ink-3)">£1,488</tspan></text>
+              </g>
+            </g>
+          </svg>
+        </div>
+      </div>
+      <p class="cap" style="margin-top:14px">
+        One ribbon <b>Mine → Ours</b> carrying contributions moved plus
+        bought-directly, one <b>Ours → Mine</b> for anything taken back out, and
+        straight-through ribbons for everything that stayed where it landed. No
+        links within a column, so it fits a column-based layout cleanly.
+      </p>
+    </div>
+  </div>
+
+  <div class="col">
+    <h3>What that one costs, honestly</h3>
+    <p>
+      This is the largest item here and the only one that touches shared geometry.
+      <code class="mono">FlowNode</code> gains a <code class="mono">column</code>;
+      <code class="mono">layoutFlow</code> generalises from
+      <code class="mono">in | hub | out</code> to <em>group by column, stack each on
+      the one shared scale, ribbon between adjacent columns</em>. Today's behaviour
+      becomes the case <code class="mono">[in, hub, out]</code> — which is what
+      <code class="mono">sankey.test.ts</code> should assert, so every existing graph
+      is provably unaffected. It can be deferred without blocking the bridge card.
+    </p>
+  </div>
+</section>
+
+<!-- ── 5 ─────────────────────────────────────────────────────── -->
+<section>
+  <div class="col">
+    <div class="head"><span class="chip book-a">All three</span></div>
+    <h2>Build order</h2>
+    <ol class="order">
+      <li><b>Who paid in.</b> A new card plus two <code class="mono">ContributionSplit</code> fields. All the data already exists.</li>
+      <li><b>How the books add up.</b> A new card plus <code class="mono">bookBridge</code>. The identities are already pinned in tests.</li>
+      <li><b>To the household, split in two.</b> Two <code class="mono">BookTotals</code> fields, one <code class="mono">partsOf</code> call, four segments in <code class="mono">SalaryStack</code>.</li>
+      <li><b>Between our books.</b> The <code class="mono">layoutFlow</code> generalisation — the only shared-geometry change.</li>
+      <li><b>Split by book.</b> A <code class="mono">bookSplitByCategory</code> and a bar variant for the Everything breakdown.</li>
+    </ol>
+    <p style="margin-top:26px">
+      One and two are self-contained cards over data that already exists, and
+      between them they answer all three of the complaints this started from. Four
+      is worth doing only if the picture above is the picture you want.
+    </p>
+
+    <p class="foot">
+      Every figure in this document is March in the test fixture, computed by the
+      real functions — not illustrative. The written version lives at
+      <code class="mono">docs/reporting-proposal.md</code>.
+    </p>
+  </div>
+</section>
+
+</div>
