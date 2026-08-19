@@ -250,6 +250,16 @@ select '23-custom-colours.sql',
        'categories.color + accounts.color + goals.color exist'
 
 union all
+-- Until this reads true a goal can only be fed by moving money again: the pot
+-- for the £3,000 already sitting in the savings account stays on zero, and the
+-- only way to fill it is to move the money out and back in.
+select '24-goal-allocations.sql',
+       to_regclass('public.goal_entries') is not null
+   and to_regprocedure('public.assign_to_goal(uuid,uuid,bigint,date,text)') is not null
+   and to_regprocedure('public.settle_goals(uuid)') is not null,
+       'goal_entries + assign_to_goal() + settle_goals() exist'
+
+union all
 -- Not a migration: 21 replaces the uniqueness rule on `rules`, because two
 -- rules for one payee at two amounts is the whole point of it. If the old index
 -- is still here the second one is refused outright, with a duplicate-key dead

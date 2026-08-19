@@ -6,6 +6,8 @@ import {
   accountsInBook,
   bookTotals,
   effectiveMonth,
+  savedInto,
+  savingsAccounts,
   spendsIn,
   type BookId,
   type BookMap,
@@ -61,19 +63,10 @@ export function householdWaterfall(
   month: string,
 ): WaterfallStep[] {
   const totals = bookTotals(txns, flows, 'household', month, books)
-  const savings = new Set(
-    accounts.filter((a) => a.kind === 'savings' && books.household.has(a.id)).map((a) => a.id),
-  )
-
-  let toSavings = 0
-  for (const t of txns) {
-    // The arriving leg only: the pair nets to zero across the book, so counting
-    // both would show nothing moving at all.
-    if (!savings.has(t.accountId) || t.amountMinor <= 0) continue
-    if (flows.get(t.id) !== 'internal') continue
-    if (monthKey(t.date) !== month) continue
-    toSavings += t.amountMinor
-  }
+  // `savedInto` rather than a loop of its own. This step and the band on the
+  // flow diagram are the same claim about the same rows, and two copies of the
+  // rule would eventually disagree about one of them.
+  const toSavings = savedInto(txns, flows, 'household', books, savingsAccounts(accounts, 'household', books), month)
 
   const steps: WaterfallStep[] = []
   let running = 0

@@ -12,6 +12,8 @@ import {
   bookSlices,
   bookTotals,
   contributionSplit,
+  savedInto,
+  savingsAccounts,
   hasBreakdown,
   BOOK_WORDS,
   type BookId,
@@ -595,9 +597,16 @@ export function FlowWidget({ data, options, controls }: WidgetProps) {
     return others.length === 1 ? nameOf(others[0]) : undefined
   }, [memberMap, data.userId])
 
+  // Of what is left over, how much was put by rather than merely left. See
+  // `savedInto`: it changes no total, it splits the band that was already there.
+  const savedMinor = useMemo(() => {
+    const ids = savingsAccounts(data.allAccounts, data.book, data.books)
+    return ids.size === 0 ? 0 : savedInto(data.allTxns, data.flows, data.book, data.books, ids, month())
+  }, [data.allAccounts, data.allTxns, data.flows, data.book, data.books])
+
   const graph = useMemo(
-    () => spendFlow({ book: data.book, totals, slices, split, partner }),
-    [data.book, totals, slices, split, partner],
+    () => spendFlow({ book: data.book, totals, slices, split, partner, savedMinor }),
+    [data.book, totals, slices, split, partner, savedMinor],
   )
   const openRows = useHomeDrill(data.book)
   if (graph.totalMinor === 0) return null

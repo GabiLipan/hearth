@@ -251,6 +251,18 @@ const RPC_WRITERS: Partial<Record<SyncedTable, (entry: OutboxEntry) => Promise<u
           p_amount_max_minor: e.payload.amountMaxMinor ?? null,
           p_account_id: e.payload.accountId ?? null,
         }),
+  // A null amount releases the entry, which is how a delete is spelled for this
+  // table — the same call, so there is no second path to keep in step. The RPC
+  // needs every argument on every call because it re-tests the whole account
+  // against its balance, including goals this device cannot see.
+  goal_entries: (e) =>
+    rpc('assign_to_goal', {
+      p_id: e.rowId,
+      p_goal_id: e.payload.goalId,
+      p_amount_minor: e.op === 'delete' ? null : e.payload.amountMinor,
+      p_on_date: e.payload.date ?? null,
+      p_note: e.payload.note ?? null,
+    }),
   // Revoking is the same call with 'none': the server tombstones rather than
   // deleting, so there is no separate delete path to keep in step.
   account_grants: (e) =>
@@ -370,6 +382,7 @@ const SINGULAR: Record<SyncedTable, string> = {
   account_grants: 'sharing setting',
   household_members: 'person',
   goals: 'goal',
+  goal_entries: 'goal entry',
   budgets: 'budget',
   bills: 'bill',
   rules: 'rule',

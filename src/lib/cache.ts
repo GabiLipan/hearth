@@ -11,6 +11,7 @@ import {
   type Budget,
   type Category,
   type Goal,
+  type GoalEntry,
   type GrantLevel,
   type HouseholdMember,
   type Rule,
@@ -222,6 +223,15 @@ export function useBudgetsForMonth(month: string): Budget[] {
 
 export function useGoals(): Goal[] {
   return useLiveQuery(() => db.goals.orderBy('sortOrder').toArray(), [], []) ?? []
+}
+
+/**
+ * Every goal's ledger. Small enough to hold whole — a household accumulates a
+ * few rows a month, not a few a day — and every screen that shows a pot needs
+ * all of them anyway, since the pot IS the sum.
+ */
+export function useGoalEntries(): GoalEntry[] {
+  return useLiveQuery(() => db.goal_entries.toArray(), [], []) ?? []
 }
 
 export function useBills(): Bill[] {

@@ -163,6 +163,30 @@ export interface Goal {
   updatedAt: string
 }
 
+/**
+ * One thing somebody did to a goal: put money towards it, or took some back.
+ *
+ * A goal is a CLAIM on money that is already in an account, not a container the
+ * money sits inside — so the pot is the sum of these and no money has to move
+ * for one to be written. See `supabase/24-goal-allocations.sql`.
+ *
+ * Deliberately as small as it can be. There is no running balance and no link
+ * to a transaction: rows rather than a `savedMinor` column on the goal, because
+ * the outbox cannot merge two increments of one column and one of two devices'
+ * assignments would silently be lost.
+ */
+export interface GoalEntry {
+  id: string
+  goalId: string
+  /** Positive puts money towards the goal, negative releases it. Never zero. */
+  amountMinor: number
+  /** yyyy-MM-dd. The day the claim was made, which may be no day money moved. */
+  date: string
+  note?: string
+  createdBy?: string
+  updatedAt: string
+}
+
 export type BillFreq = 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'yearly'
 
 export interface Bill {
@@ -349,6 +373,8 @@ export const SYNCED_TABLES = [
   'accounts',
   'account_grants',
   'goals',
+  // After `goals`, because an entry points at one.
+  'goal_entries',
   'bills',
   'transactions',
   'budgets',
@@ -362,6 +388,7 @@ export interface TableRowMap {
   accounts: Account
   account_grants: AccountGrant
   goals: Goal
+  goal_entries: GoalEntry
   bills: Bill
   transactions: Transaction
   budgets: Budget
@@ -431,6 +458,7 @@ export const db = new Dexie('hearth') as Dexie & {
   rules: EntityTable<Rule, 'id'>
   accounts: EntityTable<Account, 'id'>
   goals: EntityTable<Goal, 'id'>
+  goal_entries: EntityTable<GoalEntry, 'id'>
   household_members: EntityTable<HouseholdMember, 'id'>
   account_grants: EntityTable<AccountGrant, 'id'>
   balances: EntityTable<CachedBalance, 'accountId'>
@@ -472,6 +500,14 @@ db.version(2).stores({
 db.version(3).stores({
   household_members: 'id, userId, updatedAt',
   account_grants: 'id, accountId, userId, [accountId+userId], updatedAt',
+})
+
+// v4 adds the goal ledger migration 24 introduces. `goalId` is the only lookup
+// anything does — every screen asks "what is in this pot", never "what happened
+// on this date" — and `date` is there so a goal's history can be listed in
+// order without sorting the whole table.
+db.version(4).stores({
+  goal_entries: 'id, goalId, date, updatedAt',
 })
 
 export const newId = () => crypto.randomUUID()

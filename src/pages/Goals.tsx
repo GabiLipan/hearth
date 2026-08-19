@@ -1,23 +1,61 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { PiggyBank, Plus, ArrowRight, Lock } from 'lucide-react'
 import type { Goal } from '../lib/db'
 import { create, update, remove } from '../lib/data'
-import { goalProgress, transfer } from '../lib/goals'
+import {
+  accountAllocation,
+  assignmentRow,
+  goalProgress,
+  settleGoals,
+  shortfall,
+  type AccountAllocation,
+} from '../lib/goals'
 import { syncNow } from '../lib/session'
-import { useAccounts, useAllTransactions, useBook, useGoals, useMyLevels, useCacheReady } from '../lib/cache'
-import { canAddTransactions, levelOn } from '../lib/accounts'
+import {
+  useAccounts,
+  useAllTransactions,
+  useBook,
+  useGoalEntries,
+  useGoals,
+  useMyLevels,
+  useRemoteBalances,
+  useCacheReady,
+} from '../lib/cache'
+import { balanceOf, canSeeTransactionsAt, levelOn } from '../lib/accounts'
 import { fmtFullDate, todayISO } from '../lib/dates'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import {
-  Card, Sheet, Button, Face, Field, TextInput, Select, Empty, Progress, Toolbar, cx,
+  Card, Sheet, Button, Face, Field, TextInput, Select, Empty, Progress, Segmented, Toolbar,
+  useInfoNote, cx,
 } from '../components/ui'
 import { confirmAction } from '../components/confirm'
 import { toast } from '../components/toast'
 import { IconPicker, SlotPicker } from '../components/IconPicker'
 import { nextFreeSlot, paintOf } from '../lib/palette'
 import { BookSwitcher } from '../components/BookSwitcher'
+
+/**
+ * Everything this page has to say that is longer than a line, in one place.
+ * All of it lives behind a ⓘ — see `useInfoNote`.
+ */
+const ASSIGN_INFO = (
+  <>
+    <p>
+      A goal is a claim on money that is already in an account, not a pot the money is moved into. Nothing here
+      writes a transaction, and the account&rsquo;s balance does not change.
+    </p>
+    <p>
+      Transferring money to savings is an ordinary transfer between two accounts, and Reports counts it as saving.
+      Saying which part of the savings is the deposit is this, and the two are separate on purpose.
+    </p>
+    <p>
+      The goals on one account can never claim more than it holds. If money leaves, it comes off whatever is
+      unassigned first, and then off the largest pot.
+    </p>
+  </>
+)
 
 /**
  * Pots you are saving towards.
@@ -33,6 +71,10 @@ export default function Goals() {
   const goals = useGoals()
   const ready = useCacheReady()
   const txns = useAllTransactions() ?? []
+  const entries = useGoalEntries()
+  const accounts = useAccounts()
+  const levels = useMyLevels()
+  const remoteBalances = useRemoteBalances()
   const [book, setBook] = useBook()
   const [editing, setEditing] = useState<Goal | 'new' | null>(null)
   /**
@@ -49,7 +91,7 @@ export default function Goals() {
     setEditing(what)
     setOpened((n) => n + 1)
   }
-  const [funding, setFunding] = useState<Goal | null>(null)
+  const [assigning, setAssigning] = useState<Goal | null>(null)
 
   /**
    * A goal is the household's or it is mine — `owner_id` already says which,
@@ -67,15 +109,91 @@ export default function Goals() {
   )
 
   const rows = useMemo(
-    () => inBook.map((goal) => ({ goal, progress: goalProgress(goal, txns) })),
-    [inBook, txns],
+    () => inBook.map((goal) => ({ goal, progress: goalProgress(goal, entries) })),
+    [inBook, entries],
   )
+
+  /**
+   * Every account that has a goal on it, with what it holds and what its goals
+   * have claimed.
+   *
+   * Keyed by account rather than computed per goal, because the interesting
+   * figure — what is still unassigned — is a property of the ACCOUNT and is
+   * shared by every pot sitting on it. `goals` here is the unfiltered list on
+   * purpose: a personal goal of mine still claims money out of the joint
+   * savings account, and leaving it out under Our household would offer the
+   * same money twice.
+   */
+  const allocations = useMemo(() => {
+    const out = new Map<string, AccountAllocation>()
+    for (const account of accounts) {
+      if (!goals.some((g) => g.accountId === account.id)) continue
+      const level = levelOn(account.id, levels)
+      if (!canSeeTransactionsAt(level)) continue
+      out.set(
+        account.id,
+        accountAllocation(account.id, goals, entries, balanceOf(account, txns, remoteBalances, level)),
+      )
+    }
+    return out
+  }, [accounts, goals, entries, txns, remoteBalances, levels])
+
+  /**
+   * Where the pots on an account claim more than it now holds.
+   *
+   * Money has left since the claims were made. The server settles it — writing
+   * the subtractions as ordinary ledger rows, largest pot first — and this is
+   * the same arithmetic run here so the screen can SAY so rather than a figure
+   * silently changing under somebody the next time they sync.
+   */
+  const shortfalls = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const alloc of allocations.values()) {
+      for (const [goalId, take] of shortfall(alloc)) out.set(goalId, take)
+    }
+    return out
+  }, [allocations])
+
+  const accountOf = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts])
+
+  /**
+   * Settle any account whose pots claim more than it holds.
+   *
+   * Server-side, because the shortfall has to be worked out where every goal on
+   * the account is visible — including the other person's, which is invisible
+   * here. Idempotent, so an account that is already in step costs one call that
+   * returns 0 and writes nothing.
+   *
+   * The ref is what stops it looping: the RPC's rows only reach this device on
+   * the next pull, so until then the shortfall is still on screen and an effect
+   * keyed on it alone would fire again on every render.
+   */
+  const settled = useRef(new Set<string>())
+  useEffect(() => {
+    const owed = [...allocations.values()].filter((a) => a.unassignedMinor < 0)
+    const todo = owed.filter((a) => !settled.current.has(`${a.accountId}:${a.unassignedMinor}`))
+    if (todo.length === 0) return
+    for (const a of todo) settled.current.add(`${a.accountId}:${a.unassignedMinor}`)
+    void (async () => {
+      let wrote = 0
+      for (const a of todo) {
+        // One account's failure must not stop the others: an account somebody
+        // has since lost access to would otherwise block every pot on the page.
+        try {
+          wrote += await settleGoals(a.accountId)
+        } catch {
+          /* Reported by the next attempt, or by the dead letter it becomes. */
+        }
+      }
+      if (wrote > 0) void syncNow()
+    })()
+  }, [allocations])
 
   return (
     <div>
       <Toolbar spread>
         <p className="min-w-0 flex-1 text-sm text-ink-3">
-          Money set aside for something specific. Add to a pot by moving money into the account that holds it.
+          Money set aside for something specific, out of what an account already holds.
         </p>
         <Button className="shrink-0" onClick={() => openForm('new')}>
           <Plus size={15} /> New goal
@@ -147,6 +265,17 @@ export default function Goals() {
                 />
               </div>
 
+              {/* Where the account no longer holds what its pots claim. The
+                  server settles it on the next sync — largest pot first — so
+                  this says what is about to happen rather than letting the
+                  figure change under somebody with nothing to explain it. */}
+              {shortfalls.has(goal.id) && (
+                <p className="mt-2 rounded-lg bg-warning/12 px-2.5 py-1.5 text-xs text-ink-2">
+                  <span className="font-medium tabular">{money(shortfalls.get(goal.id)!)}</span> of this is no longer
+                  in {accountOf.get(goal.accountId ?? '')?.name ?? 'the account'} — it will come off this pot.
+                </p>
+              )}
+
               <div className="mt-2 flex items-center justify-between gap-2">
                 <p className={cx('text-xs tabular', progress.behind ? 'text-critical-text' : 'text-ink-3')}>
                   {progress.remainingMinor === 0
@@ -157,8 +286,8 @@ export default function Goals() {
                         ? `${money(progress.neededPerMonthMinor)} a month to get there`
                         : `${money(progress.remainingMinor)} to go`}
                 </p>
-                <Button size="sm" variant="subtle" onClick={() => setFunding(goal)}>
-                  Add money <ArrowRight size={13} />
+                <Button size="sm" variant="subtle" onClick={() => setAssigning(goal)}>
+                  {progress.savedMinor > 0 ? 'Adjust' : 'Put money in'} <ArrowRight size={13} />
                 </Button>
               </div>
             </Card>
@@ -178,7 +307,12 @@ export default function Goals() {
         // the sort of thing that reads as the feature being broken.
         defaultPersonal={book === 'mine'}
       />
-      <FundGoal goal={funding} open={funding !== null} onClose={() => setFunding(null)} />
+      <AssignToGoal
+        goal={assigning}
+        allocation={assigning?.accountId ? allocations.get(assigning.accountId) : undefined}
+        open={assigning !== null}
+        onClose={() => setAssigning(null)}
+      />
     </div>
   )
 }
@@ -202,7 +336,11 @@ function GoalForm({
   /** Only so a new pot takes a colour the others have not, the way a new category does. */
   const existingGoals = useGoals()
   const accounts = useMemo(
-    () => allAccounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
+    // `view` rather than `contribute`. Saying that £3,000 of the savings is the
+    // deposit records an intention about money already there and writes no
+    // transaction, so asking for the right to record one would be asking for a
+    // permission the act does not use — and it is what `assign_to_goal` checks.
+    () => allAccounts.filter((a) => canSeeTransactionsAt(levelOn(a.id, levels))),
     [allAccounts, levels],
   )
   const [name, setName] = useState(goal?.name ?? '')
@@ -335,42 +473,55 @@ function GoalForm({
 }
 
 /**
- * Moving money into a pot.
+ * Putting money that is already there towards a pot — and taking it back off.
  *
- * This is a transfer, not a payment: the money leaves one account and arrives
- * in another, so it counts as neither spending nor income. Online-only, because
- * the two legs must land together or not at all.
+ * Not a transfer. Nothing moves, no transaction is written, and the account's
+ * balance is exactly what it was: this records a CLAIM on money already sitting
+ * in the account the goal names. That is the whole change — see `lib/goals.ts`.
+ *
+ * Two consequences for this sheet. It works offline, because there is no pair
+ * of legs that have to land together; and the amount is capped at what is
+ * unassigned, which the screen can only estimate — the other person's personal
+ * goal on the same account is invisible here, so the server's refusal is
+ * reported rather than treated as impossible.
  */
-function FundGoal({ goal, open, onClose }: { goal: Goal | null; open: boolean; onClose: () => void }) {
+function AssignToGoal({
+  goal,
+  allocation,
+  open,
+  onClose,
+}: {
+  goal: Goal | null
+  allocation?: AccountAllocation
+  open: boolean
+  onClose: () => void
+}) {
   const { currency, money } = useApp()
-  const { online } = useSyncState()
-  const accounts = useAccounts()
-  const levels = useMyLevels()
-  const usable = useMemo(
-    () => accounts.filter((a) => canAddTransactions(levelOn(a.id, levels))),
-    [accounts, levels],
-  )
-
-  const [from, setFrom] = useState<string | undefined>()
+  const [mode, setMode] = useState<'add' | 'release'>('add')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(todayISO())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>()
 
-  const to = goal?.accountId
+  const held = allocation?.goals.find((r) => r.goal.id === goal?.id)?.heldMinor ?? 0
+  const spare = Math.max(0, allocation?.unassignedMinor ?? 0)
   const minor = parseAmount(amount)
-  const canSave = !!goal && !!from && !!to && from !== to && minor !== null && minor > 0 && online
+  const ceiling = mode === 'add' ? spare : held
+  const tooMuch = minor != null && minor > ceiling
+  const canSave = !!goal && !!goal.accountId && minor !== null && minor > 0 && !tooMuch
+
+  const note = useInfoNote('How a goal is filled', ASSIGN_INFO)
 
   async function save() {
     if (!canSave) return
     setBusy(true)
     setError(undefined)
     try {
-      await transfer({ fromAccountId: from!, toAccountId: to!, amountMinor: minor!, date, goalId: goal!.id })
-      await syncNow()
+      await create('goal_entries', assignmentRow(goal!.id, mode === 'add' ? minor! : -minor!, date))
+      void syncNow()
       onClose()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not move the money')
+      setError(e instanceof Error ? e.message : 'Could not record that')
     } finally {
       setBusy(false)
     }
@@ -380,54 +531,75 @@ function FundGoal({ goal, open, onClose }: { goal: Goal | null; open: boolean; o
     <Sheet
       open={open}
       onClose={onClose}
-      title={goal ? `Add to ${goal.name}` : 'Add money'}
+      title={goal ? goal.name : 'Put money towards a goal'}
       onSubmit={() => void save()}
       footer={
         <Button type="submit" size="lg" className="w-full" disabled={!canSave || busy}>
-          {busy ? 'Moving…' : 'Move money'}
+          {mode === 'add' ? 'Put it towards this' : 'Take it back off'}
         </Button>
       }
     >
       <div className="space-y-4">
-        {!to && (
-          <p className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-2">
-            This goal isn't linked to an account yet. Edit it and choose where the money sits, so contributions have
-            somewhere to go.
-          </p>
+        {!goal?.accountId ? (
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 text-sm text-ink-2">This goal does not say which account the money is in.</p>
+              {note.toggle}
+            </div>
+            {note.body}
+          </div>
+        ) : (
+          <>
+            <Segmented
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: 'add' as const, label: 'Put towards' },
+                { value: 'release' as const, label: 'Take back' },
+              ]}
+            />
+
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 text-sm text-ink-2">
+                {mode === 'add' ? (
+                  <>
+                    <span className="font-semibold tabular">{money(spare)}</span> unassigned in this account
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold tabular">{money(held)}</span> in this pot
+                  </>
+                )}
+              </p>
+              {note.toggle}
+            </div>
+            {note.body}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={`Amount (${currencySymbol(currency)})`}>
+                <TextInput
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="200"
+                  autoFocus
+                />
+              </Field>
+              <Field label="Date">
+                <TextInput type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </Field>
+            </div>
+
+            {tooMuch && (
+              <p className="text-sm text-critical-text">
+                {mode === 'add'
+                  ? `Only ${money(spare)} of that account is unassigned.`
+                  : `There is only ${money(held)} in this pot.`}
+              </p>
+            )}
+            {error && <p className="text-sm text-critical-text">{error}</p>}
+          </>
         )}
-        {!online && (
-          <p className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-ink-2">
-            Moving money needs a connection — both halves have to be recorded together, so this one can't be queued.
-          </p>
-        )}
-        <Field label="From">
-          <Select value={from ?? ''} onChange={(e) => setFrom(e.target.value || undefined)}>
-            <option value="" disabled>
-              Choose an account…
-            </option>
-            {usable
-              .filter((a) => a.id !== to)
-              .map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-          </Select>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={`Amount (${currencySymbol(currency)})`}>
-            <TextInput value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="200" autoFocus />
-          </Field>
-          <Field label="Date">
-            <TextInput type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </Field>
-        </div>
-        {goal && minor != null && minor > 0 && (
-          <p className="text-sm text-ink-3">
-            Leaves {money(minor)} in {goal.name}, and out of the account it came from.
-          </p>
-        )}
-        {error && <p className="text-sm text-critical-text">{error}</p>}
       </div>
     </Sheet>
   )

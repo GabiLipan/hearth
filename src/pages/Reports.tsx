@@ -27,6 +27,9 @@ import {
   bookTotals,
   bookTotalsInRange,
   rangeSlices,
+  savedInto,
+  savedIntoRange,
+  savingsAccounts,
   sumBookTotals,
   contributionSplit,
   contributionSplitInRange,
@@ -429,11 +432,29 @@ export default function Reports() {
    * disagree with the numbers beside it. See `lib/sankey.ts` for what it does
    * with a month that spent more than it took in.
    */
+  /**
+   * Of what is left over, how much went into a savings account inside the book.
+   *
+   * A transfer between two accounts of one book is not income and not spending,
+   * which is right for "what did we earn and spend" and useless for the one
+   * question anybody asks of a savings account. It changes no total — the money
+   * is still the book's — so the diagram simply draws what is left split into
+   * the part that was put by and the part that stayed.
+   */
+  const savedMinor = useMemo(() => {
+    const ids = savingsAccounts(accounts, book, books)
+    if (ids.size === 0) return 0
+    return period === 'custom'
+      ? savedIntoRange(txns ?? [], flows, book, books, ids, from, to)
+      : savedInto(txns ?? [], flows, book, books, ids, inView)
+  }, [txns, flows, book, books, accounts, inView, period, from, to])
+
   const flowGraph = useMemo(
     () =>
       spendFlow({
         book,
         totals,
+        savedMinor,
         // The top level always, even while a category is drilled into. A flow
         // diagram of one category's children is a picture of a drill-down, not
         // of a period — and handing it the children would leave the rest of the
@@ -443,7 +464,7 @@ export default function Reports() {
         split,
         partner: partner ?? undefined,
       }),
-    [book, totals, topSlices, split, partner],
+    [book, totals, topSlices, split, partner, savedMinor],
   )
 
   /**

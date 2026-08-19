@@ -60,6 +60,10 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   // list — see RPC_TABLES in outbox.ts.
   account_grants: ['id', 'accountId', 'userId', 'level'],
   goals: ['id', 'name', 'icon', 'slot', 'color', 'targetMinor', 'targetDate', 'ownerId', 'accountId', 'sortOrder'],
+  // Written by assign_to_goal, so the queued payload is the whole row — the RPC
+  // needs every argument to test the assignment against the account's balance,
+  // and against the goals on it that this device may not even be able to see.
+  goal_entries: ['id', 'goalId', 'amountMinor', 'date', 'note'],
   bills: ['id', 'name', 'payee', 'amountMinor', 'categoryId', 'accountId', 'freq', 'nextDue', 'active', 'autoPost'],
   // transferId and goalId are set by create_transfer server-side, never posted
   // directly — a client that could write transferId could fabricate half a transfer.
@@ -88,6 +92,7 @@ const READABLE: Record<SyncedTable, readonly string[]> = {
   categories: [...WRITABLE.categories, 'updatedAt', 'deletedAt'],
   account_grants: [...WRITABLE.account_grants, 'grantedBy', 'updatedAt', 'deletedAt'],
   accounts: [...WRITABLE.accounts, 'createdBy', 'updatedAt', 'deletedAt'],
+  goal_entries: [...WRITABLE.goal_entries, 'createdBy', 'updatedAt', 'deletedAt'],
   goals: [...WRITABLE.goals, 'createdBy', 'updatedAt', 'deletedAt'],
   bills: [...WRITABLE.bills, 'createdBy', 'updatedAt', 'deletedAt'],
   // `explainRequested*` sits with transferId and goalId: readable, never
