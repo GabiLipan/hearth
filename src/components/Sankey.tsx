@@ -251,12 +251,23 @@ export function Sankey({
     : (n.color ?? (n.slot === undefined || n.slot === 0 ? c.ink3 : c.slot(n.slot)))
 
   const boxOf = useMemo(() => new Map(layout.boxes.map((b) => [b.node.id, b])), [layout])
-  const hoveredNode = hovered ? boxOf.get(hovered.id)?.node : undefined
+  /**
+   * What the pointer is over, once the gesture has earned an answer.
+   *
+   * The band under the finger is tracked from the first touch — it has to be,
+   * or a press that turns out to be a hold has nothing to show — but nothing is
+   * DRAWN from it until `armed`. Every chart in the app sits in a scrolling
+   * page, so without this a flick that happens to start on the diagram dims
+   * every other band and opens a panel over it, and you arrive somewhere else
+   * with a tooltip explaining a chart you scrolled past. See `useTouchTooltip`.
+   */
+  const shown = touch.armed ? hovered : null
+  const hoveredNode = shown ? boxOf.get(shown.id)?.node : undefined
   /** Everything dims except the band under the pointer and the ribbon it owns. */
-  const lit = (id: string) => !hovered || hovered.id === id
+  const lit = (id: string) => !shown || shown.id === id
 
   /** Is there room to hang the panel above the pointer? Below it if not. */
-  const above = !hovered || hovered.y - 10 - size.h >= 0
+  const above = !shown || shown.y - 10 - size.h >= 0
   /**
    * Centred on the pointer, and never over either edge of the card.
    *
@@ -266,7 +277,7 @@ export function Sankey({
    */
   const half = size.w / 2
   const cardW = frame.current?.clientWidth ?? width
-  const left = hovered ? Math.min(Math.max(hovered.x, half), Math.max(half, cardW - half)) : 0
+  const left = shown ? Math.min(Math.max(shown.x, half), Math.max(half, cardW - half)) : 0
 
   if (layout.boxes.length === 0) {
     return <p className="py-8 text-center text-sm text-ink-3">Nothing moved in this period.</p>
@@ -299,7 +310,7 @@ export function Sankey({
                   key={`${r.link.from}->${r.link.to}`}
                   d={ribbonPath(r.x0, r.y0, r.x1, r.y1, r.thickness)}
                   fill={node ? colourOf(node) : c.ink3}
-                  fillOpacity={on ? (hovered ? 0.62 : 0.34) : 0.1}
+                  fillOpacity={on ? (shown ? 0.62 : 0.34) : 0.1}
                   className={cx('transition-[fill-opacity] duration-150', byClick && 'cursor-pointer')}
                   {...names(r.colourFrom)}
                 />
@@ -448,7 +459,7 @@ export function Sankey({
         </svg>
       </div>
 
-      {hovered && hoveredNode && (
+      {shown && hoveredNode && (
         <div
           ref={setPanel}
           // Follows the pointer, clamped to the card so a band near the right
@@ -470,7 +481,7 @@ export function Sankey({
           )}
           style={{
             left,
-            top: above ? hovered.y - 10 : hovered.y + 18,
+            top: above ? shown.y - 10 : shown.y + 18,
             opacity: touch.fading ? 0 : 1,
             transition: `opacity ${TIP_FADE_MS}ms linear`,
           }}

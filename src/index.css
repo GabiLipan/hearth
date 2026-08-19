@@ -351,17 +351,34 @@ select,
  * the status bar has the browser's own chrome under it and none of this is the
  * app's problem. Both spellings of "installed" again, for the reason
  * `.app-frame` gives twice above.
+ *
+ * ## And only where a status bar is actually painted over the window
+ *
+ * "Installed" is not the condition — "installed on a device whose OS draws its
+ * clock on top of the app" is. An installed app on a Mac has a real title bar
+ * with the traffic lights in it and nothing overlapping the page, so the floor
+ * there is 24px of window reserved against a status bar that does not exist,
+ * every screen, for ever.
+ *
+ * `any-pointer: coarse` rather than `pointer: coarse`, because an iPad with a
+ * Magic Keyboard reports a FINE primary pointer while still being an iPad with
+ * a clock over the top of the window — the exact device this floor was written
+ * for. `any-pointer` asks whether a touch screen is present at all, which is
+ * the question being asked. A Mac answers no; every iPad answers yes, trackpad
+ * or not.
  */
 :root {
   --safe-top: env(safe-area-inset-top);
 }
-@media (display-mode: standalone) {
+@media (display-mode: standalone) and (any-pointer: coarse) {
   :root {
     --safe-top: max(env(safe-area-inset-top), 24px);
   }
 }
-:root[data-standalone] {
-  --safe-top: max(env(safe-area-inset-top), 24px);
+@media (any-pointer: coarse) {
+  :root[data-standalone] {
+    --safe-top: max(env(safe-area-inset-top), 24px);
+  }
 }
 
 /* Currency figures that must align vertically */

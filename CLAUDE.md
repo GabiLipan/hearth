@@ -442,6 +442,18 @@ the single place a level comes from.
   of a page change; it lives on `main` instead, mobile only, where the element
   is exactly the width of the viewport. Nothing in the app sets it any more —
   the sheet scroll lock was the last one, and it locks `#app-scroll` now.
+- **"Installed" is not the same question as "has a status bar over it".**
+  `--safe-top` floors the top inset at 24px where the app is installed and
+  `env(safe-area-inset-top)` reports 0 — which is an iPad, where the app is
+  `black-translucent` and iPadOS paints the clock over the window while
+  reporting nothing. Applied to every installed app it also reserves 24px on a
+  Mac, which has a real title bar with the traffic lights in it and nothing
+  overlapping the page at all: a strip of empty window at the top of every
+  screen, for ever. The condition is `any-pointer: coarse`, not
+  `pointer: coarse` — an iPad with a Magic Keyboard reports a FINE primary
+  pointer and is still an iPad with a clock over the top of it, and
+  `any-pointer` asks whether a touch screen is there at all, which is the
+  question being asked.
 - **`100dvh` is wrong on a cold start of an installed iOS PWA**, by about the
   height of the browser chrome that is not there, and it stays wrong until the
   viewport is "exercised" — a scroll is enough. There is no event for the
@@ -1420,6 +1432,21 @@ the single place a level comes from.
   never move again to correct it. The same measurement decides which SIDE of the
   pointer the Sankey's panel goes: a wrapped name makes it tall enough to run
   off the top of the card, so it flips underneath where there is no room above.
+- **A tapped tooltip has no BEGINNING either, and that is the half that was
+  missing.** The panel opened on `pointerdown`, and every chart in the app sits
+  inside a scrolling page — so every flick that happened to start on a chart
+  opened a tooltip, and you arrived somewhere else with a panel sitting over a
+  chart you had scrolled past. A touch is not a tooltip until it has proved it
+  is not a scroll: hold still for `TIP_HOLD_MS`, or lift again without having
+  travelled `TIP_SLOP`. Either arms it; moving first kills the gesture for good,
+  and so does the `pointercancel` the browser sends when it takes the touch to
+  scroll with — once dead, always dead, which is what stops the END of a flick
+  opening one. A mouse is armed from the start, and re-arms on a bare
+  `pointermove`, because a touchscreen laptop can flick with a finger and then
+  hover with the trackpad. `useTouchTooltip.armed` is the flag, and a chart that
+  tracks what is under the pointer ITSELF rather than letting Recharts do it has
+  to gate on it — `Sankey` keeps following the finger and simply draws nothing,
+  or a press that turns out to be a hold would have nothing to show.
 - **A tapped tooltip has no ending, because nothing ever leaves.** Every chart
   here was written against hover, and a hover ends by itself; a tap opens a
   panel that then sits over the chart until something unrelated closes it.
