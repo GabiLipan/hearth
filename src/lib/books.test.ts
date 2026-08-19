@@ -6,6 +6,7 @@ import {
   bookBridge,
   bookMonthlySpendByCategory,
   bookSpendByCategory,
+  bookSplitByCategory,
   bookTotals,
   sumBookTotals,
   bookTotalsInRange,
@@ -1441,5 +1442,78 @@ describe('the bridge between the books', () => {
     const year = bookBridge(rows, flows, books, ['2026-02', '2026-03'])
     expect(year.household.spend).toBe(bridge.household.spend)
     expect(year.all.net).toBe(year.household.net + year.mine.net)
+  })
+})
+
+describe('spending split into each book\'s share', () => {
+  const cats: Category[] = [
+    { id: 'home', name: 'Home', kind: 'expense', sortOrder: 0, updatedAt: 'x' },
+    { id: 'groceries', name: 'Groceries', kind: 'expense', sortOrder: 1, updatedAt: 'x' },
+    { id: 'utilities', name: 'Utilities', kind: 'expense', sortOrder: 2, updatedAt: 'x' },
+    { id: 'shopping', name: 'Shopping', kind: 'expense', sortOrder: 3, updatedAt: 'x' },
+  ]
+  const base = march()
+  const flows = classifyFlows(base, books)
+  const rows = bookSplitByCategory(base, flows, cats, books, '2026-03')
+  const at = (id: string) => rows.find((r) => r.categoryId === id)!
+
+  it('puts joint spending in the household half and personal spending in mine', () => {
+    expect(at('groceries').householdMinor).toBe(60000)
+    expect(at('groceries').mineMinor).toBe(0)
+    expect(at('shopping').mineMinor).toBe(70000)
+    expect(at('shopping').householdMinor).toBe(0)
+  })
+
+  it('agrees with the Everything total for each category', () => {
+    const combined = new Map(
+      bookSpendByCategory(base, flows, cats, 'all', '2026-03', books).map((r) => [r.categoryId, r.totalMinor]),
+    )
+    for (const r of rows) expect(r.totalMinor).toBe(combined.get(r.categoryId))
+  })
+
+  it('counts a card-paid household shop as the household\'s and not the payer\'s', () => {
+    // The row that belongs to two books at once goes where each book puts it —
+    // the same answer every other figure in the app gives.
+    const withCard = [
+      ...base,
+      txn({
+        accountId: 'myPrivate',
+        amountMinor: -9000,
+        date: '2026-03-10',
+        categoryId: 'groceries',
+        paidForHousehold: true,
+        createdBy: ME,
+      }),
+    ]
+    const f = classifyFlows(withCard, books)
+    const g = bookSplitByCategory(withCard, f, cats, books, '2026-03').find((r) => r.categoryId === 'groceries')!
+
+    expect(g.householdMinor).toBe(69000)
+    expect(g.mineMinor).toBe(0)
+    expect(g.totalMinor).toBe(69000)
+  })
+
+  it('lets the halves come to less than the total, and says so by construction', () => {
+    // A published row from an account this device does not hold is the
+    // household's spending and is in no account here, so Everything is short by
+    // it — the same line the bridge card names. The total must NOT be
+    // re-derived from the halves.
+    const withHers = [
+      ...base,
+      txn({
+        accountId: 'herCard',
+        amountMinor: -4400,
+        date: '2026-03-11',
+        categoryId: 'groceries',
+        paidForHousehold: true,
+        createdBy: HER,
+      }),
+    ]
+    const f = classifyFlows(withHers, books)
+    const g = bookSplitByCategory(withHers, f, cats, books, '2026-03').find((r) => r.categoryId === 'groceries')!
+
+    expect(g.householdMinor).toBe(64400)
+    expect(g.totalMinor).toBe(60000)
+    expect(g.householdMinor + g.mineMinor).toBeGreaterThan(g.totalMinor)
   })
 })

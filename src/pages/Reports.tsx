@@ -25,6 +25,7 @@ import {
   bookBridge,
   bookSeries,
   bookSlices,
+  bookSplitByCategory,
   bookTotals,
   bookTotalsInRange,
   rangeSlices,
@@ -69,6 +70,7 @@ import {
   BooksBridge,
   BRIDGE_SHAPES,
   CategoryHeatmap,
+  CategorySplitBars,
   FixedVariableBars,
   PaidIn,
   PAID_IN_SHAPES,
@@ -117,6 +119,17 @@ const MONTHS_SHAPES: { value: 'table' | 'bars' | 'lines'; label: string }[] = [
   { value: 'lines', label: 'Lines' },
 ]
 
+/**
+ * The breakdown's shapes, plus one this page alone can offer.
+ *
+ * `SLICE_SHAPES` is shared with the home page's donut, which is drawn inside a
+ * single book and has nothing to split. "By book" is only ever meaningful under
+ * Everything, so it is added here rather than to the shared list, and the card
+ * falls back to bars in the other two books — a control that appears to do
+ * nothing is worse than one that is not offered.
+ */
+const CATEGORY_SHAPES = [...SLICE_SHAPES, { value: 'books', label: 'By book' }]
+
 const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
   { value: 'month', label: 'Month' },
   { value: 'year', label: 'Year' },
@@ -138,7 +151,7 @@ const SECTIONS: SectionDef[] = [
     id: 'categories',
     label: 'Where it went',
     defaultSpan: 'full',
-    variants: SLICE_SHAPES,
+    variants: CATEGORY_SHAPES,
     options: [sliceCount('8')],
   },
   { id: 'spend', label: 'Spending each month', variants: TREND_SHAPES },
@@ -366,6 +379,15 @@ export default function Reports() {
         : bookSlices(txns ?? [], flows, categories, book, inView, books, undefined, flowLimit),
     [txns, flows, categories, book, inView, books, period, from, to, flowLimit],
   )
+  /** The same breakdown, split into each book's share. Everything only. */
+  const splitSlices = useMemo(
+    () =>
+      book !== 'all' || period === 'custom'
+        ? []
+        : bookSplitByCategory(txns ?? [], flows, categories, books, inView, sliceLimit),
+    [book, period, txns, flows, categories, books, inView, sliceLimit],
+  )
+
   const series = useMemo(
     () => bookSeries(txns ?? [], flows, book, Number(range), books, month),
     [txns, flows, book, range, books, month],
@@ -737,7 +759,7 @@ export default function Reports() {
       value={currentVariant(SECTIONS[0], layout.find((i) => i.id === 'categories')) ?? 'donut'}
       onChange={(v) => setLayout(setVariant(layout, 'categories', v))}
       className="w-44"
-      options={SLICE_SHAPES}
+      options={CATEGORY_SHAPES}
     />
   )
 
@@ -921,7 +943,9 @@ export default function Reports() {
         </p>
       ) : view === 'charts' ? (
         <>
-          {shape === 'bars' ? (
+          {shape === 'books' && splitSlices.length > 0 ? (
+            <CategorySplitBars slices={splitSlices} partner={partner ?? undefined} onPick={pickSlice} />
+          ) : shape === 'bars' || shape === 'books' ? (
             <CategoryBars slices={slices} onPick={pickSlice} />
           ) : shape === 'mosaic' ? (
             /* Taller than the home widget's, because this is a full-width panel
@@ -1145,7 +1169,9 @@ export default function Reports() {
               rows={paidIn}
               totalMinor={totals.income}
               shape={variant}
-              onPick={(row) => (row.muted ? seeTransactions() : seeTransactions())}
+              // Every band leads to the same list: a contribution is not a
+              // category filter, and "not sure by whom" is the absence of one.
+              onPick={() => seeTransactions()}
             />
             {boughtDirect > 0 && (
               <p className="mt-3 text-sm text-ink-2 md:text-xs">
@@ -1656,10 +1682,16 @@ export default function Reports() {
                it cannot answer. Said once, here, rather than leaving eight empty
                cards or — worse — eight cards quietly showing the wrong period. */
             <Card className="mb-3 p-5 md:mb-2.5 md:p-4">
-              <p className="text-sm text-ink-3">
-                The monthly charts are hidden for a custom range: a waterfall, a trend and a pace line are all
-                questions about months, and this period is not made of them. Switch to Month or Year for those.
-              </p>
+              <CardHeading
+                className="mb-0"
+                title="The monthly charts are hidden for a custom range"
+                info={
+                  <p>
+                    A waterfall, a trend and a pace line are all questions about months, and this period is not made
+                    of them. Switch to Month or Year for those.
+                  </p>
+                }
+              />
             </Card>
           )}
           <Arrange

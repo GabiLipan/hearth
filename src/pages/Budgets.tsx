@@ -15,7 +15,7 @@ import { thisMonthKey, monthLabel, shiftMonth } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
-import { Card, CategoryDot, Progress, Button, Empty, Toolbar, FilterBar, FilterChip, MonthStepper, ScrollTable, table, cx } from '../components/ui'
+import { Card, CardHeading, CategoryDot, Progress, Button, Empty, Toolbar, FilterBar, FilterChip, MonthStepper, ScrollTable, table, cx } from '../components/ui'
 import { BudgetBullet } from '../components/BudgetBullet'
 import { BudgetBars } from '../components/BudgetBars'
 
@@ -231,9 +231,18 @@ export default function Budgets() {
       {/* Left, like the row above it. It was centred to match a centred toolbar
           that is no longer there. */}
       {mine && (
-        <p className="mb-3 text-xs text-ink-3 md:mb-2">
-          Personal budgets count spending on your own accounts. Moving money to the household is not spending.
-        </p>
+        <div className="mb-3 md:mb-2">
+          <CardHeading
+            className="mb-0"
+            title={<span className="text-xs font-normal text-ink-3">Personal budgets count your own spending</span>}
+            info={
+              <p>
+                They count spending on your own accounts only. Moving money to the household is not spending, and
+                nor is buying something for the household off your own card — that is money you put in.
+              </p>
+            }
+          />
+        </div>
       )}
 
       {/* `ready` first: `[]` from a cache that has not opened yet is not the

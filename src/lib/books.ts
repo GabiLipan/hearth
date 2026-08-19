@@ -89,14 +89,15 @@ export const BOOK_WORDS: Record<BookId, { income: string; spend: string; net: st
     income: 'Money in',
     spend: 'Money out',
     net: 'Net',
-    netHint: 'Every account this device can see, added together. Transfers between them cancel out.',
+    netHint:
+      'Every account this device can see. Money moved between our books is counted in neither, because both legs are in view here — so this is not the other two books added together. "How the books add up" shows the arithmetic.',
   },
 }
 
 export const BOOK_HINT: Record<BookId, string> = {
   household: 'The accounts we are both on. What we each put in, and what the household spent.',
   mine: 'My own accounts. My salary, what I contributed, and what I spent personally.',
-  all: 'Every account this device can see, added together. Useful for balances; not a meaningful income figure.',
+  all: 'Every account this device can see, and how the other two books reconcile against it.',
 }
 
 /**
@@ -1400,6 +1401,105 @@ export function bookMonthlySpendByCategory(
     series[i] -= t.amountMinor
   }
   return out
+}
+
+/**
+ * Spend per category, split into the household's part and the personal one.
+ *
+ * Only meaningful under Everything, which is the one book that contains both.
+ * Under Our household or Mine the answer is the whole bar in one colour, and a
+ * chart that draws a single segment and calls it a split is a control that
+ * appears to do nothing.
+ *
+ * The two parts are taken by asking `spendsIn` of each book in turn rather than
+ * by splitting the combined figure, so a row that belongs to two books at once
+ * lands where each book puts it: household shopping bought on a personal card
+ * is the household's spending and is not the payer's, exactly as every other
+ * figure in the app has it. That also means the parts can sum to LESS than the
+ * combined total — a published row from an account this device does not hold is
+ * in the household's part and in no account here — so the combined figure is
+ * kept rather than re-derived from the halves.
+ */
+export interface SplitSlice extends CategorySlice {
+  householdMinor: number
+  mineMinor: number
+}
+
+export function bookSplitByCategory(
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  categories: Category[],
+  books: BookMap,
+  month: string | string[],
+  maxSlices = 8,
+): SplitSlice[] {
+  const catMap = new Map(categories.map((c) => [c.id, c]))
+  const want = new Set(Array.isArray(month) ? month : [month])
+  const householdIds = accountsInBook('household', books)
+  const mineIds = accountsInBook('mine', books)
+
+  const parts = new Map<string, { household: number; mine: number }>()
+  for (const t of txns) {
+    if (!t.categoryId || !want.has(monthKey(t.date))) continue
+    const cat = catMap.get(t.categoryId)
+    if (!cat || cat.kind !== 'expense') continue
+    const flow = flows.get(t.id)
+    const inHousehold = spendsIn(flow, 'household', t.accountId, householdIds)
+    const inMine = spendsIn(flow, 'mine', t.accountId, mineIds)
+    if (!inHousehold && !inMine) continue
+    const key = budgetCategoryId(cat)!
+    const at = parts.get(key) ?? { household: 0, mine: 0 }
+    if (inHousehold) at.household -= t.amountMinor
+    if (inMine) at.mine -= t.amountMinor
+    parts.set(key, at)
+  }
+
+  // The combined figure comes from `bookSpendByCategory` under Everything, not
+  // from adding the halves — see the note above.
+  const combined = new Map(
+    bookSpendByCategory(txns, flows, categories, 'all', month, books).map((r) => [r.categoryId, r.totalMinor]),
+  )
+  const rows = [...new Set([...parts.keys(), ...combined.keys()])].map((categoryId) => ({
+    categoryId,
+    totalMinor: combined.get(categoryId) ?? 0,
+  }))
+
+  const slices = toSlices(
+    rows.filter((r) => r.totalMinor > 0).sort((a, b) => b.totalMinor - a.totalMinor),
+    categories,
+    undefined,
+    maxSlices,
+  )
+
+  // "Other" is the folded tail, so its parts are everything not named above it.
+  // Reading the map by its synthetic id would give it a split of nothing, and a
+  // bar drawn with no segments in a chart whose whole point is the segments.
+  const named = slices.filter((sl) => sl.categoryId !== OTHER_SLICE_ID)
+  const grand = [...parts.values()].reduce(
+    (sum, p) => ({ household: sum.household + p.household, mine: sum.mine + p.mine }),
+    { household: 0, mine: 0 },
+  )
+  const namedTotals = named.reduce(
+    (sum, sl) => ({
+      household: sum.household + (parts.get(sl.categoryId)?.household ?? 0),
+      mine: sum.mine + (parts.get(sl.categoryId)?.mine ?? 0),
+    }),
+    { household: 0, mine: 0 },
+  )
+
+  return slices.map((slice) =>
+    slice.categoryId === OTHER_SLICE_ID
+      ? {
+          ...slice,
+          householdMinor: Math.max(0, grand.household - namedTotals.household),
+          mineMinor: Math.max(0, grand.mine - namedTotals.mine),
+        }
+      : {
+          ...slice,
+          householdMinor: parts.get(slice.categoryId)?.household ?? 0,
+          mineMinor: parts.get(slice.categoryId)?.mine ?? 0,
+        },
+  )
 }
 
 /**

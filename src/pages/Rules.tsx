@@ -14,6 +14,7 @@ import {
   AccountDot,
   Button,
   Card,
+  CardHeading,
   CategoryDot,
   Chip,
   Empty,
@@ -170,16 +171,38 @@ export default function RulesPage() {
         </div>
       </Toolbar>
 
-      <p className="mb-3 max-w-2xl px-1 text-sm text-ink-2 md:mb-2.5">
-        Every time you categorise a payee — or give one a name of your own — Hearth remembers it and
-        applies it to future entries and imports. Here you can point one somewhere else, rename it,
-        apply it to what you have already recorded, or write one yourself. A rule can do either job or
-        both: a name alone is enough where the bank’s words are the only problem. A rule can also ask
-        for more than the payee — an exact amount, a range, a particular account — which is how two
-        subscriptions billed by the same vendor become two rules instead of one. Where several could
-        match, the most specific wins: a rule that names an amount beats one that does not, and
-        “tesco petrol” beats “tesco”.
-      </p>
+      {/* Six sentences, which is five more than a screen may carry. The one
+          that is worth reading every time stays; the rest is behind the ⓘ. */}
+      <div className="mb-3 px-1 md:mb-2.5">
+        <CardHeading
+          className="mb-0"
+          title={
+            <span className="text-sm font-normal text-ink-2">
+              Hearth remembers how you file a payee, and applies it to what comes next.
+            </span>
+          }
+          info={
+            <>
+              <p>
+                Here you can point a rule somewhere else, rename it, apply it to what you have already recorded, or
+                write one yourself.
+              </p>
+              <p>
+                A rule can file a payee, name it, or both — a name alone is enough where the bank&rsquo;s words are
+                the only problem.
+              </p>
+              <p>
+                It can also ask for more than the payee: an exact amount, a range, a particular account. That is how
+                two subscriptions billed by the same vendor become two rules instead of one.
+              </p>
+              <p>
+                Where several could match, the most specific wins — a rule that names an amount beats one that does
+                not, and &ldquo;tesco petrol&rdquo; beats &ldquo;tesco&rdquo;.
+              </p>
+            </>
+          }
+        />
+      </div>
 
       {done && (
         <Card className="mb-3 flex items-center gap-2 px-4 py-2.5 text-sm md:mb-2.5 md:px-3 md:py-2">

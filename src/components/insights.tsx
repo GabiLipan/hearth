@@ -14,6 +14,7 @@ import {
 } from 'recharts'
 import { useChartColors } from '../hooks/useChartColors'
 import { paintOf } from '../lib/palette'
+import type { SplitSlice } from '../lib/books'
 import { useApp } from '../state/AppContext'
 import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
 import { monthLabel, thisMonthKey } from '../lib/dates'
@@ -1053,5 +1054,85 @@ export function BooksBridge({
         ))}
       </tbody>
     </ScrollTable>
+  )
+}
+
+/* ---------- 11. Spending, split by book ---------- */
+
+/**
+ * One bar per category, each split into the household's part and the personal
+ * one.
+ *
+ * Everything only — it is the one book that contains both, and under the other
+ * two the answer is the whole bar in one colour. Bars rather than a ring or
+ * blocks, because a split arc is unreadable and a split tile is two tiles.
+ *
+ * The two segments may sum to LESS than the figure beside them: a published row
+ * from an account this device does not hold is the household's spending and is
+ * in no account here. That is the same line the bridge card names, and it is
+ * why the total comes from `bookSpendByCategory` rather than from adding the
+ * halves — see `bookSplitByCategory`.
+ */
+export function CategorySplitBars({
+  slices,
+  partner,
+  onPick,
+}: {
+  slices: SplitSlice[]
+  partner?: string
+  onPick?: (slice: SplitSlice) => void
+}) {
+  const { money } = useApp()
+  const c = useChartColors()
+  const peak = slices.reduce((m, s) => Math.max(m, s.totalMinor), 0)
+  if (slices.length === 0) return null
+
+  const ours = c.slot(1)
+  const mine = c.slot(2)
+
+  return (
+    <div>
+      <ul className="space-y-2">
+        {slices.map((s) => {
+          const width = peak > 0 ? (s.totalMinor / peak) * 100 : 0
+          const known = s.householdMinor + s.mineMinor
+          return (
+            <li key={s.categoryId}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0" style={{ color: paintOf(s.slot, s.color) }}>
+                    <CategoryIcon icon={s.icon} size={13} />
+                  </span>
+                  <span className="truncate text-sm">{s.name}</span>
+                </span>
+                <span className="shrink-0 text-sm font-semibold tabular">{money(s.totalMinor)}</span>
+              </div>
+              <button
+                type="button"
+                disabled={!onPick}
+                onClick={onPick ? () => onPick(s) : undefined}
+                aria-label={`${s.name}, ${money(s.totalMinor)}`}
+                className={cx('mt-1 flex h-3 w-full gap-0.5 rounded-full', onPick && 'cursor-pointer')}
+              >
+                <span
+                  className="h-full rounded-full"
+                  style={{ width: `${known > 0 ? width * (s.householdMinor / known) : 0}%`, background: ours }}
+                />
+                <span
+                  className="h-full rounded-full"
+                  style={{ width: `${known > 0 ? width * (s.mineMinor / known) : 0}%`, background: mine }}
+                />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      <Legend
+        items={[
+          { name: 'Our household', colour: ours },
+          { name: partner ? 'Mine' : 'Mine', colour: mine },
+        ]}
+      />
+    </div>
   )
 }
