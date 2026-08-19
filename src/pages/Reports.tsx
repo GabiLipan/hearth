@@ -165,7 +165,9 @@ const SECTIONS: SectionDef[] = [
   // Everything only. These two are what that book is FOR, now that it has
   // stopped being the other two poured into one pool.
   { id: 'bridge', label: 'How the books add up', defaultSpan: 'full', variants: BRIDGE_SHAPES },
-  { id: 'crossings', label: 'Between our books', defaultSpan: 'full', options: [sliceCount('6')] },
+  // Five rather than eight: this diagram stacks BOTH books' categories in one
+  // column, so the count is paid for twice. See `MAX_HEIGHT` in Sankey.tsx.
+  { id: 'crossings', label: 'Between our books', defaultSpan: 'full', options: [sliceCount('5')] },
   { id: 'waterfall', label: 'Step by step', defaultSpan: 'full' },
   { id: 'salary', label: 'What each salary turned into', defaultSpan: 'full' },
   { id: 'committed', label: 'Committed vs chosen' },
@@ -278,7 +280,7 @@ export default function Reports() {
     ) ?? fallback
   const sliceLimit = Number(sectionOption('categories', 'count', '8'))
   const flowLimit = Number(sectionOption('flow', 'count', '8'))
-  const crossingLimit = Number(sectionOption('crossings', 'count', '6'))
+  const crossingLimit = Number(sectionOption('crossings', 'count', '5'))
   const payeeLimit = Number(sectionOption('payees', 'rows', '10'))
   const heatmapRows = Number(sectionOption('heatmap', 'rows', '10'))
 

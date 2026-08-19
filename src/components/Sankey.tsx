@@ -35,6 +35,19 @@ const MIN_WIDTH = 560
  * which is what the scroller is for.
  */
 const COLUMN_GAP = 200
+/**
+ * As tall as a diagram may ask to be.
+ *
+ * "Room for every band to carry its own label" is the right floor and a
+ * disastrous ceiling: the four-column diagram stacks BOTH books' categories in
+ * its last column, so a household with eight categories each asks for around
+ * a thousand pixels — a card taller than the phone it is on, which cannot be
+ * taken in at all. Past this the small bands give up their labels rather than
+ * the whole picture giving up being visible; they keep their colour, their
+ * hover and their place, and the tooltip is where their name was going to be
+ * legible anyway.
+ */
+const MAX_HEIGHT = 560
 const NODE_W = 12
 /**
  * The gap between two bands in a column.
@@ -83,7 +96,7 @@ export function sankeyHeight(graph: FlowGraph): number {
     const c = columnOf(n)
     perColumn.set(c, (perColumn.get(c) ?? 0) + 1)
   }
-  return Math.max(280, Math.max(0, ...perColumn.values()) * 42)
+  return Math.min(MAX_HEIGHT, Math.max(280, Math.max(0, ...perColumn.values()) * 42))
 }
 
 /**
@@ -322,6 +335,11 @@ export function Sankey({
                 behind two words. */}
             {layout.boxes.map((b) => {
               const col = columnOf(b.node)
+              // The same suppression the label below makes. A derived hub is
+              // unlabelled — it always was — so a plate drawn for it is a dark
+              // rounded rectangle sitting in the middle of the ribbons with
+              // nothing written on it.
+              if (b.node.column === undefined && b.node.side === 'hub') return null
               if (!(col > first && col < last) || b.height < 30) return null
               const chars = Math.max(short(b.node.name, 12).length, 7)
               const w = chars * 6.6 + 16
