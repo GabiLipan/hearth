@@ -41,7 +41,7 @@ import {
   type BookId,
 } from '../lib/books'
 import { useApp } from '../state/AppContext'
-import { Card, CardHeading, useInfoNote, Fill, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, useColumnCount, cx } from '../components/ui'
+import { Card, CardHeading, useInfoNote, Fill, Progress, Segmented, Empty, FilterBar, FilterChip, Popover, Toolbar, MonthStepper, Button, TextInput, table, ScrollTable, useColumnCount, cx } from '../components/ui'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { BookSwitcher } from '../components/BookSwitcher'
 import { Arrange, useLayout } from '../components/Arrange'
@@ -1477,49 +1477,93 @@ export default function Reports() {
           the contributions line is the one that does not exist anywhere else:
           it is the money we each put in, and it is visible to both of us even
           though neither can see the other's salary. */}
-      <Card className="mb-3 p-4 md:mb-2.5 md:p-3">
-        {/* A two-column grid on a phone and one divided row on a desktop.
-            `flex-wrap` with `divide-x` was neither: the item that wrapped kept
-            its left border, so the second line began with a divider attached to
-            nothing and the figures no longer lined up under their headings. */}
-        {/* Everything this card has to explain sits behind one ⓘ, rather than
-            as three paragraphs stacked under the figures — which is what it
-            was, and on a phone it pushed the first chart off the screen. */}
-        <div className="mb-1.5 flex items-start justify-end">{summaryNote.toggle}</div>
-        <div className="grid grid-cols-2 gap-x-5 gap-y-3 md:flex md:flex-nowrap md:items-start md:gap-0 md:divide-x md:divide-hairline">
-          <Stat label={words.income} value={money(totals.income)} />
-          {book === 'household' && totals.contributions > 0 && (
-            <Stat label="of which we put in" value={money(totals.contributions)} muted />
-          )}
-          {book === 'mine' && totals.contributed > 0 && (
-            <Stat label="Moved to household" value={money(totals.contributed)} muted />
-          )}
-          <Stat label={words.spend} value={money(totals.spend)} />
-          <Stat
-            label={words.net}
-            value={money(totals.net, { sign: true })}
-            tone={totals.net < 0 ? 'bad' : 'good'}
-          />
+      {/*
+        The period, as the page's one painted surface.
+
+        It was three grey figures in a tall white box: the same weight each, so
+        nothing led; a bare "Money in / Money out / Net" with no sense of one
+        becoming the other; and no colour anywhere on the page's first screen.
+        Home solves this already — `.panel-month` is the app's own answer to
+        "this is the card you opened the page for" — and Reports had simply
+        never been given it. Same panel, same tokens, same over-budget state.
+
+        The hierarchy is the point rather than the paint: one figure leads, the
+        two that make it up sit under a rule, and the bar underneath is what
+        came in against what went out, so the relationship between them is a
+        shape rather than a subtraction the reader has to do.
+      */}
+      {/* No `panel-over`. On Home the alarm state means "past the budget you
+          set", which is a fact you can act on; here the only candidate is a
+          negative net, and a part-month that has not had its salary yet is
+          negative every time — an alarm that fires monthly is one nobody
+          reads. The figure says it, and the sentence under it says why. */}
+      <Card className="panel-month mb-3 p-4 md:mb-2.5 md:p-3.5">
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-sm" style={{ color: 'var(--panel-ink-2)' }}>
+            {periodLabel} · {words.spend.toLowerCase()}
+          </p>
+          {summaryNote.toggle}
         </div>
+        <p className="mt-0.5 text-4xl font-bold tracking-tight tabular md:text-3xl">{money(totals.spend)}</p>
+
+        {/* What came in against what went out, as one bar. A month that spent
+            more than it took in fills it and says so — which is the same fact
+            as the negative net below, in the form you can read without
+            subtracting. */}
+        {totals.income > 0 && (
+          <div className="mt-3">
+            <Progress
+              fraction={totals.spend / totals.income}
+              tone={totals.spend > totals.income ? 'over' : totals.spend / totals.income > 0.85 ? 'warn' : 'ok'}
+              on="panel"
+            />
+          </div>
+        )}
+
+        <dl
+          className="mt-3 grid grid-cols-2 gap-x-5 gap-y-3 border-t pt-3 md:grid-cols-4"
+          style={{ borderColor: 'var(--panel-line)' }}
+        >
+          {[
+            { label: words.income, value: totals.income, sign: false },
+            ...(book === 'household' && totals.contributions > 0
+              ? [{ label: 'Of that, we put in', value: totals.contributions, sign: false }]
+              : []),
+            ...(book === 'mine' && totals.contributed > 0
+              ? [{ label: 'To our household', value: totals.contributed, sign: false }]
+              : []),
+            ...(savedMinor > 0 ? [{ label: 'To savings', value: savedMinor, sign: false }] : []),
+            { label: words.net, value: totals.net, sign: true },
+          ].map((f) => (
+            <div key={f.label} className="min-w-0">
+              <dt className="text-xs" style={{ color: 'var(--panel-ink-2)' }}>{f.label}</dt>
+              {/* No tone on the figure: green and red on this panel are a dark
+                  green and a dark red on a dark blue, which are the two figures
+                  that most need reading made hardest to read. The panel's own
+                  colour says which state the period is in. */}
+              <dd className="mt-0.5 text-xl font-bold tracking-tight tabular md:text-lg">
+                {money(f.value, { sign: f.sign })}
+              </dd>
+            </div>
+          ))}
+        </dl>
 
 
         {/* The balances, for the month that has not finished. Deliberately
             below the figures rather than beside them: it is the sentence that
             makes an alarming "left over" readable, not a fourth statistic. */}
         {partial && balances && (
-          <p className="mt-1.5 text-xs text-ink-2">
+          <p className="mt-2.5 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
             <span className="font-medium tabular">{money(balances.startMinor)}</span> at the start of{' '}
             {periodLabel},{' '}
             <span className="font-medium tabular">{money(balances.nowMinor)}</span> now
-            <span className="text-ink-3">
-              {' '}— the {period === 'year' ? 'year' : period === 'custom' ? 'range runs to today, so it' : 'month'}{' '}
-              is not over.
-            </span>
+            {' '}— the {period === 'year' ? 'year' : period === 'custom' ? 'range runs to today, so it' : 'month'}{' '}
+            is not over.
           </p>
         )}
         {summaryNote.body}
         {partial && !balances && (
-          <p className="mt-1.5 text-xs text-ink-3">
+          <p className="mt-2.5 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
             {periodLabel} runs to today, so these figures are still moving.
           </p>
         )}
@@ -1528,8 +1572,8 @@ export default function Reports() {
             not a change worth a sentence, and saying so anyway trains people to
             ignore the line. */}
         {period !== 'custom' && lastYear && Math.abs(lastYear.deltaMinor) >= Math.max(lastYear.spendMinor * 0.1, 1000) && (
-          <p className="mt-1.5 text-xs text-ink-2">
-            <span className={lastYear.deltaMinor > 0 ? 'font-medium text-critical-text' : 'font-medium text-good-text'}>
+          <p className="mt-2.5 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
+            <span className="font-semibold" style={{ color: 'var(--panel-ink)' }}>
               {money(Math.abs(lastYear.deltaMinor))} {lastYear.deltaMinor > 0 ? 'more' : 'less'}
             </span>{' '}
             than {period === 'year' ? Number(year) - 1 : monthLabel(shiftMonth(month, -12))}, when{' '}
@@ -1542,8 +1586,8 @@ export default function Reports() {
             until they link it the figures above are counting a movement of
             money as spending or as income. */}
         {book === 'household' && (unexplained.outCount > 0 || unexplained.inCount > 0) && (
-          <div className="mt-3 rounded-xl bg-warning/12 px-3 py-2.5">
-            <p className="text-xs text-ink-2">
+          <div className="mt-3 rounded-xl px-3 py-2.5" style={{ background: 'var(--panel-track)' }}>
+            <p className="text-xs" style={{ color: 'var(--panel-ink-2)' }}>
               {unexplained.outCount > 0 && (
                 <>
                   <span className="font-medium tabular">{money(unexplained.outMinor)}</span> of that spending
@@ -1564,7 +1608,7 @@ export default function Reports() {
                   you can only ask. If they are not using the app at all, there
                   is no far side to wait for and saying whose it was is the
                   whole of the fix — which is a thing you can do yourself. */}
-              <span className="text-ink-3">
+              <span>
                 {unexplained.inCount > 0 && partner
                   ? `Pair it from ${partner}'s device, or — if the account it came from is not in Hearth — say it was theirs and it will count towards the month it was for.`
                   : partner
@@ -1574,7 +1618,8 @@ export default function Reports() {
               <button
                 type="button"
                 onClick={() => seeTransactions()}
-                className="underline underline-offset-2 hover:text-ink"
+                className="underline underline-offset-2"
+                style={{ color: 'var(--panel-ink)' }}
               >
                 See {unexplained.outCount + unexplained.inCount === 1 ? 'it' : 'them'}
               </button>
@@ -1710,33 +1755,3 @@ export default function Reports() {
 }
 
 
-function Stat({
-  label,
-  value,
-  tone,
-  muted,
-}: {
-  label: string
-  value: string
-  tone?: 'good' | 'bad'
-  muted?: boolean
-}) {
-  return (
-    <div className="min-w-0 md:flex-1 md:px-3 md:first:pl-0">
-      <p className="text-xs text-ink-3">{label}</p>
-      {/* Amounts stay on one line and shrink instead: "Household spending"
-          against "−£3,141.42" is two long strings in half a phone's width, and
-          a wrapped figure reads as two numbers. */}
-      <p
-        className={cx(
-          'mt-0.5 truncate font-bold tracking-tight tabular',
-          muted ? 'text-base text-ink-2 md:text-lg' : 'text-xl md:text-2xl',
-          tone === 'bad' && 'text-critical-text',
-          tone === 'good' && 'text-good-text',
-        )}
-      >
-        {value}
-      </p>
-    </div>
-  )
-}

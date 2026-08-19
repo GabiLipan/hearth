@@ -215,29 +215,64 @@ export function HeroWidget({ data }: WidgetProps) {
   )
   const quiet = { color: 'var(--panel-ink-2)' }
 
+  /**
+   * What this card is about, in order.
+   *
+   * `lead` is the one figure the page is opened for; `second` is a figure that
+   * is not a detail of it and must not be printed as one — on the personal book
+   * that is the money moved to the household, which is routinely an order of
+   * magnitude larger than what was spent on oneself. Everything else is `rest`,
+   * and every one of them gets a cell it fits in.
+   */
+  const lead = { label: words.spend, value: totals.spend }
+  const second =
+    data.book === 'mine' && totals.contributed > 0
+      ? { label: 'To our household', value: totals.contributed }
+      : data.book === 'household' && boughtDirect > 0
+        ? { label: 'Of that, bought on personal cards', value: boughtDirect }
+        : null
+  const rest: { label: string; value: number; sign?: boolean }[] = [
+    { label: words.income, value: totals.income },
+    ...(savedMinor > 0 ? [{ label: 'To savings', value: savedMinor }] : []),
+    { label: words.net, value: totals.net, sign: true },
+  ]
+
   return (
     <Card className={cx('panel-month p-4 md:p-3.5', over && 'panel-over')}>
-      {/* Phone: one headline figure with the detail stacked underneath. */}
-      <div className="flex flex-wrap items-end justify-between gap-3 md:hidden">
-        <div className="min-w-0">
-          <p className="text-sm" style={quiet}>{monthLabel(month())} · {words.spend.toLowerCase()}</p>
-          <p className="mt-0.5 truncate text-4xl font-bold tracking-tight tabular">{money(totals.spend)}</p>
-          {/* The two facts the headline figure hides, one line each and only
-              where there is one to tell: how much of the household's spending
-              never passed through a joint account, and — on the personal book —
-              how much of what left was not spending at all. */}
-          {data.book === 'household' && boughtDirect > 0 && (
-            <p className="mt-1 text-sm" style={quiet}>
-              {money(boughtDirect, { compact: true })} of it from personal cards
-            </p>
-          )}
-          {data.book === 'mine' && totals.contributed > 0 && (
-            <p className="mt-1 text-sm" style={quiet}>
-              and {money(totals.contributed, { compact: true })} to our household
-            </p>
-          )}
-          {budgetTotal > 0 && (
-            <p className="mt-1 text-sm" style={quiet}>
+      {/*
+        Phone: a headline, then the rest in a grid that cannot truncate.
+
+        It used to be a flex row — the big figure on the left, and on the right
+        a `min-w-36` box holding "Money in" and "Net" as two truncating spans
+        above the bar. At 390px those two had about 70px each, so the page
+        shipped reading "Money in £1,50…" and "Net −£3,135…": two figures
+        rendered as ellipsis, which is worse than not printing them.
+
+        A figure is either worth the room to be read or it is not on the card.
+        So each one gets a cell of its own, and the grid wraps rather than
+        shrinking anything.
+      */}
+      <div className="md:hidden">
+        <p className="text-sm" style={quiet}>{monthLabel(month())} · {lead.label.toLowerCase()}</p>
+        <p className="mt-0.5 text-4xl font-bold tracking-tight tabular">{money(lead.value)}</p>
+
+        {/*
+          On the personal book the second figure is not a detail of the first.
+          £156 spent on myself beside £2,909 moved to the household is a card
+          whose headline is the smaller number by a factor of nineteen, and the
+          bigger one was a grey sub-line under it. It gets its own figure, at a
+          size that says so.
+        */}
+        {second && (
+          <div className="mt-2.5 border-t pt-2.5" style={{ borderColor: 'var(--panel-line)' }}>
+            <p className="text-sm" style={quiet}>{second.label}</p>
+            <p className="mt-0.5 text-2xl font-bold tracking-tight tabular">{money(second.value)}</p>
+          </div>
+        )}
+
+        {budgetTotal > 0 && (
+          <>
+            <p className="mt-2 text-sm" style={quiet}>
               of {money(budgetTotal, { hideDecimals: true })}
               <span className="font-semibold" style={{ color: 'var(--panel-ink)' }}>
                 {' · '}
@@ -246,15 +281,25 @@ export function HeroWidget({ data }: WidgetProps) {
                   : `${money(budgetTotal - totals.spend)} left`}
               </span>
             </p>
-          )}
-        </div>
-        <div className="min-w-36 flex-1">
-          <div className="mb-1.5 flex justify-between gap-2 text-xs" style={quiet}>
-            <span className="truncate">{words.income} {money(totals.income, { compact: true })}</span>
-            <span className="truncate">{words.net} {money(totals.net, { sign: true, compact: true })}</span>
-          </div>
-          {bar}
-        </div>
+            <div className="mt-2">{bar}</div>
+          </>
+        )}
+
+        {rest.length > 0 && (
+          <dl
+            className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5 border-t pt-3"
+            style={{ borderColor: 'var(--panel-line)' }}
+          >
+            {rest.map((f) => (
+              <div key={f.label} className="min-w-0">
+                <dt className="text-xs" style={quiet}>{f.label}</dt>
+                <dd className="mt-0.5 text-lg font-semibold tracking-tight tabular">
+                  {money(f.value, { sign: f.sign })}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </div>
 
       {/* Desktop: a strip of figures across the full width. */}

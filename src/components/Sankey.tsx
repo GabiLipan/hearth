@@ -24,6 +24,17 @@ import { cx } from './ui'
 const LABEL = 116
 /** Below this the bands are too thin to read whatever we do, so it scrolls instead. */
 const MIN_WIDTH = 560
+/**
+ * How much room a column needs between it and the next one.
+ *
+ * A three-column diagram fits a phone at `MIN_WIDTH` and always has, so that
+ * case is left exactly as it was. A four-column one at the same width has
+ * ~105px between columns: the ribbons become vertical slabs, the two middle
+ * columns collide with their own labels, and the last column is off screen
+ * behind a scroll nobody knows is there. It gets the room it needs and scrolls,
+ * which is what the scroller is for.
+ */
+const COLUMN_GAP = 200
 const NODE_W = 12
 /**
  * The gap between two bands in a column.
@@ -199,11 +210,21 @@ export function Sankey({
     return () => ro.disconnect()
   }, [])
 
-  const width = Math.max(MIN_WIDTH, available)
+  const columnCount = new Set(graph.nodes.map(columnOf)).size
+  const wanted = columnCount <= 3 ? MIN_WIDTH : LABEL * 2 + (columnCount - 1) * COLUMN_GAP
+  const width = Math.max(wanted, available)
+  /** Wider than the box it sits in, so there is more of it off to the right. */
+  const clipped = width > available + 1
   const height = Math.max(sankeyHeight(graph), offered ?? 0)
 
   const layout = useMemo(
-    () => layoutFlow(graph, { width: width - LABEL * 2, height, nodeWidth: NODE_W, padding: BAND_GAP }),
+    () =>
+      layoutFlow(graph, {
+        width: width - LABEL * 2,
+        height,
+        nodeWidth: NODE_W,
+        padding: BAND_GAP,
+      }),
     [graph, width, height],
   )
   /** The outermost columns, which are the ones with room for a name beside them. */
@@ -287,6 +308,38 @@ export function Sankey({
               />
             ))}
 
+            {/* A middle column has ribbons on both sides of it, so its name has
+                nowhere clear to go: hung off either edge it lies on a ribbon,
+                and above the node it lands in the band overhead. It sits on the
+                node instead, on a plate of the card's own colour — the ordinary
+                device for a label that must cross a picture, and the reason it
+                can be centred at all is that these bands are the two or three
+                fattest things on the diagram.
+
+                The width is estimated from the character count rather than
+                measured: `getComputedTextLength` needs a laid-out node, which
+                means a second render pass and a `ResizeObserver` for a plate
+                behind two words. */}
+            {layout.boxes.map((b) => {
+              const col = columnOf(b.node)
+              if (!(col > first && col < last) || b.height < 30) return null
+              const chars = Math.max(short(b.node.name, 12).length, 7)
+              const w = chars * 6.6 + 16
+              return (
+                <rect
+                  key={`p-${b.node.id}`}
+                  x={b.x + NODE_W / 2 - w / 2}
+                  y={b.y + b.height / 2 - 17}
+                  width={w}
+                  height={32}
+                  rx={8}
+                  fill={c.surface}
+                  fillOpacity={0.92}
+                  className="pointer-events-none"
+                />
+              )
+            })}
+
             {/* Labels last, so nothing is drawn over them. A band with no room
                 for one keeps its colour and its hover; the alternative is two
                 names on top of each other, which is worse than one missing. */}
@@ -297,12 +350,21 @@ export function Sankey({
               // band instead, which needs no room of its own — and a band too
               // short for that keeps its colour and its hover, the same trade
               // the outer ones make.
+              // A derived hub carries no name — it never did, and "The month"
+              // written across the middle of a three-column diagram is a label
+              // for the diagram rather than for anything in it. A node that
+              // states its own column is a real band and is named.
+              if (b.node.column === undefined && b.node.side === 'hub') return null
               const middle = col > first && col < last
-              if (middle && b.height < 22) return null
+              if (middle && b.height < 30) return null
               if (!middle && b.height < 13) return null
-              const left = col === last
+              // The FIRST column hangs its names to the left, where the margin
+              // is; every other outer column hangs them to the right. Getting
+              // this the wrong way round draws every name on top of the ribbon
+              // leaving the band it belongs to.
+              const left = col === first
               const x = middle ? b.x + NODE_W / 2 : left ? b.x - 8 : b.x + NODE_W + 8
-              const y = middle ? b.y - 6 : b.y + b.height / 2
+              const y = b.y + b.height / 2
               return (
                 <text
                   key={`t-${b.node.id}`}
@@ -313,14 +375,12 @@ export function Sankey({
                   fill={c.ink2}
                   fontSize={11}
                 >
-                  <tspan x={x} dy={middle ? 0 : b.height < 30 ? 4 : -2}>
-                    {short(b.node.name)}
+                  <tspan x={x} dy={b.height < 30 ? 4 : -2} fontWeight={middle ? 600 : undefined}>
+                    {short(b.node.name, middle ? 12 : 18)}
                   </tspan>
                   {/* The amount only where the band is tall enough to take two
-                      lines without the second one landing on its neighbour. A
-                      middle band's name is above it, so the figure goes inside
-                      where there is room and is dropped where there is not. */}
-                  {(middle ? b.height >= 34 : b.height >= 30) && (
+                      lines without the second one landing on its neighbour. */}
+                  {b.height >= 30 && (
                     <tspan x={x} dy={13} fill={c.ink3}>
                       {money(b.node.valueMinor, { compact: true, hideDecimals: true })}
                     </tspan>
@@ -352,7 +412,7 @@ export function Sankey({
               // columns, and reaching into it here would take the tap that
               // belonged to a band in the next column along.
               const middle = col > first && col < last
-              const left = col === last
+              const left = col === first
               return (
                 <rect
                   key={`h-${b.node.id}`}
@@ -454,7 +514,12 @@ export function Sankey({
         </div>
       )}
 
-      <p className={cx('mt-2 text-xs text-ink-3', !caption && 'sr-only')}>
+      {/* That it scrolls has to be SAID. A four-column diagram is wider than a
+          phone by design — the alternative is four columns in 330px, which is
+          four vertical slabs — and a picture that is cut off at the right edge
+          with no scrollbar reads as broken rather than as continued. */}
+      <p className={cx('mt-2 text-xs text-ink-3', !caption && !clipped && 'sr-only')}>
+        {clipped && <span className="font-medium">Scroll sideways for the rest. </span>}
         {caption ?? 'Left: where the money came from. Right: what it became. Each ribbon is as wide as the amount it carries.'}
       </p>
     </div>
