@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeftRight, ArrowRight, ChevronLeft, Eye } from 'lucide-react'
+import { ArrowDownLeft, ArrowLeftRight, ArrowRight, ArrowUpRight, ChevronLeft, Eye, Flag } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
-import { thisMonthKey, monthLabel, shiftMonth, fmtDay, daysUntil, fmtFullDate, todayISO } from '../lib/dates'
+import { thisMonthKey, monthLabel, monthName, shiftMonth, fmtDay, daysUntil, fmtFullDate, todayISO } from '../lib/dates'
 import { monthsEndingAt, monthsOfHistory, OTHER_SLICE_ID } from '../lib/stats'
 import {
   accountsInBook,
   bookMonthlySpendByCategory,
   bookOpening,
+  bookPosition,
   bookSeries,
   bookSlices,
   bookBridge,
@@ -18,6 +19,7 @@ import {
   savingsAccounts,
   hasBreakdown,
   BOOK_WORDS,
+  type BalanceGroup,
   type BookId,
   type BookMap,
   type Flow,
@@ -152,14 +154,7 @@ function useHomeDrill(book: BookId) {
  */
 function Stat({ label, value, lead }: { label: string; value: string; lead?: boolean }) {
   return (
-    /* The hairline is stated here rather than as `divide-x` on the row: a
-       `divide-*` utility sets only the width, so the colour falls back to the
-       child's `currentColor` — which on this panel is full-strength white, four
-       times too strong for a divider. */
-    <div
-      className="min-w-0 border-l px-4 first:border-l-0 first:pl-0 last:pr-0"
-      style={{ borderColor: 'var(--panel-line)' }}
-    >
+    <div className="min-w-0">
       <p className="text-xs" style={{ color: 'var(--panel-ink-2)' }}>{label}</p>
       <p className={cx('mt-0.5 truncate font-bold tracking-tight tabular', lead ? 'text-2xl' : 'text-lg')}>
         {value}
@@ -195,7 +190,34 @@ function Stat({ label, value, lead }: { label: string; value: string; lead?: boo
  *     the whole card oxblood via `data-over`, which is why `Stat` has no tone
  *     and the phone layout's "over"/"left" is plain semibold white.
  */
-export function HeroWidget({ data }: WidgetProps) {
+/**
+ * The shapes the month card can take, and why the third is a shape rather than
+ * an option on the second.
+ *
+ * `variants` are supposed to be "what kind of picture" and `options` everything
+ * else, and the rule that separates them is whether the choice COMPOSES — every
+ * shape of the breakdown can show five categories or twenty, so the count is an
+ * option. "Account types: together or separately" does not compose: it means
+ * nothing at all to the flow card, and as an option it would sit in the picker
+ * under every variant offering a choice that did nothing under one of them.
+ *
+ * They are also genuinely different pictures. One is a set of figures; the
+ * other is a stack of subcards with a composition bar over it.
+ */
+export const HERO_SHAPES: { value: string; label: string }[] = [
+  { value: 'month', label: 'The month' },
+  { value: 'balances', label: 'Balances' },
+  { value: 'kinds', label: 'By account type' },
+]
+
+export function HeroWidget({ data, variant, controls }: WidgetProps) {
+  if (variant === 'balances' || variant === 'kinds') {
+    return <BalancesHero data={data} byKind={variant === 'kinds'} controls={controls} />
+  }
+  return <MonthHero data={data} controls={controls} />
+}
+
+function MonthHero({ data, controls }: { data: HomeData; controls?: ReactNode }) {
   const { money } = useApp()
   const words = BOOK_WORDS[data.book]
   const totals = useMemo(
@@ -276,7 +298,7 @@ export function HeroWidget({ data }: WidgetProps) {
   const rest: { label: string; value: number; sign?: boolean }[] = [
     { label: words.income, value: totals.income },
     ...(opening
-      ? [{ label: `Left from ${monthLabel(shiftMonth(month(), -1), 'short')}`, value: carryMinor, sign: true }]
+      ? [{ label: `Left from ${monthName(shiftMonth(month(), -1))}`, value: carryMinor, sign: true }]
       : []),
     ...(savedMinor > 0 ? [{ label: 'To savings', value: savedMinor }] : []),
     { label: words.net, value: carryMinor + totals.net, sign: true },
@@ -306,7 +328,7 @@ export function HeroWidget({ data }: WidgetProps) {
         {opening.laterMinor > 0 && (
           <p>
             {money(opening.laterMinor)} of what is in the accounts is already{' '}
-            {monthLabel(shiftMonth(month(), 1), 'short')}'s, and is not counted here.
+            {monthName(shiftMonth(month(), 1))}'s, and is not counted here.
           </p>
         )}
       </>
@@ -335,6 +357,7 @@ export function HeroWidget({ data }: WidgetProps) {
             {monthLabel(month())} · {lead.label.toLowerCase()}
           </p>
           {note.toggle}
+          {controls}
         </div>
         <p className="mt-0.5 text-4xl font-bold tracking-tight tabular">{money(lead.value)}</p>
 
@@ -389,8 +412,26 @@ export function HeroWidget({ data }: WidgetProps) {
         <div className="flex items-start gap-2">
           <p className="min-w-0 flex-1 text-xs" style={quiet}>{monthLabel(month())}</p>
           {note.toggle}
+          {controls}
         </div>
-        <div className="mt-1 flex flex-nowrap items-start">
+        {/*
+          A wrapping grid, not a row of figures divided by hairlines.
+
+          It was `flex flex-nowrap` with a `border-l` between each, which is a
+          better-looking strip and only while every figure fits. This card can
+          carry seven — spending, income, to the household, to savings, the
+          leftover, what is left, the budget — and every one of them is
+          `truncate`, so at one column on a laptop the panel shipped reading
+          "£4,0…" and "+£10,…". That is the same fault the phone layout has a
+          paragraph about: a figure is either worth the room to be read or it is
+          not on the card.
+
+          The rules go rather than the figures, because a `border-l` cannot
+          survive wrapping — the first cell of the second row wears a divider
+          with nothing to its left. Whitespace separates them instead, which is
+          what the phone layout has always done.
+        */}
+        <div className="mt-1 grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] items-start gap-x-5 gap-y-3">
           <Stat label={words.spend} value={money(totals.spend)} lead />
           <Stat label={words.income} value={money(totals.income)} />
           {data.book === 'mine' && totals.contributed > 0 && (
@@ -402,7 +443,7 @@ export function HeroWidget({ data }: WidgetProps) {
               left now. */}
           {opening && (
             <Stat
-              label={`From ${monthLabel(shiftMonth(month(), -1), 'short')}`}
+              label={`From ${monthName(shiftMonth(month(), -1))}`}
               value={money(carryMinor, { sign: true })}
             />
           )}
@@ -418,6 +459,324 @@ export function HeroWidget({ data }: WidgetProps) {
           document twice and break the `aria-controls` pointing at it. The
           toggle is duplicated safely; `display: none` keeps the hidden one out
           of the accessibility tree. */}
+      {note.body && <div className="mt-3">{note.body}</div>}
+    </Card>
+  )
+}
+
+/* ---------- The month as a set of balances ---------- */
+
+/**
+ * One figure in the flow strip: an icon, a word, an amount.
+ *
+ * A subcard on `--panel-track` rather than a bare column of text, because four
+ * figures in a row on a painted surface need something to sit ON or they read
+ * as a caption that happens to have numbers in it. The track is the panel's own
+ * translucent wash — the same fill `Progress` uses for its trough — so the
+ * gradient still shows through and the card stays one object rather than five.
+ */
+function FlowTile({
+  icon,
+  label,
+  value,
+  wide,
+}: { icon: ReactNode; label: string; value: string; wide?: boolean }) {
+  return (
+    <div
+      className={cx('min-w-0 rounded-xl px-3 py-2.5', wide && 'col-span-2 md:col-span-1')}
+      style={{ background: 'var(--panel-track)' }}
+    >
+      <div className="flex items-center gap-1.5" style={{ color: 'var(--panel-ink-2)' }}>
+        {icon}
+        <p className="min-w-0 truncate text-xs">{label}</p>
+      </div>
+      <p className="mt-1 truncate text-lg font-bold tracking-tight tabular">{value}</p>
+    </div>
+  )
+}
+
+/**
+ * How the money divides across the kinds of account, as one bar.
+ *
+ * Segments are white at four strengths rather than four palette colours, and
+ * that is the panel's rule rather than a shortage of ideas: `--series-1` is a
+ * blue, the panel is a blue gradient, and a legend of surface colours on a
+ * painted card is the one thing `.panel-month` says not to do. Strength carries
+ * the order instead — the largest holding is the brightest — and the legend
+ * under it repeats the same four values, so the bar is readable without colour
+ * vision at all.
+ *
+ * ONLY the groups holding something positive. A credit card in debt is not a
+ * share of what you hold, and folding a negative into a proportion bar produces
+ * either a segment of negative width or a total nobody can reconcile against
+ * the figures beside it. It keeps its subcard and its real figure; the ⓘ says
+ * it is not in the bar.
+ */
+function CompositionBar({ parts }: { parts: { label: string; value: number }[] }) {
+  // Sorted, because the strength ramp is the only thing carrying the order and
+  // a bright sliver beside a faint half is a legend nobody can use.
+  const shown = parts.filter((p) => p.value > 0).sort((a, b) => b.value - a.value)
+  const total = shown.reduce((s, p) => s + p.value, 0)
+  if (total <= 0 || shown.length < 2) return null
+  // Far enough apart to be told apart on the panel's own gradient. The first
+  // pair was 1 and 0.66, which at a 69/30 split read as one bar that changed
+  // shade half way rather than as two holdings.
+  const strength = [1, 0.52, 0.3, 0.18]
+  return (
+    <div>
+      <div
+        className="flex h-3 w-full gap-1 overflow-hidden rounded-full md:h-2.5"
+        style={{ background: 'var(--panel-track)' }}
+      >
+        {shown.map((p, i) => (
+          <div
+            key={p.label}
+            className="h-full rounded-full transition-[width] duration-500"
+            style={{
+              width: `${(p.value / total) * 100}%`,
+              background: `rgba(255, 255, 255, ${strength[i] ?? 0.2})`,
+            }}
+          />
+        ))}
+      </div>
+      {/* The share in words as well as in width. Four strengths of white on a
+          gradient can be told apart and cannot be MEASURED by eye, and the
+          smallest holding is routinely a segment too thin to see at all — a
+          legend that only names it leaves that entry explaining nothing. */}
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {shown.map((p, i) => {
+          const pct = (p.value / total) * 100
+          return (
+            <span key={p.label} className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ background: `rgba(255, 255, 255, ${strength[i] ?? 0.18})` }}
+              />
+              {p.label}
+              <span className="font-semibold tabular" style={{ color: 'var(--panel-ink)' }}>
+                {pct < 1 ? '<1%' : `${Math.round(pct)}%`}
+              </span>
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** One account type, as a subcard: what it holds, and what the month did to it. */
+function KindCard({ group, money }: { group: BalanceGroup; money: (m: number, o?: { sign?: boolean }) => string }) {
+  const line = [
+    { label: 'On the 1st', value: group.openingMinor, sign: true },
+    ...(group.inMinor > 0 ? [{ label: 'In', value: group.inMinor, sign: false }] : []),
+    ...(group.outMinor > 0 ? [{ label: 'Out', value: group.outMinor, sign: false }] : []),
+    ...(group.movedMinor !== 0 ? [{ label: 'Moved', value: group.movedMinor, sign: true }] : []),
+  ]
+  return (
+    <div className="rounded-xl px-3 py-2.5" style={{ background: 'var(--panel-track)' }}>
+      <div className="flex items-baseline gap-2">
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          {/* The same icon `accountFace` derives from `kind`, so a subcard is
+              headed by the picture on every badge inside it. */}
+          <CategoryIcon icon={group.icon} size={16} />
+          <span className="min-w-0 truncate text-sm font-semibold">{group.label}</span>
+          <span className="shrink-0 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
+            {group.accountCount}
+          </span>
+        </span>
+        <span className="shrink-0 text-lg font-bold tracking-tight tabular">{money(group.nowMinor)}</span>
+      </div>
+      {/* `dt`/`dd` must be children of the `dl` or of a `div` inside it —
+          wrapping each pair in a span is invalid and drops the association. */}
+      <dl className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
+        {line.map((f) => (
+          <div key={f.label} className="whitespace-nowrap">
+            <dt className="inline">{f.label} </dt>
+            <dd className="ml-0 inline font-medium tabular" style={{ color: 'var(--panel-ink)' }}>
+              {money(f.value, { sign: f.sign })}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+/**
+ * The month as a set of BALANCES rather than as a set of flows.
+ *
+ * The default hero answers "how is the month going" — what was earned, what was
+ * spent, what is left over. This answers the other question people open a
+ * finance app for, which is "where is my money", and the two need different
+ * arithmetic rather than a different arrangement of the same figures. See
+ * `bookPosition` for what is counted where, and for the identity that lets the
+ * account types be added up:
+ *
+ *     on the 1st + in − out + moved + next month's === what is held now
+ *
+ * The starting figure EXCLUDES money that arrived this month, including a
+ * salary that landed before the month turned — which is the whole reason it is
+ * `bookOpening`'s arithmetic and not the bank's own 1st-of-the-month balance.
+ * Printing the literal one beside this month's income would count that salary
+ * twice, and the card would disagree with the banking app by exactly it.
+ *
+ * Undefined on a book holding an account this device may only see the total of.
+ * There is no approximate version — the figures either reconcile or they are
+ * not worth printing — so the card says why and stops.
+ */
+function BalancesHero({ data, byKind, controls }: { data: HomeData; byKind: boolean; controls?: ReactNode }) {
+  const { money } = useApp()
+  const pos = useMemo(
+    () =>
+      bookPosition(data.allAccounts, data.allTxns, data.flows, data.rule, data.book, data.books, month(), (id) =>
+        canSeeTransactionsAt(levelOn(id, data.levels)),
+      ),
+    // `levels` is a fresh Map every render — see `HeroWidget`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data.allAccounts, data.allTxns, data.flows, data.rule, data.book, data.books],
+  )
+
+  const savings = pos?.byKind.find((g) => g.key === 'savings')
+  const total = pos?.total
+  const quiet = { color: 'var(--panel-ink-2)' }
+
+  /**
+   * The month as three or four movements.
+   *
+   * "Moved" appears only where money actually went somewhere else, because a
+   * permanent "Moved £0" is a cell spent saying nothing happened — and on the
+   * household book the commonest case is exactly that, since a transfer to the
+   * joint savings account nets to nothing across the book it is inside.
+   */
+  const tiles = total
+    ? [
+        { icon: <Flag size={13} />, label: 'On the 1st', value: money(total.openingMinor, { sign: true }) },
+        { icon: <ArrowDownLeft size={13} />, label: 'In', value: money(total.inMinor) },
+        { icon: <ArrowUpRight size={13} />, label: 'Out', value: money(total.outMinor) },
+        ...(total.movedMinor !== 0
+          ? [{ icon: <ArrowLeftRight size={13} />, label: 'Moved', value: money(total.movedMinor, { sign: true }) }]
+          : []),
+      ]
+    : []
+
+  const note = useInfoNote(
+    'Balances',
+    total ? (
+      <>
+        <p>
+          {money(total.openingMinor, { sign: true })} on the 1st, {money(total.inMinor)} in and{' '}
+          {money(total.outMinor)} out
+          {total.movedMinor !== 0 && <>, {money(Math.abs(total.movedMinor))} moved {total.movedMinor < 0 ? 'out to' : 'in from'} accounts elsewhere</>}
+          {' '}— which is {money(total.nowMinor)} now.
+        </p>
+        <p>
+          The starting figure leaves out money that arrived FOR this month, including a salary that landed before the
+          month turned. That is what makes it add up: counting it in both would credit the same money twice.
+        </p>
+        {total.laterMinor > 0 && (
+          <p>
+            {money(total.laterMinor)} of what is in the accounts is already{' '}
+            {monthName(shiftMonth(month(), 1))}&apos;s, so it is in the balance and not in these figures.
+          </p>
+        )}
+        {byKind && (
+          <p>
+            The bar shows only what is being held. An account in debt keeps its own figure below and is not a share of
+            anything.
+          </p>
+        )}
+      </>
+    ) : undefined,
+    'panel',
+  )
+
+  return (
+    <Card className="panel-month p-4 md:p-3.5">
+      <div className="flex items-start gap-2">
+        <p className="min-w-0 flex-1 text-sm md:text-xs" style={quiet}>
+          {monthLabel(month())} · in {data.book === 'mine' ? 'my accounts' : 'the accounts'}
+        </p>
+        {note.toggle}
+        {controls}
+      </div>
+
+      {!total ? (
+        /* The same refusal `bookBalances` makes, and for the same reason: a
+           `balance`-level account gives today's total and no line items, so
+           there is no winding it back to the 1st — and leaving it out would
+           make "now" and "the 1st" measure different sets of accounts. */
+        <p className="mt-2 text-sm" style={quiet}>
+          One account here is one you can only see the total of, so there is no way to say what these accounts held on
+          the 1st. The month summary works without it.
+        </p>
+      ) : (
+        <>
+          <p className="mt-0.5 text-4xl font-bold tracking-tight tabular md:text-3xl">{money(total.nowMinor)}</p>
+
+          {byKind ? (
+            <div className="mt-3">
+              <CompositionBar parts={pos.byKind.map((g) => ({ label: g.label, value: g.nowMinor }))} />
+            </div>
+          ) : (
+            savings &&
+            savings.nowMinor > 0 &&
+            total.nowMinor > 0 && (
+              <div className="mt-3">
+                <Progress fraction={savings.nowMinor / total.nowMinor} tone="ok" on="panel" />
+                <p className="mt-2 text-xs" style={quiet}>
+                  <span className="font-semibold" style={{ color: 'var(--panel-ink)' }}>
+                    {money(savings.nowMinor)}
+                  </span>{' '}
+                  of it in savings
+                </p>
+              </div>
+            )
+          )}
+
+          {/*
+            The figures the card exists for, in the order they happen.
+
+            Two per row on a phone, whatever the count. Three across 390px is
+            three truncated figures — "On the…" over "+£8,…" — which is the
+            fault the strip on the other variant has a paragraph about, and a
+            tile is narrower than a stat because it carries padding of its own.
+            An odd one out takes the full row rather than leaving a hole beside
+            it; above `md` there is room for the lot in one line.
+          */}
+          <div className={cx('mt-3 grid grid-cols-2 gap-2', tiles.length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-4')}>
+            {tiles.map((t, i) => (
+              <FlowTile
+                key={t.label}
+                icon={t.icon}
+                label={t.label}
+                value={t.value}
+                wide={tiles.length % 2 === 1 && i === tiles.length - 1}
+              />
+            ))}
+          </div>
+
+          {/* Said out loud rather than left in the ⓘ. The four tiles do not add
+              up to the figure above them by exactly this much, and a reader who
+              tries the arithmetic and fails will trust neither. */}
+          {total.laterMinor > 0 && (
+            <p className="mt-2 text-xs" style={quiet}>
+              <span className="font-semibold" style={{ color: 'var(--panel-ink)' }}>
+                {money(total.laterMinor)}
+              </span>{' '}
+              of that is {monthName(shiftMonth(month(), 1))}&apos;s money, already in the account
+            </p>
+          )}
+
+          {byKind && (
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              {pos.byKind.map((g) => (
+                <KindCard key={g.key} group={g} money={money} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
       {note.body && <div className="mt-3">{note.body}</div>}
     </Card>
   )

@@ -5,6 +5,7 @@ import {
   accountsInBook,
   bookBalances,
   bookOpening,
+  bookPosition,
   bookBridge,
   bookMonthlySpendByCategory,
   bookSpendByCategory,
@@ -23,6 +24,7 @@ import {
   showsInBook,
   isHouseholdPaid,
   DEFAULT_MONTH_RULE,
+  type BalanceGroup,
   type BookMap,
 } from './books'
 
@@ -797,6 +799,119 @@ describe('what was left when the month started', () => {
 
     const noBooks: BookMap = { household: new Set(), mine: new Set(), others: new Set() }
     expect(bookOpening(accounts, rows, flows, RULE, 'mine', noBooks, '2026-03', seeEverything)).toBeUndefined()
+  })
+})
+
+describe('where the money actually is', () => {
+  const seeEverything = () => true
+  const position = (rows: Transaction[], book: 'household' | 'mine' | 'all', month: string, accs = accounts) =>
+    bookPosition(accs, rows, classifyFlows(rows, books), RULE, book, books, month, seeEverything)!
+
+  /**
+   * The identity the split view rests on. Every row lands in exactly one
+   * bucket and `effectiveMonth` puts it in exactly one month, so a reader can
+   * add the subcards up and get the combined figures — which a flow-based
+   * split could not promise, since a transfer to savings is `internal` and
+   * counted in neither while both balances plainly moved.
+   */
+  const balances = (g: { openingMinor: number; inMinor: number; outMinor: number; movedMinor: number; laterMinor: number; nowMinor: number }) =>
+    g.openingMinor + g.inMinor - g.outMinor + g.movedMinor + g.laterMinor === g.nowMinor
+
+  it('reconciles opening + in − out + moved + later against what is held now', () => {
+    const rows = [...march(), txn({ accountId: 'joint', amountMinor: -20000, date: '2026-02-10', categoryId: 'groceries' })]
+    for (const book of ['household', 'mine', 'all'] as const) {
+      const p = position(rows, book, '2026-03')
+      expect(balances(p.total), `${book} total`).toBe(true)
+      for (const g of p.byKind) expect(balances(g), `${book} ${g.key}`).toBe(true)
+    }
+  })
+
+  it('adds the account types up to the combined figures', () => {
+    const p = position(march(), 'household', '2026-03')
+    const sum = (pick: (g: BalanceGroup) => number) => p.byKind.reduce((s, g) => s + pick(g), 0)
+    expect(sum((g) => g.nowMinor)).toBe(p.total.nowMinor)
+    expect(sum((g) => g.inMinor)).toBe(p.total.inMinor)
+    expect(sum((g) => g.outMinor)).toBe(p.total.outMinor)
+    expect(sum((g) => g.movedMinor)).toBe(p.total.movedMinor)
+    expect(sum((g) => g.openingMinor)).toBe(p.total.openingMinor)
+  })
+
+  it('calls a transfer to savings MOVED, not spent, on both sides of it', () => {
+    // The case the flow-based figures cannot answer: `internal` is not an event
+    // in `bookTotals` and is the whole of what happened to these two balances.
+    const p = position(march(), 'household', '2026-03')
+    const current = p.byKind.find((g) => g.key === 'current')!
+    const savings = p.byKind.find((g) => g.key === 'savings')!
+
+    expect(current.movedMinor).toBe(-100000)
+    expect(savings.movedMinor).toBe(100000)
+    expect(savings.inMinor).toBe(0)
+    expect(savings.outMinor).toBe(0)
+    // …and it nets to nothing across the book, which is why `bookTotals` is
+    // right to ignore it and this is right not to.
+    expect(p.total.movedMinor).toBe(0)
+  })
+
+  it('never calls a contribution spending, on the side it leaves', () => {
+    // The one thing the personal book exists to say. £2,000 to the joint
+    // account is money that left my current account and was not spent.
+    const p = position(march(), 'mine', '2026-03')
+    expect(p.total.movedMinor).toBe(-200000)
+    expect(p.total.inMinor).toBe(300000)
+    expect(p.total.outMinor).toBe(70000)
+  })
+
+  it('counts what a household purchase did to the balance it left', () => {
+    // Deliberately read differently from `bookTotals`, which files this as
+    // `contributed` — correct there, because it is not personal spending. Here
+    // the only thing the balance knows is that the money went out.
+    const rows = [
+      ...march(),
+      txn({ accountId: 'myPrivate', amountMinor: -9000, date: '2026-03-10', paidForHousehold: true, createdBy: ME }),
+    ]
+    const mine = position(rows, 'mine', '2026-03')
+    expect(mine.total.outMinor).toBe(70000 + 9000)
+    expect(balances(mine.total)).toBe(true)
+
+    // And it is in no joint account, so the household's balances never saw it.
+    const ours = position(rows, 'household', '2026-03')
+    expect(ours.total.outMinor).toBe(120000 + 60000 + 25000 + 35000)
+  })
+
+  it('excludes this month`s arrival from the 1st, and says where it went', () => {
+    // The reason the card can print a starting balance at all: the salary of
+    // the 25th is next month's money, so it is neither in the opening figure
+    // nor in this month's — it is `later`, which is exactly the gap between
+    // these figures and the banking app.
+    const rows = [
+      txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-07-25', categoryId: 'salary' }),
+      txn({ accountId: 'myPrivate', amountMinor: -40000, date: '2026-07-28', categoryId: 'shopping' }),
+    ]
+    const july = position(rows, 'mine', '2026-07')
+    expect(july.total.openingMinor).toBe(0)
+    expect(july.total.inMinor).toBe(0)
+    expect(july.total.outMinor).toBe(40000)
+    expect(july.total.laterMinor).toBe(300000)
+    expect(july.total.nowMinor).toBe(260000)
+
+    const august = position(rows, 'mine', '2026-08')
+    expect(august.total.openingMinor).toBe(-40000)
+    expect(august.total.inMinor).toBe(300000)
+  })
+
+  it('offers only the kinds the book actually holds, in reading order', () => {
+    expect(position(march(), 'household', '2026-03').byKind.map((g) => g.key)).toEqual(['current', 'savings'])
+    expect(position(march(), 'mine', '2026-03').byKind.map((g) => g.key)).toEqual(['current'])
+  })
+
+  it('is undefined on a book holding an account we can only see the total of', () => {
+    const rows = march()
+    const flows = classifyFlows(rows, books)
+    const canSee = (id: string) => id !== 'jointSavings'
+    expect(bookPosition(accounts, rows, flows, RULE, 'household', books, '2026-03', canSee)).toBeUndefined()
+
+    const noBooks: BookMap = { household: new Set(), mine: new Set(), others: new Set() }
+    expect(bookPosition(accounts, rows, flows, RULE, 'mine', noBooks, '2026-03', seeEverything)).toBeUndefined()
   })
 })
 

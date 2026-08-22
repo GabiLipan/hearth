@@ -28,6 +28,7 @@ import { Button, Empty, Toolbar, useColumnCount } from '../components/ui'
 import { BRIDGE_SHAPES, PAID_IN_SHAPES } from '../components/insights'
 import {
   HeroWidget,
+  HERO_SHAPES,
   BridgeWidget,
   BudgetGlanceWidget,
   PaidInWidget,
@@ -52,7 +53,7 @@ import {
  * width and the accounts in a corner, and the app has no way of knowing that.
  */
 const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
-  { id: 'hero', label: 'Month summary', component: HeroWidget, defaultSpan: 'full' },
+  { id: 'hero', label: 'Month summary', component: HeroWidget, defaultSpan: 'full', variants: HERO_SHAPES },
   { id: 'budgets', label: 'Budgets at a glance', component: BudgetGlanceWidget, defaultSpan: 'full' },
   {
     id: 'bills',

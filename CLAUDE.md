@@ -152,7 +152,7 @@ list means, and what it writes),
 `layout.ts` (which sections a page shows, in what order, how wide, in which
 shape, and what else each one lets you decide — home and Reports share it),
 `drill.ts` (out of a figure and into the rows behind it, and the way back),
-`sticky.ts` (a filter that outlives leaving the page and dies with the tab), `monthRule.ts` (when this household's month starts, and how that reaches both devices), `books.ts` (the three sets of books, which month each row counts in, and what was left over when the month began), `sankey.ts` (a period as one balanced flow,
+`sticky.ts` (a filter that outlives leaving the page and dies with the tab), `monthRule.ts` (when this household's month starts, and how that reaches both devices), `books.ts` (the three sets of books, which month each row counts in, what was left over when the month began, and where the money actually is), `sankey.ts` (a period as one balanced flow,
 and where every band goes), `scale.ts` (a value axis with round numbers, shared
 by a scrolling chart and the axis pinned beside it),
 `reimbursements.ts` (what the household owes you — computed always, shown only
@@ -1285,6 +1285,19 @@ the single place a level comes from.
   behaviour you would otherwise have to build. A route never posts anything: a
   bill records money that has not moved, a route only recognises money that
   has, and `nextOn` is a sentence rather than a row.
+- **A row of figures divided by hairlines is a strip that only works while
+  every figure fits.** The month panel's desktop layout was `flex flex-nowrap`
+  with a `border-l` between each `Stat`, and the card can carry seven —
+  spending, income, to the household, to savings, the leftover, what is left,
+  the budget. Every one is `truncate`, so at one column on a laptop it shipped
+  reading "£4,0…" and "+£10,…": two figures rendered as ellipsis, which is the
+  exact fault the phone layout above it has a paragraph about. The rules went
+  rather than the figures, because a `border-l` cannot survive wrapping — the
+  first cell of the second row wears a divider with nothing to its left — so it
+  is an auto-fit grid separated by whitespace, which is what the phone layout
+  always did. Same rule for the balance variants' tiles, which are narrower
+  still because they carry padding of their own: two per row on a phone
+  whatever the count, and an odd one out takes the full row.
 - **A faded bar already means something, so nothing else may fade one.** Every
   chart draws an unfinished month at 45%, and it says so in words. A gradient
   hinting that a scrolling chart has more to the left washes out the bar under
@@ -1757,6 +1770,35 @@ the single place a level comes from.
   the month alone. One seam is left and stated rather than papered over: under
   `all`, a transfer with one leg in an account in NEITHER book moves the balance
   without moving the net — `BookBridge.unbookedCount`'s row again.
+- **"How is the month going" and "where is my money" need different arithmetic,
+  not a different arrangement of the same figures.** `bookTotals` files every
+  row by what it MEANS — a contribution is not income to the person making it, a
+  transfer inside one book is not an event at all — which is right for the flow
+  card and useless for a balance. `bookPosition` partitions the same rows by
+  what they did to a BALANCE instead: `in` arrived from outside, `out` was
+  spent, `moved` went somewhere else you hold. Which buys the identity the split
+  view rests on, for ANY set of accounts:
+
+      opening + in − out + moved + later === now
+
+  So the account-type subcards add up to the combined figures, which a
+  flow-based split could never promise — a transfer to savings is `internal` and
+  counted in neither, while both balances plainly moved. Two rows are
+  deliberately read differently from `bookTotals` and both are stated in the
+  function's own note: `paid-for-household` is `out` here (the money left the
+  account by being spent) and `contributed` there (it is not personal
+  spending); and a contribution is `in` where it arrives and `moved` where it
+  leaves, never `out`.
+
+  The card built on it is `HeroWidget`'s second and third variants — see
+  `HERO_SHAPES` for why "together or separately" is a variant rather than an
+  option, which is the one place the documented variants/options split does not
+  decide it: the choice does not COMPOSE, so as an option it would sit in the
+  picker under a variant it means nothing to.
+
+  `laterMinor` is printed on the card rather than left in the ⓘ, and that is not
+  a detail: the tiles do not add up to the figure above them by exactly it, and
+  a reader who tries the arithmetic and fails will trust neither.
 - **The month rule is the household's, not the device's.** It rides on
   `households` beside the currency, is cached in `meta` on every pull, and is
   written by an RPC. Kept per device it would break the one property the books

@@ -46,6 +46,19 @@ export function monthLabel(key: string, style: 'long' | 'short' = 'long') {
   return format(parseISO(key + '-01'), style === 'long' ? 'MMMM yyyy' : 'MMM yy')
 }
 
+/**
+ * The month's name and nothing else.
+ *
+ * `monthLabel` always carries a year — "August 2026" or "Aug 26" — which is
+ * right for a heading naming the month you are looking at and noise inside a
+ * label that is already under one: "Left from Jul 26" on a card headed August
+ * 2026. The year earns its place across a December boundary and nowhere else,
+ * and the heading above has it either way.
+ */
+export function monthName(key: string) {
+  return format(parseISO(key + '-01'), 'MMMM')
+}
+
 export function fmtDay(dateISO: string) {
   const d = parseISO(dateISO)
   if (isToday(d)) return 'Today'

@@ -1517,6 +1517,166 @@ export function bookOpening(
   return { openingMinor, laterMinor }
 }
 
+/* ---------- where the money actually is ---------- */
+
+/**
+ * One set of accounts, from what it held on the 1st to what it holds now.
+ *
+ * ## A different question from `bookTotals`, on purpose
+ *
+ * `bookTotals` asks what a BOOK earned and spent, and files every row by what
+ * it MEANS: a contribution is not income to the person making it, money moved
+ * between two accounts in one book is not an event at all. That is the right
+ * vocabulary for "how is the month going" and it is the wrong one for "where is
+ * my money", which is a question about accounts rather than about meaning.
+ *
+ * So this partitions the month's rows three ways instead, by what they did to a
+ * BALANCE:
+ *
+ *   in     money that arrived from outside these accounts
+ *   out    money that was spent
+ *   moved  money that went somewhere else I hold — to savings, to the joint
+ *          account, back out to a private one
+ *
+ * Which buys an identity that holds for ANY set of accounts, because every row
+ * lands in exactly one bucket and `effectiveMonth` puts it in exactly one
+ * month:
+ *
+ *     opening + in − out + moved + later === now
+ *
+ * That is what makes the split view trustworthy. The card can show four
+ * subcards, one per account type, and the reader can add them up and get the
+ * combined figures — which a flow-based split could not promise, because a
+ * transfer from the current account to the savings account is `internal` and
+ * counted in neither, while both balances plainly moved.
+ *
+ * ## The two places it deliberately reads a row differently
+ *
+ * A `paid-for-household` row is `out` here and `contributed` in `bookTotals`.
+ * Both are right for the question being asked: the household shopping bought on
+ * a personal card is not personal spending in the books, and the money left the
+ * account by being spent, which is the only thing a balance knows about it.
+ *
+ * A contribution is `in` on the side it arrives and `moved` on the side it
+ * leaves — never `out`. Contributing is not spending, which is the one thing
+ * the personal book exists to say, and a card that called £2,900 "spent" would
+ * unsay it.
+ *
+ * Undefined on a book holding an account this device may only see the total of,
+ * for the reason `bookBalances` and `bookOpening` give: there are no line items
+ * to wind back, and dropping the account would leave "now" and "the 1st"
+ * measuring different sets of accounts.
+ */
+export interface BalanceGroup {
+  /** The account kind, or `all` for every account in the book as one. */
+  key: Account['kind'] | 'all'
+  label: string
+  /** An icon key, so a subcard wears the same face as the accounts in it. */
+  icon: string
+  accountCount: number
+  /** What these accounts held before this month — see `bookOpening`. Signed. */
+  openingMinor: number
+  /** Arrived from outside them this month. Positive. */
+  inMinor: number
+  /** Spent out of them this month. Positive. */
+  outMinor: number
+  /** Net moved to or from elsewhere in the household. Signed; negative left. */
+  movedMinor: number
+  /** Already in them for a later month — see `BookOpening.laterMinor`. Signed. */
+  laterMinor: number
+  /** What they hold today. */
+  nowMinor: number
+}
+
+/**
+ * The kinds, in the order a card shows them, with the face each one wears.
+ *
+ * The same icons `accountFace` derives from `kind`, so a subcard headed by a
+ * piggy bank is headed by the picture on every savings account inside it. The
+ * order is "what you spend from" first and "what you are keeping" last, which
+ * is the order the figures are read in rather than the order the enum happens
+ * to declare.
+ */
+const KIND_GROUPS: { key: Account['kind']; label: string; icon: string }[] = [
+  { key: 'current', label: 'Current', icon: 'bank' },
+  { key: 'credit', label: 'Credit cards', icon: 'card' },
+  { key: 'cash', label: 'Cash', icon: 'banknote' },
+  { key: 'savings', label: 'Savings', icon: 'piggy' },
+]
+
+export function bookPosition(
+  accounts: Account[],
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  rule: MonthRule,
+  book: BookId,
+  books: BookMap,
+  month: string,
+  canSeeRows: (accountId: string) => boolean,
+): { total: BalanceGroup; byKind: BalanceGroup[] } | undefined {
+  const ids = accountsInBook(book, books)
+  const mine = accounts.filter((a) => ids.has(a.id))
+  if (mine.length === 0 || mine.some((a) => !canSeeRows(a.id))) return undefined
+
+  const blank = (key: BalanceGroup['key'], label: string, icon: string, list: Account[]): BalanceGroup => ({
+    key,
+    label,
+    icon,
+    accountCount: list.length,
+    openingMinor: list.reduce((s, a) => s + a.openingBalanceMinor, 0),
+    inMinor: 0,
+    outMinor: 0,
+    movedMinor: 0,
+    laterMinor: 0,
+    nowMinor: list.reduce((s, a) => s + a.openingBalanceMinor, 0),
+  })
+
+  const total = blank('all', 'Everything', 'wallet', mine)
+  const groups = new Map<Account['kind'], BalanceGroup>()
+  const kindOf = new Map<string, Account['kind']>()
+  for (const g of KIND_GROUPS) {
+    const list = mine.filter((a) => a.kind === g.key)
+    if (list.length === 0) continue
+    groups.set(g.key, blank(g.key, g.label, g.icon, list))
+    for (const a of list) kindOf.set(a.id, a.kind)
+  }
+
+  for (const t of txns) {
+    if (!ids.has(t.accountId)) continue
+    const kind = kindOf.get(t.accountId)
+    const here = kind ? groups.get(kind) : undefined
+    const both = here ? [total, here] : [total]
+
+    for (const g of both) g.nowMinor += t.amountMinor
+
+    const m = effectiveMonth(t, flows.get(t.id), rule)
+    if (m < month) {
+      for (const g of both) g.openingMinor += t.amountMinor
+      continue
+    }
+    if (m > month) {
+      for (const g of both) g.laterMinor += t.amountMinor
+      continue
+    }
+
+    const flow = flows.get(t.id)
+    // Which bucket, and the whole of the classification. Note the fall-through
+    // for a row with no flow at all: it moved money and nothing knows why, so
+    // it counts as arriving or being spent rather than being silently dropped —
+    // the identity above is worth more than the label.
+    const moved =
+      flow === 'internal' ||
+      ((flow === 'contribution' || flow === 'withdrawal') && t.amountMinor < 0)
+    for (const g of both) {
+      if (moved) g.movedMinor += t.amountMinor
+      else if (t.amountMinor > 0) g.inMinor += t.amountMinor
+      else g.outMinor -= t.amountMinor
+    }
+  }
+
+  return { total, byKind: KIND_GROUPS.map((g) => groups.get(g.key)).filter((g): g is BalanceGroup => !!g) }
+}
+
 /**
  * Spend per category for one book and month, ready for the donut.
  *
