@@ -23,6 +23,7 @@ import { thisMonthKey, monthLabel, shiftMonth, todayISO, fmtFullDate } from '../
 import { OTHER_SLICE_ID } from '../lib/stats'
 import {
   bookBalances,
+  bookOpening,
   bookBridge,
   bookSeries,
   bookSlices,
@@ -684,6 +685,31 @@ export default function Reports() {
   const periodLabel =
     period === 'year' ? year : period === 'custom' ? `${fmtFullDate(from)} – ${fmtFullDate(to)}` : monthLabel(month)
   const words = BOOK_WORDS[book]
+
+  /**
+   * What was left when the period began — see `bookOpening`, which is also
+   * where the reason it is needed at all is written down.
+   *
+   * Under Year as readily as under Month: `inView[0]` is that year's January,
+   * every month in between is summed into `totals`, and the identity chains, so
+   * the leftover plus the year's net is where the year ends up.
+   *
+   * Not under a hand-drawn range, and for the reason the range already gives
+   * itself: it counts money on the day it moved rather than towards the month
+   * it funds, so there is no "before this period" that is the same question.
+   */
+  const opening = useMemo(
+    () =>
+      period === 'custom'
+        ? undefined
+        : bookOpening(accounts, txns ?? [], flows, rule, book, books, inView, (id) =>
+            canSeeTransactionsAt(levelOn(id, levels)),
+          ),
+    // `levels` is a fresh Map every render — see `balances` above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [accounts, txns, flows, rule, book, books, inView, period],
+  )
+  const carryMinor = opening?.openingMinor ?? 0
   /**
    * What the figures on this card mean, and the one way a hand-drawn range
    * behaves differently. Both are worth saying and neither is worth saying
@@ -693,13 +719,28 @@ export default function Reports() {
     `${periodLabel} in figures`,
     <>
       <p>{words.netHint}</p>
+      {opening && (
+        <p>
+          {money(carryMinor, { sign: true })} was left when {periodLabel} began, and {periodLabel} has{' '}
+          {totals.net < 0 ? 'taken' : 'added'} {money(Math.abs(totals.net))} since. Money arriving near the end of a
+          month is counted towards the month it pays for and spending always keeps its own date, so carrying the
+          leftover forward is what makes {words.net.toLowerCase()} match what the accounts actually hold.
+        </p>
+      )}
+      {opening && opening.laterMinor > 0 && (
+        <p>
+          {money(opening.laterMinor)} of what is in the accounts belongs to a later{' '}
+          {period === 'year' ? 'year' : 'month'}, and is not counted here.
+        </p>
+      )}
       {period === 'custom' && (
         <p>
           A range counts money on the day it moved. Contributions are not shifted into the month they fund, the
-          way they are under Month and Year.
+          way they are under Month and Year — which is also why there is no leftover carried into one.
         </p>
       )}
     </>,
+    'panel',
   )
   const drillName = drill ? (catMap.get(drill)?.name ?? 'Category') : null
   /**
@@ -1537,7 +1578,17 @@ export default function Reports() {
               ? [{ label: 'To our household', value: totals.contributed, sign: false }]
               : []),
             ...(savedMinor > 0 ? [{ label: 'To savings', value: savedMinor, sign: false }] : []),
-            { label: words.net, value: totals.net, sign: true },
+            // Before the figure it feeds, so the grid reads as the sum it is.
+            ...(opening
+              ? [
+                  {
+                    label: `Left from ${period === 'year' ? Number(year) - 1 : monthLabel(shiftMonth(month, -1), 'short')}`,
+                    value: carryMinor,
+                    sign: true,
+                  },
+                ]
+              : []),
+            { label: words.net, value: carryMinor + totals.net, sign: true },
           ].map((f) => (
             <div key={f.label} className="min-w-0">
               <dt className="text-xs" style={{ color: 'var(--panel-ink-2)' }}>{f.label}</dt>
@@ -1553,10 +1604,19 @@ export default function Reports() {
         </dl>
 
 
-        {/* The balances, for the month that has not finished. Deliberately
-            below the figures rather than beside them: it is the sentence that
-            makes an alarming "left over" readable, not a fourth statistic. */}
-        {partial && balances && (
+        {/* The balances, for a period that has not finished. Deliberately below
+            the figures rather than beside them: it is the sentence that makes
+            an alarming "left over" readable, not a fourth statistic.
+
+            Only where there is no leftover carried in, because both answer
+            "what did you start with" and they answer it differently on purpose
+            — the leftover counts by the month money is FOR, this counts what
+            the bank literally held on the 1st. Printing both puts two "start of
+            March" figures on one card with nothing to say why they differ. The
+            leftover is the one that reconciles with the figures beside it, so
+            it wins; this stays for the hand-drawn range, where there is no
+            leftover to be had and it is still the best answer available. */}
+        {partial && balances && !opening && (
           <p className="mt-2.5 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
             <span className="font-medium tabular">{money(balances.startMinor)}</span> at the start of{' '}
             {periodLabel},{' '}
@@ -1565,8 +1625,16 @@ export default function Reports() {
             is not over.
           </p>
         )}
+        {/* The period has not finished, and the leftover has already made the
+            figures reconcilable — so this says the one thing left to say rather
+            than repeating a number that is two lines above it. */}
+        {partial && opening && (
+          <p className="mt-2.5 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
+            {periodLabel} runs to today, so this is where it stands rather than where it ends up.
+          </p>
+        )}
         {summaryNote.body}
-        {partial && !balances && (
+        {partial && !balances && !opening && (
           <p className="mt-2.5 text-xs" style={{ color: 'var(--panel-ink-2)' }}>
             {periodLabel} runs to today, so these figures are still moving.
           </p>

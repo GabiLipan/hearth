@@ -151,7 +151,7 @@ list means, and what it writes),
 `layout.ts` (which sections a page shows, in what order, how wide, in which
 shape, and what else each one lets you decide — home and Reports share it),
 `drill.ts` (out of a figure and into the rows behind it, and the way back),
-`sticky.ts` (a filter that outlives leaving the page and dies with the tab), `monthRule.ts` (when this household's month starts, and how that reaches both devices), `sankey.ts` (a period as one balanced flow,
+`sticky.ts` (a filter that outlives leaving the page and dies with the tab), `monthRule.ts` (when this household's month starts, and how that reaches both devices), `books.ts` (the three sets of books, which month each row counts in, and what was left over when the month began), `sankey.ts` (a period as one balanced flow,
 and where every band goes), `scale.ts` (a value axis with round numbers, shared
 by a scrolling chart and the axis pinned beside it),
 `reimbursements.ts` (what the household owes you — computed always, shown only
@@ -1201,6 +1201,12 @@ the single place a level comes from.
   wizard's steps and the Settings automation rows use. **Nothing on a screen may
   be more than a heading and one line of prose**; anything longer goes behind
   one of these, wherever it is.
+
+  It takes a GROUND, and there are exactly two. `.panel-month` defines its own
+  ink, so the default `text-ink-3` toggle and paragraph — ink for a surface —
+  are an unreadable grey on a saturated panel. Both month panels pass `'panel'`.
+  A caller choosing its own colour would be a third ground and is why this is an
+  enum rather than a className.
 - **Two categories of the same colour is the ORDINARY case.** Twelve slots, no
   limit on categories, and a subcategory inherits its parent's slot on purpose —
   so a donut routinely holds two identical arcs, and drilling in is where it
@@ -1656,6 +1662,50 @@ the single place a level comes from.
   `*InRange` functions are the deliberate exception and still count by real
   date: "the month this money was for" is not a question a fortnight in the
   middle of March can answer.
+- **Shifting arrivals and not spending leaves a seam, and the leftover is what
+  closes it.** A salary landing on the 23rd is next month's money; the £400
+  spent out of it before the month turns keeps its own date and is THIS month's
+  spending. So the old month reads several hundred pounds worse than it was and
+  the new one reads richer by the same amount, and "left over" matches the bank
+  in neither. `bookOpening` carries the position forward instead — and the
+  reason it is a second function rather than a line inside `bookBalances` is the
+  one thing here that is easy to get silently wrong: it counts by
+  `effectiveMonth`, where `bookBalances` counts by `t.date`. Written the obvious
+  way, the salary of the 23rd lands in August's opening balance AND in August's
+  income, counted twice. Counting by effective month partitions every row into
+  exactly one month, which buys the identity the figure is worth printing for
+  and which `books.test.ts` pins across all three books:
+
+      opening(M) + net(M) === opening(M + 1)
+
+  For the month you are in, `opening + net` is what the book's accounts hold
+  less `laterMinor` — money already in them for a later month. That subtraction
+  is the point, not an error: on the 26th the bank holds next month's salary and
+  this month does not get to spend it, so the card says so rather than quietly
+  disagreeing with the banking app. `laterMinor` is a NET figure for the same
+  reason — it has to be exactly that difference, so a future-dated purchase is
+  in it too.
+
+  Two consequences on screen. `BOOK_WORDS[book].net` is the RUNNING figure on
+  both month panels now — leftover plus this month — and the month-only net has
+  moved into the ⓘ, where it is the arithmetic rather than the answer. And
+  Reports prints the leftover or the literal start-of-month balance, never both:
+  they answer "what did you start with" differently on purpose, so two of them
+  on one card is two "start of March" figures with nothing to say why they
+  differ. The leftover wins where it exists, because it is the one that
+  reconciles with the figures beside it; the balances sentence stays for the
+  hand-drawn range, which counts by date and so has no leftover to carry.
+
+  It takes a month or a LIST of them, the same way `savedInto` and
+  `bookSpendByCategory` do, and for a reason worth stating: asked for a year's
+  January alone, `laterMinor` calls February through December next month's
+  money. "Before" is the first of them and "after" is the last.
+
+  It is `undefined` rather than approximate on a book holding a `balance`-level
+  account, exactly as `bookBalances` is, and both panels fall back to printing
+  the month alone. One seam is left and stated rather than papered over: under
+  `all`, a transfer with one leg in an account in NEITHER book moves the balance
+  without moving the net — `BookBridge.unbookedCount`'s row again.
 - **The month rule is the household's, not the device's.** It rides on
   `households` beside the currency, is cached in `meta` on every pull, and is
   written by an RPC. Kept per device it would break the one property the books

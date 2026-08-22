@@ -487,7 +487,13 @@ export function Button({ variant = 'primary', size = 'md', type = 'button', clas
  * text is in the document, in reading order, right after the thing it explains.
  * Nothing here is hidden from a screen reader that a sighted reader can see.
  */
-function InfoToggle({ open, controls, onClick, label }: { open: boolean; controls: string; onClick: () => void; label: string }) {
+function InfoToggle({
+  open,
+  controls,
+  onClick,
+  label,
+  on,
+}: { open: boolean; controls: string; onClick: () => void; label: string; on?: InfoGround }) {
   return (
     <button
       // Inside a `<form>` a button with no type submits it, and every one of
@@ -499,18 +505,50 @@ function InfoToggle({ open, controls, onClick, label }: { open: boolean; control
       aria-label={open ? `Hide what this means: ${label}` : `What does this mean? ${label}`}
       className={cx(
         'grid size-7 shrink-0 place-items-center rounded-full transition-colors',
-        open ? 'bg-ink/10 text-ink-2' : 'text-ink-3 hover:bg-ink/5 hover:text-ink-2',
+        on === 'panel'
+          ? 'hover:bg-white/10'
+          : open
+            ? 'bg-ink/10 text-ink-2'
+            : 'text-ink-3 hover:bg-ink/5 hover:text-ink-2',
       )}
+      // The panel defines its own ink, and `text-ink-3` on it is ink for a
+      // SURFACE — see the note on `.panel-month`. Stated as a style rather than
+      // a utility because there is no Tailwind colour for a per-theme token.
+      style={on === 'panel' ? { color: open ? 'var(--panel-ink)' : 'var(--panel-ink-2)' } : undefined}
     >
       <Info size={16} />
     </button>
   )
 }
 
+/**
+ * Where an ⓘ is being drawn, which decides nothing but its ink.
+ *
+ * `.panel-month` is the app's one painted surface and it defines its own ink
+ * tokens; `text-ink-3` and `bg-ink/10` are ink for a SURFACE, and on a
+ * saturated panel they are a grey nobody can read. Two grounds rather than a
+ * colour prop, because there are exactly two and a caller picking its own would
+ * be a third.
+ */
+export type InfoGround = 'surface' | 'panel'
+
 /** The revealed paragraphs. A `<div>` of `<p>`s, spaced, in the quiet size. */
-function InfoBody({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
+function InfoBody({
+  id,
+  className,
+  on,
+  children,
+}: { id: string; className?: string; on?: InfoGround; children: ReactNode }) {
   return (
-    <div id={id} className={cx('animate-fade space-y-2 text-xs leading-relaxed text-ink-3 [&_p]:m-0', className)}>
+    <div
+      id={id}
+      className={cx(
+        'animate-fade space-y-2 text-xs leading-relaxed [&_p]:m-0',
+        on !== 'panel' && 'text-ink-3',
+        className,
+      )}
+      style={on === 'panel' ? { color: 'var(--panel-ink-2)' } : undefined}
+    >
       {children}
     </div>
   )
@@ -533,11 +571,11 @@ function useInfo(has: boolean) {
  * the import wizard explaining what it is about to do — so the gesture is the
  * same wherever the prose is.
  */
-export function useInfoNote(label: string, info?: ReactNode) {
+export function useInfoNote(label: string, info?: ReactNode, on: InfoGround = 'surface') {
   const i = useInfo(!!info)
   return {
-    toggle: info ? <InfoToggle open={i.open} controls={i.id} onClick={i.toggle} label={label} /> : null,
-    body: info && i.open ? <InfoBody id={i.id}>{info}</InfoBody> : null,
+    toggle: info ? <InfoToggle open={i.open} controls={i.id} onClick={i.toggle} label={label} on={on} /> : null,
+    body: info && i.open ? <InfoBody id={i.id} on={on}>{info}</InfoBody> : null,
   }
 }
 

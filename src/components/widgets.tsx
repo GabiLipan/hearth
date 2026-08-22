@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom'
 import { ArrowLeftRight, ArrowRight, ChevronLeft, Eye } from 'lucide-react'
 import { getDaysInMonth } from 'date-fns'
 import type { Transaction, Category, Budget, Bill, Account, GrantLevel } from '../lib/db'
-import { thisMonthKey, monthLabel, fmtDay, daysUntil, fmtFullDate, todayISO } from '../lib/dates'
+import { thisMonthKey, monthLabel, shiftMonth, fmtDay, daysUntil, fmtFullDate, todayISO } from '../lib/dates'
 import { monthsEndingAt, monthsOfHistory, OTHER_SLICE_ID } from '../lib/stats'
 import {
   accountsInBook,
   bookMonthlySpendByCategory,
+  bookOpening,
   bookSeries,
   bookSlices,
   bookBridge,
@@ -37,7 +38,7 @@ import { parseAmount, currencySymbol } from '../lib/money'
 import { syncNow } from '../lib/session'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
-import { AccountDot, Button, Card, CardHeader, CardHeading, CategoryDot, Field, Fill, Progress, Select, Sheet, TextInput, cx } from './ui'
+import { AccountDot, Button, Card, CardHeader, CardHeading, CategoryDot, Field, Fill, Progress, Select, Sheet, TextInput, cx, useInfoNote } from './ui'
 import { BudgetBullet } from './BudgetBullet'
 import { CategoryIcon } from './CategoryIcon'
 import { CategoryBars, CategoryDonut, CategoryMosaic, Sparkline, SpendBars, type TrendShape } from './charts'
@@ -210,6 +211,30 @@ export function HeroWidget({ data }: WidgetProps) {
     [data.allTxns, data.flows, data.rule, data.books, data.userId],
   )
   const boughtDirect = split.minePaidMinor + split.theirsPaidMinor
+  /**
+   * What was left when the month began, and why the card needs it.
+   *
+   * A salary that lands on the 23rd is next month's money, and everything
+   * bought with it before the month turns is this month's spending — see
+   * `bookOpening`. Without the leftover carried in, the card is credited with a
+   * whole salary that has already been partly spent, and "left over" matches
+   * the bank in neither month.
+   *
+   * `undefined` on a book holding an account we may only see the total of, and
+   * the card silently goes back to printing the month on its own. It is a
+   * figure that reconciles or is absent; there is no approximate version.
+   */
+  const opening = useMemo(
+    () =>
+      bookOpening(data.allAccounts, data.allTxns, data.flows, data.rule, data.book, data.books, month(), (id) =>
+        canSeeTransactionsAt(levelOn(id, data.levels)),
+      ),
+    // `levels` is a fresh Map every render — the same reason Reports gives for
+    // leaving it out: the inputs that change the answer are the accounts and
+    // grants it is derived from.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data.allAccounts, data.allTxns, data.flows, data.rule, data.book, data.books],
+  )
   const budgetTotal = data.budgets.reduce((s, b) => s + b.amountMinor, 0)
   const frac = budgetTotal > 0 ? totals.spend / budgetTotal : 0
   const over = frac > 1
@@ -234,11 +259,60 @@ export function HeroWidget({ data }: WidgetProps) {
       : data.book === 'household' && boughtDirect > 0
         ? { label: 'Of that, bought on personal cards', value: boughtDirect }
         : null
+  /**
+   * The leftover line, and what it does to the one under it.
+   *
+   * `words.net` becomes the RUNNING figure — what was left when the month began
+   * plus what the month has done since — rather than the month on its own. That
+   * is the number the card is read for: it is what the book's accounts hold,
+   * less anything already in them for next month. The month-only figure has not
+   * been dropped, it has moved into the ⓘ, where it is the arithmetic rather
+   * than the answer.
+   *
+   * With no leftover to be had, both lines fall back to exactly what the card
+   * printed before — the same figure, under the same word.
+   */
+  const carryMinor = opening?.openingMinor ?? 0
   const rest: { label: string; value: number; sign?: boolean }[] = [
     { label: words.income, value: totals.income },
+    ...(opening
+      ? [{ label: `Left from ${monthLabel(shiftMonth(month(), -1), 'short')}`, value: carryMinor, sign: true }]
+      : []),
     ...(savedMinor > 0 ? [{ label: 'To savings', value: savedMinor }] : []),
-    { label: words.net, value: totals.net, sign: true },
+    { label: words.net, value: carryMinor + totals.net, sign: true },
   ]
+
+  /**
+   * Where the running figure comes from, said once.
+   *
+   * Behind a ⓘ because it is four sentences and the rule is a heading and one
+   * line — and because it is the sort of thing you read once, when the word
+   * "left" first fails to mean what you assumed, and never again.
+   */
+  const note = useInfoNote(
+    words.net,
+    opening ? (
+      <>
+        <p>
+          {money(carryMinor, { sign: true })} was left when {monthLabel(month())} began, and the month has{' '}
+          {totals.net < 0 ? 'taken' : 'added'} {money(Math.abs(totals.net))} since — so {words.net.toLowerCase()} is{' '}
+          {money(carryMinor + totals.net, { sign: true })}.
+        </p>
+        <p>
+          Money that arrives near the end of a month is counted towards the month it pays for, and spending always
+          keeps its own date. Carrying the leftover forward is what stops a salary looking unspent on the day it
+          arrives, and it is why this figure matches what the accounts actually hold.
+        </p>
+        {opening.laterMinor > 0 && (
+          <p>
+            {money(opening.laterMinor)} of what is in the accounts is already{' '}
+            {monthLabel(shiftMonth(month(), 1), 'short')}'s, and is not counted here.
+          </p>
+        )}
+      </>
+    ) : undefined,
+    'panel',
+  )
 
   return (
     <Card className={cx('panel-month p-4 md:p-3.5', over && 'panel-over')}>
@@ -256,7 +330,12 @@ export function HeroWidget({ data }: WidgetProps) {
         shrinking anything.
       */}
       <div className="md:hidden">
-        <p className="text-sm" style={quiet}>{monthLabel(month())} · {lead.label.toLowerCase()}</p>
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-sm" style={quiet}>
+            {monthLabel(month())} · {lead.label.toLowerCase()}
+          </p>
+          {note.toggle}
+        </div>
         <p className="mt-0.5 text-4xl font-bold tracking-tight tabular">{money(lead.value)}</p>
 
         {/*
@@ -307,7 +386,10 @@ export function HeroWidget({ data }: WidgetProps) {
 
       {/* Desktop: a strip of figures across the full width. */}
       <div className="hidden md:block">
-        <p className="text-xs" style={quiet}>{monthLabel(month())}</p>
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-xs" style={quiet}>{monthLabel(month())}</p>
+          {note.toggle}
+        </div>
         <div className="mt-1 flex flex-nowrap items-start">
           <Stat label={words.spend} value={money(totals.spend)} lead />
           <Stat label={words.income} value={money(totals.income)} />
@@ -315,11 +397,28 @@ export function HeroWidget({ data }: WidgetProps) {
             <Stat label="To household" value={money(totals.contributed)} />
           )}
           {savedMinor > 0 && <Stat label="To savings" value={money(savedMinor)} />}
-          <Stat label={words.net} value={money(totals.net, { sign: true })} />
+          {/* Before the figure it feeds, so the strip reads left to right as
+              the sum it is: what was left, what came in, what went out, what is
+              left now. */}
+          {opening && (
+            <Stat
+              label={`From ${monthLabel(shiftMonth(month(), -1), 'short')}`}
+              value={money(carryMinor, { sign: true })}
+            />
+          )}
+          <Stat label={words.net} value={money(carryMinor + totals.net, { sign: true })} />
           {budgetTotal > 0 && <Stat label="Budgeted" value={money(budgetTotal, { hideDecimals: true })} />}
         </div>
         {budgetTotal > 0 && <div className="mt-2.5">{bar}</div>}
       </div>
+
+      {/* Once, at the foot of the card, rather than inside either width. Both
+          layouts are rendered and one is hidden — see the `FilterBar`/`Toolbar`
+          note in CLAUDE.md — so a body in each would put the same `id` in the
+          document twice and break the `aria-controls` pointing at it. The
+          toggle is duplicated safely; `display: none` keeps the hidden one out
+          of the accessibility tree. */}
+      {note.body && <div className="mt-3">{note.body}</div>}
     </Card>
   )
 }

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, AccountGrant, Category, Transaction } from './db'
+import { shiftMonth } from './dates'
 import {
   accountsInBook,
   bookBalances,
+  bookOpening,
   bookBridge,
   bookMonthlySpendByCategory,
   bookSpendByCategory,
@@ -663,6 +665,138 @@ describe('what the book held, at the start of a month and now', () => {
     // Salary in, contribution out, personal spending.
     expect(b.nowMinor).toBe(300000 - 200000 - 70000)
     expect(b.startMinor).toBe(0)
+  })
+})
+
+describe('what was left when the month started', () => {
+  const seeEverything = () => true
+  const opening = (
+    rows: Transaction[],
+    book: Parameters<typeof bookOpening>[4],
+    month: string | string[],
+    accs = accounts,
+    rule = RULE,
+  ) => bookOpening(accs, rows, classifyFlows(rows, books), rule, book, books, month, seeEverything)!
+
+  /**
+   * The seam this exists to close, in the shape it actually turns up in.
+   *
+   * The salary lands on the 25th of July, so it is August's money. £400 of it
+   * is spent before the month turns, and that spending keeps its real date —
+   * so it is July's. Neither month can be read on its own.
+   */
+  function paydayOverspill() {
+    return [
+      txn({ accountId: 'myPrivate', amountMinor: 300000, date: '2026-07-25', categoryId: 'salary' }),
+      txn({ accountId: 'myPrivate', amountMinor: -40000, date: '2026-07-28', categoryId: 'shopping' }),
+      txn({ accountId: 'myPrivate', amountMinor: -100000, date: '2026-08-10', categoryId: 'shopping' }),
+    ]
+  }
+
+  it('carries last month`s overspill in as a negative leftover', () => {
+    const rows = paydayOverspill()
+
+    // July: the salary has gone to August, and the £400 spent out of it has not.
+    const july = opening(rows, 'mine', '2026-07')
+    expect(july.openingMinor).toBe(0)
+    // The salary is sitting in the account and belongs to a later month, so
+    // this is the amount by which July's card will fail to match the bank. Net
+    // of August's own £1,000, because the figure's job is to be exactly that
+    // difference rather than a sum of arrivals — see `BookOpening.laterMinor`.
+    expect(july.laterMinor).toBe(300000 - 100000)
+
+    // August opens £400 down: the money its salary has already spent.
+    expect(opening(rows, 'mine', '2026-08').openingMinor).toBe(-40000)
+  })
+
+  it('makes the month`s figures add up to what the accounts hold', () => {
+    // The whole point. £3,000 in, £400 spent in July and £1,000 in August, so
+    // the account holds £1,600 — and that is what August's card must say once
+    // the leftover is carried in, rather than the £2,000 it would say alone.
+    const rows = paydayOverspill()
+    const flows = classifyFlows(rows, books)
+    const totals = bookTotals(rows, flows, RULE, 'mine', '2026-08', books)
+    const o = opening(rows, 'mine', '2026-08')
+
+    expect(totals.net).toBe(300000 - 100000)
+    expect(o.openingMinor + totals.net).toBe(160000)
+    expect(o.openingMinor + totals.net).toBe(
+      bookBalances(accounts, rows, 'mine', books, '2026-08', seeEverything)!.nowMinor,
+    )
+  })
+
+  it('holds `opening + net === next month`s opening` across every book', () => {
+    // The identity that makes the leftover worth printing: every row is counted
+    // in exactly one month, so the months chain. Break `effectiveMonth` or the
+    // set of rows either function selects and this is what says so.
+    const rows = [...paydayOverspill(), ...march()]
+    const flows = classifyFlows(rows, books)
+
+    for (const book of ['household', 'mine', 'all'] as const) {
+      for (const m of ['2026-03', '2026-07', '2026-08']) {
+        const here = opening(rows, book, m)
+        const next = opening(rows, book, shiftMonth(m, 1))
+        const net = bookTotals(rows, flows, RULE, book, m, books).net
+        expect(`${book} ${m}: ${here.openingMinor + net}`).toBe(`${book} ${m}: ${next.openingMinor}`)
+      }
+    }
+  })
+
+  it('counts by the month a row is FOR, not the month it landed in', () => {
+    // The one line that would be easy to write as `t.date < firstOfMonth` and
+    // be silently wrong: that puts the salary of the 25th into August's opening
+    // balance AND into August's income, counting it twice.
+    const rows = paydayOverspill()
+    const byDate = bookBalances(accounts, rows, 'mine', books, '2026-08', seeEverything)!
+
+    expect(byDate.startMinor).toBe(260000)
+    expect(opening(rows, 'mine', '2026-08').openingMinor).toBe(-40000)
+  })
+
+  it('does not shift anything for a household that has turned the rule off', () => {
+    const rows = paydayOverspill()
+    const off = { contributionDay: null, incomeDay: null }
+
+    // Nothing shifts, so July keeps its own salary and August opens on what
+    // was really left. Only August's own spending is still "later" in July,
+    // which is a date rather than a rule and is unaffected either way.
+    expect(opening(rows, 'mine', '2026-07', accounts, off).laterMinor).toBe(-100000)
+    expect(opening(rows, 'mine', '2026-08', accounts, off).openingMinor).toBe(260000)
+  })
+
+  it('starts from the accounts` opening balances', () => {
+    const opened = accounts.map((a) => (a.id === 'joint' ? { ...a, openingBalanceMinor: 100000 } : a))
+    expect(opening(march(), 'household', '2026-03', opened).openingMinor).toBe(100000)
+  })
+
+  it('asks about a run of months as one period, not about its first', () => {
+    // The year view's case. Asked for January alone, everything from February
+    // on is "next month's money" — which would have Reports telling a household
+    // that eleven months of its own salary is not counted in the year.
+    const rows = paydayOverspill()
+    const year = ['2026-07', '2026-08', '2026-09']
+
+    const o = opening(rows, 'mine', year)
+    expect(o.openingMinor).toBe(0)
+    expect(o.laterMinor).toBe(0)
+
+    // …and the identity still chains across the whole run.
+    const flows = classifyFlows(rows, books)
+    const net = year.reduce((n, m) => n + bookTotals(rows, flows, RULE, 'mine', m, books).net, 0)
+    expect(o.openingMinor + net).toBe(160000)
+  })
+
+  it('is undefined on a book holding an account we can only see the total of', () => {
+    // Same reason as `bookBalances`: no line items, so no winding it back — and
+    // dropping the account would leave a leftover measuring a different set of
+    // accounts from the figures it is added to.
+    const rows = march()
+    const flows = classifyFlows(rows, books)
+    const canSee = (id: string) => id !== 'jointSavings'
+    expect(bookOpening(accounts, rows, flows, RULE, 'household', books, '2026-03', canSee)).toBeUndefined()
+
+    const noBooks: BookMap = { household: new Set(), mine: new Set(), others: new Set() }
+    expect(bookOpening(accounts, rows, flows, RULE, 'mine', noBooks, '2026-03', seeEverything)).toBeUndefined()
   })
 })
 

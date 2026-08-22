@@ -1394,6 +1394,129 @@ export function bookBalances(
   return { startMinor, nowMinor }
 }
 
+/* ---------- what was left when the month started ---------- */
+
+/**
+ * What the book had before this month began — the leftover, which is routinely
+ * negative.
+ *
+ * ## The hole this fills
+ *
+ * `effectiveMonth` moves an ARRIVAL across the cutoff into the month it funds
+ * and never moves spending, which is deliberate and stated at length above. The
+ * cost of that is a seam: a salary landing on the 23rd is August's money, and
+ * everything bought with it between the 24th and the 31st is July's spending.
+ *
+ * Left as two figures, that is wrong in both directions at once and nothing on
+ * either month says so. July reads several hundred pounds worse than it was,
+ * because its last week was funded by money the book has already handed to
+ * August. August reads richer than it is by exactly the same amount, because it
+ * is credited with a salary that has already been partly spent. "Left over"
+ * then matches the bank in neither month, which is the one thing that figure is
+ * for.
+ *
+ * Carrying the position forward is what closes it, and it closes it without
+ * moving a single row: July's overspill arrives in August as a negative
+ * leftover, which is precisely what it was.
+ *
+ * ## Why it counts by EFFECTIVE month
+ *
+ * This is the whole trick, and it is the one line that would be easy to write
+ * the obvious way and get silently wrong. `bookBalances` — a neighbour, and a
+ * different question — asks what the accounts literally held on the 1st, so it
+ * counts by `t.date`. Doing that here would put the salary of the 23rd into
+ * August's opening balance AND into August's income, counting it twice.
+ *
+ * Counting by `effectiveMonth` partitions every row into exactly one month, so
+ * the identity below holds by construction:
+ *
+ *     opening(M) + net(M) === opening(M + 1)
+ *
+ * and, for the month we are in, `opening + net` is what the book's accounts
+ * hold right now, less anything that has already arrived FOR next month. That
+ * subtraction is the point rather than an error: on the 26th the bank has next
+ * month's salary in it and this month does not get to spend it.
+ * `arrivedForLater` is that figure, so a card can say so instead of quietly
+ * disagreeing with the banking app.
+ *
+ * ## Why undefined rather than approximate
+ *
+ * The same reason as `bookBalances`. A `balance`-level account hands us today's
+ * total from the server and no line items, so there is no winding it back; and
+ * dropping that account instead would produce a leftover measuring a different
+ * set of accounts from the figures it is added to. A card that omits the line
+ * is honest. One that prints a number reconciling with nothing is not.
+ *
+ * ## The one seam left, which is `bookBridge`'s seam again
+ *
+ * The identity holds wherever every leg of every transfer is inside the book or
+ * outside it together. Under `all`, a transfer with one leg in an account that
+ * is in NEITHER book — one somebody shared with me, which `classifyFlows` calls
+ * `internal` or `contribution` and `bookTotals` therefore counts in nothing —
+ * moves the balance without moving the net. That is the same row
+ * `BookBridge.unbookedCount` exists to say out loud, and it is left stated
+ * rather than papered over: a household of two has no such account, and
+ * inventing a correction for it would make the common case harder to check.
+ */
+export interface BookOpening {
+  /** What was left when the month began. Signed — negative is an overspill. */
+  openingMinor: number
+  /**
+   * Money sitting in the accounts that belongs to a LATER month — in practice
+   * the salary that landed on the 25th for next month.
+   *
+   * A NET figure, not a sum of arrivals, because that is what makes it the
+   * exact difference between `openingMinor + net` and the live balance. A row
+   * dated next week is in it too, which is right: it is money that has moved
+   * and that this month does not get to count.
+   */
+  laterMinor: number
+}
+
+export function bookOpening(
+  accounts: Account[],
+  txns: Transaction[],
+  flows: Map<string, Flow>,
+  rule: MonthRule,
+  book: BookId,
+  books: BookMap,
+  /**
+   * One month, or several — a year asks the same question of twelve, and the
+   * identity chains, so the leftover before January plus the year's net is
+   * where the year ends up. "Before" and "after" are then the first and the
+   * LAST of them, which is the only reason this takes the whole list rather
+   * than the one month it opens on: asked for January alone, `laterMinor`
+   * would call February through December next month's money.
+   */
+  month: string | string[],
+  canSeeRows: (accountId: string) => boolean,
+): BookOpening | undefined {
+  const ids = accountsInBook(book, books)
+  const mine = accounts.filter((a) => ids.has(a.id))
+  if (mine.length === 0 || mine.some((a) => !canSeeRows(a.id))) return undefined
+
+  const months = Array.isArray(month) ? month : [month]
+  if (months.length === 0) return undefined
+  const first = months.reduce((a, b) => (b < a ? b : a))
+  const last = months.reduce((a, b) => (b > a ? b : a))
+
+  let openingMinor = 0
+  for (const a of mine) openingMinor += a.openingBalanceMinor
+
+  let laterMinor = 0
+  for (const t of txns) {
+    if (!ids.has(t.accountId)) continue
+    // Every row in the book's accounts, whatever its flow. This is a position
+    // rather than a total: an internal transfer nets to zero across the book
+    // and a row nothing classifies still moved money, so filtering by flow here
+    // would leave the leftover disagreeing with the balance it claims to be.
+    const m = effectiveMonth(t, flows.get(t.id), rule)
+    if (m < first) openingMinor += t.amountMinor
+    else if (m > last) laterMinor += t.amountMinor
+  }
+  return { openingMinor, laterMinor }
+}
+
 /**
  * Spend per category for one book and month, ready for the donut.
  *
