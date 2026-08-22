@@ -220,15 +220,24 @@ HalifaxMark.displayName = 'Halifax Bank Cross'
  *   is one twelve-point outline of the two bars' *union*, computed rather than
  *   stacked: four tips, four tip corners and the four notches where the bars'
  *   edges meet.
- * - **The dots are arcs in the same path**, sitting in the notches with
- *   clearance to spare. That clearance is what survives the 0.5px `HAIRLINE`,
- *   which fattens every edge by a quarter-pixel on each side — drawn tighter,
- *   the dots weld themselves to the arms at the 19px `Face` renders at.
+ * - **The dots are arcs in the same path**, and where they go is a rule rather
+ *   than a judgement: the bars are the DIAGONALS of a rectangle, so each dot is
+ *   centred on the midpoint of one of that rectangle's sides. Placed by eye
+ *   they drift in towards the crossing and the mark reads as a snowflake; out
+ *   on the midpoints the four of them describe the rectangle the arms imply.
+ *   It also leaves clearance to spare, which is what survives the 0.5px
+ *   `HAIRLINE` — that fattens every edge by a quarter-pixel on each side, and a
+ *   dot drawn tight to an arm welds to it at the 19px `Face` renders at.
+ *
+ * So there are four numbers behind the whole drawing: the rectangle's half-width
+ * and half-height (9.15 and 6.41, about the centre of the viewBox), the bars'
+ * half-thickness, and the dot radius. Re-derive from those rather than nudging a
+ * coordinate — the dots are on the midpoints or the mark is wrong.
  */
 export const BankOfScotlandMark = (p: TraceProps) => (
   <Trace
     {...p}
-    d="M 3.62 3.79 L 12 10.66 L 20.38 3.79 L 21.82 5.29 L 13.63 12 L 21.82 18.71 L 20.38 20.21 L 12 13.34 L 3.62 20.21 L 2.18 18.71 L 10.37 12 L 2.18 5.29 Z M 10.62 7.26 A 1.38 1.38 0 1 0 13.38 7.26 A 1.38 1.38 0 1 0 10.62 7.26 Z M 10.62 16.74 A 1.38 1.38 0 1 0 13.38 16.74 A 1.38 1.38 0 1 0 10.62 16.74 Z M 4.84 12 A 1.38 1.38 0 1 0 7.6 12 A 1.38 1.38 0 1 0 4.84 12 Z M 16.4 12 A 1.38 1.38 0 1 0 19.16 12 A 1.38 1.38 0 1 0 16.4 12 Z"
+    d="M 3.6 4.8 L 12 10.68 L 20.4 4.8 L 21.9 6.39 L 13.89 12 L 21.9 17.61 L 20.4 19.2 L 12 13.32 L 3.6 19.2 L 2.1 17.61 L 10.11 12 L 2.1 6.39 Z M 10.66 5.59 A 1.34 1.34 0 1 0 13.34 5.59 A 1.34 1.34 0 1 0 10.66 5.59 Z M 10.66 18.41 A 1.34 1.34 0 1 0 13.34 18.41 A 1.34 1.34 0 1 0 10.66 18.41 Z M 1.51 12 A 1.34 1.34 0 1 0 4.19 12 A 1.34 1.34 0 1 0 1.51 12 Z M 19.81 12 A 1.34 1.34 0 1 0 22.49 12 A 1.34 1.34 0 1 0 19.81 12 Z"
   />
 )
 BankOfScotlandMark.displayName = 'Bank Of Scotland Saltire Dots'
