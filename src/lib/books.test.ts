@@ -852,6 +852,33 @@ describe('where the money actually is', () => {
     expect(p.total.movedMinor).toBe(0)
   })
 
+  it('counts a salary once when the transfer of it is also in view', () => {
+    // The double count Everything had. March's salary is £3,000 into my current
+    // account and £2,000 of it moves to the joint account — and under `all`
+    // BOTH accounts are in the set, so read off the flow alone the arriving leg
+    // was `in` too and "money in" came to £5,000 for £3,000 of income.
+    const p = position(march(), 'all', '2026-03')
+    expect(p.total.inMinor).toBe(300000 + 180000 + 8800)
+    // Both legs `moved`, so it nets to nothing across the set rather than
+    // inflating one figure and deflating the other.
+    expect(p.total.movedMinor).toBe(0)
+    expect(balances(p.total)).toBe(true)
+
+    // …and the books that can only see one leg are untouched, because there the
+    // money really did arrive from outside them.
+    expect(position(march(), 'household', '2026-03').total.inMinor).toBe(200000 + 180000 + 8800)
+    expect(position(march(), 'mine', '2026-03').total.inMinor).toBe(300000)
+  })
+
+  it('still counts a contribution nobody could pair as money arriving', () => {
+    // Her contribution has no far leg on this device and never will. Under
+    // every book including Everything that is money reaching the set from
+    // outside it, and the partner test says so without a special case.
+    const p = position(march(), 'all', '2026-03')
+    const hers = 180000
+    expect(p.total.inMinor).toBeGreaterThanOrEqual(hers)
+  })
+
   it('never calls a contribution spending, on the side it leaves', () => {
     // The one thing the personal book exists to say. £2,000 to the joint
     // account is money that left my current account and was not spent.

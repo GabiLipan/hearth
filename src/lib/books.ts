@@ -1631,6 +1631,17 @@ export function bookPosition(
     nowMinor: list.reduce((s, a) => s + a.openingBalanceMinor, 0),
   })
 
+  // Transfer legs by id, the same index `classifyFlows` builds — this needs to
+  // know where a leg's FAR END is, which no flow can say once two books are
+  // being measured as one. See the note in the loop.
+  const legs = new Map<string, Transaction[]>()
+  for (const t of txns) {
+    if (!t.transferId) continue
+    const list = legs.get(t.transferId)
+    if (list) list.push(t)
+    else legs.set(t.transferId, [t])
+  }
+
   const total = blank('all', 'Everything', 'wallet', mine)
   const groups = new Map<Account['kind'], BalanceGroup>()
   const kindOf = new Map<string, Account['kind']>()
@@ -1660,11 +1671,32 @@ export function bookPosition(
     }
 
     const flow = flows.get(t.id)
-    // Which bucket, and the whole of the classification. Note the fall-through
-    // for a row with no flow at all: it moved money and nothing knows why, so
-    // it counts as arriving or being spent rather than being silently dropped —
-    // the identity above is worth more than the label.
+    /**
+     * Which bucket, and the whole of the classification.
+     *
+     * The first test is the one that stops money being counted twice, and it
+     * asks about the PARTNER rather than about the flow. `classifyFlows` says
+     * `contribution` for a leg crossing from a personal account to a joint one,
+     * because those are two books — but under Everything both accounts are in
+     * view, so the salary arriving in the current account and the transfer of
+     * it into the joint account are the same money reaching this set once. Read
+     * off the flow alone the arriving leg is `in`, and Everything's "in" was a
+     * salary plus most of that salary again.
+     *
+     * So a transfer whose far leg is also inside the set being measured is
+     * `moved`, both ways, and nets to nothing — which is exactly the rule
+     * `bookTotals` states for itself when it skips a contribution under `all`.
+     * A leg whose partner is outside the set (or has no partner row at all,
+     * which is what a contribution from somebody not using the app looks like)
+     * is money genuinely arriving from outside it.
+     *
+     * Note the fall-through for a row with no flow at all: it moved money and
+     * nothing knows why, so it counts as arriving or being spent rather than
+     * being silently dropped — the identity above is worth more than the label.
+     */
+    const partner = t.transferId ? legs.get(t.transferId)?.find((l) => l.id !== t.id) : undefined
     const moved =
+      (partner !== undefined && ids.has(partner.accountId)) ||
       flow === 'internal' ||
       ((flow === 'contribution' || flow === 'withdrawal') && t.amountMinor < 0)
     for (const g of both) {

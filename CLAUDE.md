@@ -1799,6 +1799,44 @@ the single place a level comes from.
   `laterMinor` is printed on the card rather than left in the ⓘ, and that is not
   a detail: the tiles do not add up to the figure above them by exactly it, and
   a reader who tries the arithmetic and fails will trust neither.
+
+  **What counts as `in` is a question about the PARTNER, not about the flow**,
+  and reading it off the flow alone is how Everything came to report a salary
+  twice. `classifyFlows` says `contribution` for a leg crossing from a personal
+  account to a joint one, because those are two books — but under `all` both
+  accounts are in view, so the salary landing in the current account and the
+  transfer of it into the joint account are the same money reaching the set
+  once. A transfer whose far leg is also inside the set being measured is
+  therefore `moved`, both ways, nets to nothing, and can never inflate what came
+  in; a leg whose partner is outside the set, or has no partner row at all
+  (a contribution from somebody not using the app), is money genuinely arriving.
+  That is the same rule `bookTotals` states for itself when it skips a
+  contribution under `all`, which is why `bookPosition` builds the same legs
+  index `classifyFlows` does.
+- **The balances card is two grounds in one card, and the cut is what makes the
+  colour possible.** `.panel-month` is the app's one painted surface and its
+  rule holds: every colour on it comes from `--panel-*`, because a palette hue
+  on a blue gradient is either invisible or a clash — which is why the figures
+  were four strengths of white to begin with. Rather than break that, the
+  headline and the bar keep the gradient and everything BELOW a hairline cut is
+  an ordinary surface, on a soft `--surface-2` → `--surface` gradient, where the
+  twelve slots and `Card`'s own vocabulary (white, hairline, `--elev-1`) are
+  simply available. The `Card` is `p-0 overflow-hidden` so each zone states its
+  own padding and the gradient is clipped by the radius.
+
+  Two things follow. A metric's chip colour is IDENTITY, not judgement — the
+  four hues tell four figures apart the way the palette tells twelve categories
+  apart — with the single exception of green in / red out, which is a 16% tint
+  on a fingernail rather than the `--critical` an alarm paints across a panel,
+  and which never "fires" because it labels a figure that is always there. And
+  an account-type card is headed by a `Face` on the slot `accountFace` derives
+  from `kind`, so the Savings card wears the same teal piggy bank every savings
+  account wears in the Accounts list — a second colour chosen for the same idea
+  would be the drift this avoids.
+
+  `useInfoNote`'s body stays ABOVE the cut with the ⓘ that opens it. The hook
+  takes one ground for both halves, and `--panel-ink-2` is a near-white:
+  correct on the gradient, invisible on the surface below it.
 - **The month rule is the household's, not the device's.** It rides on
   `households` beside the currency, is cached in `meta` on every pull, and is
   written by an RPC. Kept per device it would break the one property the books
