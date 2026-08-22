@@ -203,14 +203,35 @@ export const HalifaxMark = (p: TraceProps) => (
 )
 HalifaxMark.displayName = 'Halifax Bank Cross'
 
-/** The saltire, on a shield. */
+/**
+ * The saltire, with its four dots.
+ *
+ * This is the mark the bank actually uses now — two crossed bars with a dot in
+ * each of the four notches — where this file used to carry the older saltire on
+ * a shield. The key stays `bankOfScotland`, per the rule at the top: the
+ * artwork behind a key may be replaced, the key may not.
+ *
+ * Two things about it are unlike the traced marks around it, and both are
+ * forced by `Trace`'s `evenodd`:
+ *
+ * - **Nothing here may overlap anything else.** The obvious drawing — two
+ *   crossed quadrilaterals and four circles — puts a diamond-shaped HOLE where
+ *   the bars cross, because under `evenodd` an overlap is a counter. So the X
+ *   is one twelve-point outline of the two bars' *union*, computed rather than
+ *   stacked: four tips, four tip corners and the four notches where the bars'
+ *   edges meet.
+ * - **The dots are arcs in the same path**, sitting in the notches with
+ *   clearance to spare. That clearance is what survives the 0.5px `HAIRLINE`,
+ *   which fattens every edge by a quarter-pixel on each side — drawn tighter,
+ *   the dots weld themselves to the arms at the 19px `Face` renders at.
+ */
 export const BankOfScotlandMark = (p: TraceProps) => (
   <Trace
     {...p}
-    d="M 14.36 20.65 C13.48,21.17 12.56,21.68 12.32,21.77 C11.67,22 8.53,19.89 6.87,18.1 C4.53,15.58 4.18,14.49 4.04,9.28 C3.95,5.76 4.01,4.73 4.33,4.48 C4.92,4.01 11.15,2 12.02,2 C12.43,2 14.4,2.55 16.41,3.21 L 20.05 4.43 L 20.05 8.86 C20.05,12.6 19.95,13.53 19.43,14.93 C18.68,16.93 16.54,19.34 14.36,20.65 Z M 6.38 15.7 C6.54,16.02 6.73,16.28 6.78,16.28 C6.82,16.28 7.98,15.41 9.34,14.34 C10.7,13.28 11.96,12.42 12.14,12.42 C12.32,12.43 13.53,13.29 14.83,14.34 C16.12,15.38 17.29,16.18 17.43,16.1 C17.56,16.01 17.8,15.69 17.97,15.39 C18.22,14.91 17.94,14.57 16.03,13.01 C14.81,12 13.8,11.09 13.81,10.98 C13.81,10.87 14.94,9.91 16.32,8.84 C18.39,7.25 18.84,6.76 18.85,6.09 C18.86,4.79 18.14,5.07 15.11,7.5 C13.59,8.73 12.22,9.73 12.07,9.73 C11.92,9.73 10.54,8.73 9.01,7.5 C5.98,5.08 5.08,4.74 5.23,6.08 C5.3,6.69 5.92,7.35 7.78,8.78 C9.13,9.82 10.23,10.83 10.23,11.04 C10.23,11.24 9.3,12.11 8.15,12.98 C7.01,13.86 6.07,14.69 6.07,14.85 C6.07,15 6.21,15.38 6.38,15.7 Z M 9.71 19.08 C10.74,19.82 11.78,20.43 12.04,20.43 C12.61,20.44 14.91,18.95 15.83,17.97 L 16.5 17.26 L 14.41 15.55 C13.12,14.49 12.15,13.9 11.87,14 C11.1,14.3 7.9,17 7.87,17.37 C7.86,17.57 8.69,18.34 9.71,19.08 Z M 9.79 6.58 C10.93,7.48 11.96,8.23 12.07,8.23 C12.33,8.25 16.3,5 16.42,4.67 C16.51,4.43 12.82,3.19 12.01,3.19 C11.29,3.19 7.54,4.5 7.62,4.72 C7.67,4.84 8.64,5.68 9.79,6.58 Z M 5.36 12.83 C5.46,13.09 5.62,13.3 5.73,13.29 C6.05,13.28 8.61,10.98 8.45,10.85 C8.37,10.79 7.68,10.24 6.93,9.64 C6.18,9.04 5.47,8.54 5.37,8.54 C5.13,8.54 5.11,12.2 5.36,12.83 Z M 16.98 12.18 C17.77,12.79 18.51,13.29 18.64,13.3 C18.76,13.3 18.86,12.23 18.86,10.91 L 18.86 10.91 C18.86,9.58 18.86,8.91 18.6,8.79 C18.34,8.67 17.79,9.14 16.69,10.09 L 16.68 10.09 L 15.55 11.07 Z"
+    d="M 3.62 3.79 L 12 10.66 L 20.38 3.79 L 21.82 5.29 L 13.63 12 L 21.82 18.71 L 20.38 20.21 L 12 13.34 L 3.62 20.21 L 2.18 18.71 L 10.37 12 L 2.18 5.29 Z M 10.62 7.26 A 1.38 1.38 0 1 0 13.38 7.26 A 1.38 1.38 0 1 0 10.62 7.26 Z M 10.62 16.74 A 1.38 1.38 0 1 0 13.38 16.74 A 1.38 1.38 0 1 0 10.62 16.74 Z M 4.84 12 A 1.38 1.38 0 1 0 7.6 12 A 1.38 1.38 0 1 0 4.84 12 Z M 16.4 12 A 1.38 1.38 0 1 0 19.16 12 A 1.38 1.38 0 1 0 16.4 12 Z"
   />
 )
-BankOfScotlandMark.displayName = 'Bank Of Scotland Saltire Shield'
+BankOfScotlandMark.displayName = 'Bank Of Scotland Saltire Dots'
 
 /** The three cubes. */
 export const NatwestMark = (p: TraceProps) => (
