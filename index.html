@@ -108,11 +108,30 @@
 
       ## Sizing
 
-      `position: fixed; inset: 0` rather than a height in `dvh`. The dynamic
-      viewport units resolve SHORT on a cold start of the installed iOS app and
-      do not correct until a scroll (see `.app-frame`), and a cold start is the
-      only time this is ever on screen — it would be wrong every single time.
-      A fixed box is the layout viewport itself, which needs no settling.
+      `position: fixed; inset: 0`, plus the same `100vh` the app frame takes
+      where the app is installed — and that second half is not belt and braces,
+      it is the fix for a visible fault.
+
+      A fixed box was believed to be the layout viewport itself and so to need
+      no settling. It is not exempt: on a cold start of the installed iOS app
+      the layout viewport is one of the numbers that comes up SHORT, by about
+      the height of the browser chrome that is not there, and stays short until
+      a geometry change exercises it (see `.app-frame`). `.app-frame` is already
+      `100vh` there and so is full height from the first frame, which is what
+      made this visible rather than harmless: the splash covered the top of a
+      screen the app already filled, so a strip of the bottom tab bar showed
+      BELOW the splash, and the lockup — centred in a box short by that much —
+      sat high and then dropped to the middle when the viewport settled.
+
+      So the height is stated the way `.app-frame` states it, in both spellings
+      of "installed" and for the reasons given there: `100vh` is the large
+      viewport, a fixed number needing no settling, and in standalone there is
+      no chrome for it to be wrong about. The two boxes now agree at every
+      moment, which is the property that matters — a splash that disagrees with
+      the app behind it by any amount shows a slice of the app around its edge.
+      A browser tab keeps the plain fixed box, where the chrome is real, the
+      layout viewport is honest about it, and a cold start is the only time this
+      is ever on screen anyway.
 
       The mark and the name together are 40% of the width, and every number
       inside them is a fraction of THAT rather than of the viewport: `.brand` is
@@ -135,6 +154,16 @@
         background: #f9f9f7;
       }
       :root[data-theme="dark"] #boot { background: #0d0d0d; }
+
+      /* See "## Sizing" above. `bottom: auto` rather than leaving `inset: 0` to
+         be resolved as over-constrained: which of the three the browser drops
+         is a rule nobody should have to remember, and the height is the one
+         being asserted. Kept in step with `.app-frame` in `index.css` by hand,
+         like `--page` and `--ink` above it. */
+      @media (display-mode: standalone) {
+        #boot { height: 100vh; bottom: auto; }
+      }
+      :root[data-standalone] #boot { height: 100vh; bottom: auto; }
 
       /* The mark and the name on one line, sized as a fraction of the screen
          and then measured from the inside. `cqw` is one hundredth of this row,
