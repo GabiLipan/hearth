@@ -66,3 +66,49 @@ export function nextFreeSlot(used: number[]): number {
   }
   return SLOTS.reduce((best, s) => ((counts.get(s) ?? 0) < (counts.get(best) ?? 0) ? s : best), 1)
 }
+
+/* ---------- resolving a token to something measurable ---------- */
+
+/**
+ * A CSS custom property as a concrete `#rrggbb`, cached per theme.
+ *
+ * `inkOn` measures contrast and so needs a colour it can parse; `slotVar`
+ * hands back `var(--series-3)`, which nothing outside the browser's style
+ * resolution can read. The tokens themselves are plain hex in `index.css`, with
+ * a light and a dark step, so one `getComputedStyle` per token per theme is the
+ * whole cost — and the cache is keyed on the theme precisely so a flip
+ * re-resolves rather than repainting yesterday's answer.
+ *
+ * Deliberately not a table of inks written beside the palette. That is the
+ * argument `lib/ink.ts` opens with and it holds here: two themes' worth of
+ * exceptions, going stale the first time a slot is re-tuned, with nothing to
+ * say so. Measuring the value that is actually on the page cannot go stale.
+ *
+ * Undefined off the DOM — the unit tests run in node — so every caller needs a
+ * behaviour for "cannot measure this", and for `Face` that is the tint it drew
+ * before any of this existed.
+ */
+const hexCache = new Map<string, string>()
+
+export function tokenHex(token: string, theme: string): string | undefined {
+  const key = `${theme}|${token}`
+  const hit = hexCache.get(key)
+  if (hit) return hit
+  if (typeof document === 'undefined') return undefined
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
+  // Only a hit is cached. A miss is a token that has been renamed or a read
+  // that happened before the stylesheet resolved, and caching either would make
+  // a face permanently and invisibly wrong — where re-reading costs one style
+  // recalc on a path that is otherwise never taken.
+  if (!isHexColour(raw)) return undefined
+  const value = raw.toLowerCase()
+  hexCache.set(key, value)
+  return value
+}
+
+/** The hex a face will actually be painted in: its own colour, else its slot's. */
+export function paintHex(slot: number | undefined, color: string | undefined, theme: string): string | undefined {
+  if (color && isHexColour(color)) return color.trim().toLowerCase()
+  if (slot === undefined) return undefined
+  return tokenHex(`--series-${((slot - 1) % SLOT_COUNT) + 1}`, theme)
+}

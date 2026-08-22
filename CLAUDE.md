@@ -70,6 +70,7 @@ read-only detector that reports which are present — run it when unsure.
 | `23-custom-colours.sql` | `categories.color` / `accounts.color` / `goals.color` — a `#rrggbb` of your own, laid OVER the slot rather than replacing it. Null is the ordinary case |
 | `24-goal-allocations.sql` | `goal_entries` — a goal is a CLAIM on money already in an account, not a pot you move money into. `assign_to_goal` puts some of what an account holds towards a goal and refuses to let the goals on one account claim more than it has; `settle_goals` takes a withdrawal off what is unassigned first and then off the largest pot |
 | `25-month-rule.sql` | `households.contribution_cutoff_day` + `income_cutoff_day` (null = never shift) and `set_month_rule` — the 25th stops being a constant and becomes two settings; `transactions.book_month` is one row's own answer, and the only thing that can move spending |
+| `26-account-ink.sql` | `accounts.ink` — the MARK on an account's tile, where measuring it is not the answer. Null (the ordinary case) means measure it. Same deploy trap as `23`: run it BEFORE deploying |
 
 All are re-runnable, with **five ordering traps**, and three of them are the
 same trap. The rule migrations stack: `20` drops the three-argument
@@ -1161,6 +1162,56 @@ the single place a level comes from.
   `FlowNode`, `PayeeTotal` and `HeatmapRow` all carry `color` next to `slot`.
   `SlotPicker` offers it as a disclosure and not a `Popover`: it lives inside a
   `Sheet`, and a popover portals underneath one.
+
+  **That "cannot promise the contrast" is not theoretical, and on an ACCOUNT it
+  broke outright.** `Face` derived both halves of a badge from one value — the
+  icon in the colour, on a 16% mix of it into the surface — which is legible for
+  the twelve, each having a step per theme, and unreadable for a hex, which has
+  one value for both. Ask for a bank's own navy and the dark theme gives a dark
+  mark on a nearly-black tile. No tuning of the 16% saves it: the fill and the
+  mark are the same colour by construction, so in dark mode both are dark, and
+  the colours most worth matching — a bank's — are the ones most likely to be
+  dark.
+
+  So an account badge is a SOLID tile (`Face fill`), with the mark whichever of
+  black or white measures better against it — `faceInk` in `ink.ts`, the same
+  question `inkOn` already answers for a name written onto a category's own
+  colour. A tile cannot fail that way because it IS a ground rather than a mix
+  with one. Four things about it:
+
+  - **Categories keep the tint, deliberately.** A category's colour is there to
+    tell it from the eleven others rather than to MATCH something, so in
+    practice it is only ever a palette slot, and a list of circles is quieter
+    than a list of filled discs. The shapes already say which axis you are
+    reading; this says it again in weight.
+  - **`accounts.ink` (migration 26) is for what measurement cannot reach**, and
+    nothing else: a brand mark in the brand's own colour on a pale tile.
+    Measurement says black on white, correctly, and the answer wanted is navy.
+    Null is the ordinary case, so every account that existed before 26 got a
+    legible mark without anybody opening a form. `InkPicker` measures a chosen
+    pair against 3:1 and SAYS so rather than refusing it — their bank's colours,
+    on their own screen.
+  - **The measurement needs a hex, and `slotVar` is a token.** `paintHex` /
+    `tokenHex` in `palette.ts` resolve one off the document, cached per theme,
+    and only a HIT is cached: a miss is a renamed token or a read that beat the
+    stylesheet, and caching either would make a face permanently and invisibly
+    wrong. Undefined off the DOM — the tests run in node — so every caller needs
+    a "cannot measure this" behaviour, and for `Face` that is the tint it drew
+    before. Quieter than intended, never invisible. Deliberately NOT a table of
+    inks beside the palette: that is `ink.ts`'s own opening argument, two themes
+    of exceptions going stale the first time a slot is re-tuned.
+  - **A free background introduces exactly one new failure**, and it is handled:
+    a tile the colour of the card it sits on has no edge, so a white badge on
+    the light theme is an icon floating in a row. `needsRing` measures it rather
+    than special-casing white — the dark theme's near-black is the same problem
+    from the other end — and the threshold is low on purpose, because a ring on
+    a merely pale tile is visible as a ring.
+
+  The picker gets the same treatment and for a sharper reason: `IconPicker`
+  takes `fill`/`ink` from the account form, because without it the SELECTED cell
+  kept the tint — so on the one screen where you are choosing, the navy icon you
+  had just picked was the one you could not see. A preview wrong in the same way
+  the old badge was is worse than no preview.
 - **A goal wears the same face as a category, and now gets to choose it.**
   `goals.slot` and `goals.icon` have existed since the table did and the cards
   have always painted them, but the form offered the first twenty-four keys of

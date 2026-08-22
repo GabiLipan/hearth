@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SLOTS, SLOT_COUNT, SLOT_NAMES, SWATCH_ORDER, isHexColour, nextFreeSlot, paintOf, slotVar } from './palette'
+import { SLOTS, SLOT_COUNT, SLOT_NAMES, SWATCH_ORDER, isHexColour, nextFreeSlot, paintHex, paintOf, slotVar, tokenHex } from './palette'
 
 describe('SWATCH_ORDER', () => {
   /**
@@ -67,5 +67,39 @@ describe('nextFreeSlot', () => {
   it('gives the least-used slot', () => {
     expect(nextFreeSlot([])).toBe(1)
     expect(nextFreeSlot(SLOTS.filter((s) => s !== 5))).toBe(5)
+  })
+})
+
+describe('resolving a paint to something measurable', () => {
+  /**
+   * `inkOn` measures contrast and so needs a colour it can parse, and
+   * `slotVar` hands back `var(--series-3)` — which only the browser's style
+   * resolution can read. These tests run in node, where there is no document,
+   * so this is the "cannot measure" path: every caller needs a behaviour for
+   * it, and for `Face` that is the tint it drew before any of this existed. A
+   * face that is quieter than intended, never one that is invisible.
+   */
+  it('is undefined for a slot off the DOM, rather than a token nothing can read', () => {
+    expect(paintHex(1, undefined, 'light')).toBeUndefined()
+    expect(paintHex(undefined, undefined, 'light')).toBeUndefined()
+    expect(tokenHex('--series-1', 'light')).toBeUndefined()
+  })
+
+  /**
+   * A custom colour needs no resolving at all, which is the case that matters:
+   * it is the one that could not be painted legibly before, and it is
+   * measurable everywhere, document or not.
+   */
+  it('answers a custom colour without touching the document', () => {
+    expect(paintHex(1, '#0A2D5E', 'light')).toBe('#0a2d5e')
+    expect(paintHex(undefined, '#0a2d5e', 'dark')).toBe('#0a2d5e')
+  })
+
+  it('ignores a colour that is not one, and falls back to the slot', () => {
+    // The same reasoning as `isHexColour`: a value that is not six hex digits
+    // is a half-typed field or something that should never have reached here,
+    // and painting with it would put an arbitrary string into `background:`.
+    expect(paintHex(1, 'var(--series-1)', 'light')).toBeUndefined()
+    expect(paintHex(1, '#7c6', 'light')).toBeUndefined()
   })
 })

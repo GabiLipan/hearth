@@ -280,6 +280,16 @@ export interface Account {
   /** A colour of its own, `#rrggbb`, overriding the slot. See `Category.color`. */
   color?: string
   /**
+   * The MARK on the tile, `#rrggbb`, where measuring it is not the answer.
+   *
+   * An account badge is a solid tile and the icon on it is whichever of black
+   * or white measures more legible — see `faceInk`. Undefined is the ordinary
+   * case and means exactly that. It is set only for the thing measurement
+   * cannot reach: a brand mark in the brand's own colour on a pale tile, which
+   * is a decision rather than a legibility question. Migration 26.
+   */
+  ink?: string
+  /**
    * Which book this account is in, when deriving it from grants gets it wrong.
    * Undefined — the normal case — means derive. See `classifyAccounts`.
    */

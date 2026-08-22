@@ -44,7 +44,7 @@ import { checkForUpdate, installUpdate, useUpdateState } from '../lib/updates'
 import { discardAllDeadLetters, discardDeadLetter, retryDeadLetter } from '../lib/outbox'
 import { parseAmount, CURRENCIES, currencySymbol } from '../lib/money'
 import { exportJSON, downloadJSON, importJSON, clearAllData } from '../lib/backup'
-import { paintOf, nextFreeSlot } from '../lib/palette'
+import { paintHex, paintOf, nextFreeSlot } from '../lib/palette'
 import { seedDemoData } from '../lib/demo'
 import {
   getTransferMode,
@@ -76,7 +76,7 @@ import {
 } from '../lib/accounts'
 import { CategoryTree } from '../components/CategoryTree'
 import { ImportsSection } from '../components/ImportHistory'
-import { IconPicker, SlotPicker } from '../components/IconPicker'
+import { IconPicker, InkPicker, SlotPicker } from '../components/IconPicker'
 import { PersonDot, nameOf } from '../components/PersonDot'
 
 /**
@@ -2257,7 +2257,7 @@ function DemoDataForm({ open, onClose }: { open: boolean; onClose: () => void })
 }
 
 function AccountForm({ account, open, onClose }: { account?: Account; open: boolean; onClose: () => void }) {
-  const { currency } = useApp()
+  const { currency, resolvedTheme } = useApp()
   const { userId } = useSyncState()
   const [name, setName] = useState(account?.name ?? '')
   const [kind, setKind] = useState<Account['kind']>(account?.kind ?? 'current')
@@ -2277,6 +2277,16 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
   /** A colour of its own, overriding the slot. Undefined is the normal case. */
   const [color, setColor] = useState(account?.color)
   /**
+   * The mark on the tile, where measuring it is not the answer. Undefined is
+   * the normal case and means "measure it" — see `InkPicker`.
+   */
+  const [ink, setInk] = useState(account?.ink)
+  /**
+   * The tile as a measurable hex, for the two controls that preview it.
+   * Undefined off the DOM, where both fall back to the tint — see `paintHex`.
+   */
+  const fill = paintHex(slot, color, resolvedTheme)
+  /**
    * Whether the face is still the one `kind` implies.
    *
    * Until somebody picks, changing the type moves the colour and icon with it —
@@ -2285,7 +2295,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
    * their choice is the newer answer.
    */
   const [facePicked, setFacePicked] = useState(
-    account?.slot != null || account?.icon != null || account?.color != null,
+    account?.slot != null || account?.icon != null || account?.color != null || account?.ink != null,
   )
   useEffect(() => {
     if (facePicked) return
@@ -2372,6 +2382,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         slot,
         icon,
         color,
+        ink,
         publishesHouseholdRows: publishes,
       })
     } else {
@@ -2395,6 +2406,7 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         slot,
         icon,
         color,
+        ink,
         createdBy: userId,
       })
     }
@@ -2492,7 +2504,23 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
             setIcon(next)
           }}
           colour={paintOf(slot, color)}
+          fill={fill}
+          ink={ink}
           hint={facePicked ? undefined : 'from the type'}
+        />
+        {/* Under the two it depends on, because it is the one control here
+            whose default is computed from what they say. Moving either of them
+            changes what "Auto" resolves to, and the preview beside it is where
+            you see that happen. */}
+        <InkPicker
+          slot={slot}
+          color={color}
+          value={ink}
+          onChange={(next) => {
+            setFacePicked(true)
+            setInk(next)
+          }}
+          icon={icon}
         />
         {/* Only when editing. A brand new account has no grants yet, so there is
             nothing to derive from and nothing to override. */}

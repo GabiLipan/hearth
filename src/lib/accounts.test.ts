@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { format, subDays } from 'date-fns'
 import type { Transaction } from './db'
-import { balanceHistory } from './accounts'
+import { accountFace, balanceHistory } from './accounts'
 
 const day = (offset: number) => format(subDays(new Date(), offset), 'yyyy-MM-dd')
 
@@ -60,5 +60,32 @@ describe('balanceHistory', () => {
     const series = balanceHistory('a', [txn('a', -500, day(0))], 10_000, 30)
     expect(series[30]).toBe(10_000)
     expect(series[29]).toBe(10_500)
+  })
+})
+
+describe('accountFace', () => {
+  const base = { kind: 'current' as const, slot: undefined, icon: undefined, color: undefined, ink: undefined }
+
+  it('derives a face from the type when nobody has chosen one', () => {
+    // The state this feature exists to remove: a raw `account.slot` read is
+    // undefined on the common case and paints the badge grey.
+    expect(accountFace(base)).toEqual({ slot: 1, icon: 'bank', color: undefined, ink: undefined })
+    expect(accountFace({ ...base, kind: 'savings' }).icon).toBe('piggy')
+    expect(accountFace({ ...base, kind: 'credit' }).icon).toBe('card')
+  })
+
+  it('never derives a colour or a mark from the type', () => {
+    // The derived faces are palette slots, and the palette is the one thing
+    // whose ink can always be measured — so there is nothing to derive, and a
+    // derived override would be a decision nobody made.
+    for (const kind of ['current', 'savings', 'credit', 'cash'] as const) {
+      expect(accountFace({ ...base, kind }).color).toBeUndefined()
+      expect(accountFace({ ...base, kind }).ink).toBeUndefined()
+    }
+  })
+
+  it('carries a chosen colour and mark through unchanged', () => {
+    const face = accountFace({ ...base, slot: 5, icon: 'bankOfScotland', color: '#0a2d5e', ink: '#ffffff' })
+    expect(face).toEqual({ slot: 5, icon: 'bankOfScotland', color: '#0a2d5e', ink: '#ffffff' })
   })
 })

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { contrast, inkOn, luminance, DARK_INK, LIGHT_INK } from './ink'
+import {
+  contrast,
+  faceInk,
+  inkOn,
+  luminance,
+  needsRing,
+  DARK_INK,
+  GRAPHIC_CONTRAST,
+  LIGHT_INK,
+  RING_BELOW,
+} from './ink'
 import { shade } from './shade'
 
 /** The twelve slots, both themes, exactly as `index.css` defines them. */
@@ -81,5 +91,73 @@ describe('inkOn', () => {
         expect(contrast(inkOn(shaded).color, shaded), shaded).toBeGreaterThanOrEqual(4.5)
       }
     }
+  })
+})
+
+describe('the mark on an account tile', () => {
+  /**
+   * The whole point of the solid tile, stated as the thing that used to fail.
+   *
+   * A bank's navy on the old recipe was the icon in that navy on a 16% mix of
+   * it into the surface, which in the dark theme is a dark mark on a nearly
+   * black tile. On a solid tile the same colour gets white, measured.
+   */
+  it('gives a dark brand colour a legible mark rather than itself', () => {
+    const navy = '#0a2d5e'
+    expect(faceInk(navy)).toBe(LIGHT_INK)
+    expect(contrast(faceInk(navy), navy)).toBeGreaterThanOrEqual(GRAPHIC_CONTRAST)
+
+    // And the failure it replaces: the mark WAS the fill, so there was nothing
+    // to measure and no contrast to have.
+    expect(contrast(navy, navy)).toBeCloseTo(1, 5)
+  })
+
+  it('clears the graphic bar on every fill in the palette, both themes', () => {
+    // The claim that makes "Auto" the default rather than a suggestion. AA for
+    // a graphic is 3:1; the palette clears 4.5 already, so this is the floor
+    // that matters for the twelve and it is nowhere near it.
+    for (const fill of [...LIGHT, ...DARK]) {
+      expect(contrast(faceInk(fill), fill), fill).toBeGreaterThanOrEqual(GRAPHIC_CONTRAST)
+    }
+  })
+
+  it('lets a deliberate choice through, legible or not', () => {
+    // "Navy on white" is the case measurement cannot reach — it is a decision,
+    // and the form measures it and says so rather than refusing it.
+    const navy = '#0a2d5e'
+    expect(faceInk('#ffffff')).toBe(DARK_INK)
+    expect(faceInk('#ffffff', navy)).toBe(navy)
+
+    // Faint, and still honoured.
+    expect(faceInk('#0b1c33', navy)).toBe(navy)
+    expect(contrast('#0b1c33', navy)).toBeLessThan(GRAPHIC_CONTRAST)
+  })
+
+  it('ignores an override that is not a colour', () => {
+    // Belt and braces for a value that reached the cache before the check
+    // constraint existed, or from a client that sent a token by mistake.
+    expect(faceInk('#0a2d5e', 'var(--ink)')).toBe(LIGHT_INK)
+    expect(faceInk('#0a2d5e', '')).toBe(LIGHT_INK)
+  })
+
+  /**
+   * The one failure a free background introduces, and the only one: a tile the
+   * colour of the card it sits on has no edge to see.
+   */
+  it('asks for a ring only where the tile has no edge of its own', () => {
+    expect(needsRing('#ffffff', '#ffffff')).toBe(true)
+    expect(needsRing('#fdfdfd', '#ffffff')).toBe(true)
+    expect(needsRing('#0a2d5e', '#ffffff')).toBe(false)
+    // From the other end, which is why this is measured rather than a test for
+    // white: the dark theme's near-black has exactly the same problem.
+    expect(needsRing('#111111', '#0e0e0e')).toBe(true)
+    expect(needsRing('#ffffff', '#0e0e0e')).toBe(false)
+    // A merely PALE tile keeps its edge and gets no ring — a ring on one of
+    // those is visible as a ring, and these are meant to read as marks. The
+    // threshold sits between this and `#e8e8e8`, which at 1.23:1 is faint
+    // enough that a square with no outline reads as an icon floating in a row.
+    expect(contrast('#d4d4d4', '#ffffff')).toBeGreaterThan(RING_BELOW)
+    expect(needsRing('#d4d4d4', '#ffffff')).toBe(false)
+    expect(needsRing('#e8e8e8', '#ffffff')).toBe(true)
   })
 })

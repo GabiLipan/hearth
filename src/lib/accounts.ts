@@ -108,14 +108,25 @@ const KIND_FACE: Record<Account['kind'], { slot: number; icon: string }> = {
  * read gives `undefined` on the common case and paints the row grey, which is
  * the state this feature exists to remove.
  */
-export function accountFace(account: Pick<Account, 'kind' | 'slot' | 'icon' | 'color'>): {
+export function accountFace(account: Pick<Account, 'kind' | 'slot' | 'icon' | 'color' | 'ink'>): {
   slot: number
   icon: string
   /** A colour of its own, overriding the slot. Never derived from `kind`. */
   color?: string
+  /**
+   * The mark on the tile, where somebody has overridden the measured one.
+   * Never derived from `kind` either: the derived faces are palette slots, and
+   * the palette is the one thing whose ink can always be measured.
+   */
+  ink?: string
 } {
   const base = KIND_FACE[account.kind] ?? KIND_FACE.current
-  return { slot: account.slot ?? base.slot, icon: account.icon ?? base.icon, color: account.color }
+  return {
+    slot: account.slot ?? base.slot,
+    icon: account.icon ?? base.icon,
+    color: account.color,
+    ink: account.ink,
+  }
 }
 
 /* ---------- balances ---------- */

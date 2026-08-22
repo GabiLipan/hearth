@@ -288,6 +288,17 @@ select '25-month-rule.sql',
        'households cutoff days + transactions.book_month + set_month_rule() exist'
 
 union all
+-- Until this reads true, an account's mark is painted in the same colour as its
+-- tile — which is legible on the twelve palette slots, each of which has a step
+-- per theme, and unreadable on a custom hex, which has one value for both. A
+-- bank's own navy is a dark mark on a nearly-black tile in dark mode.
+select '26-account-ink.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'accounts'
+                  and column_name = 'ink'),
+       'accounts.ink exists — run 26 BEFORE deploying a client that writes it'
+
+union all
 -- Not a migration: the same trap 09-after-10 sets, now two files along. Both 20
 -- and 21 drop the previous upsert_rule and replace it with a wider one, and 03
 -- and 20 are both still re-runnable — running either AFTER 21 or 22 puts an

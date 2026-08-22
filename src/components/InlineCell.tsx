@@ -1,9 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import type { Account, Category } from '../lib/db'
-import { accountFace } from '../lib/accounts'
 import { fullName, grouped } from '../lib/categories'
-import { paintOf } from '../lib/palette'
 import { parseAmount } from '../lib/money'
 import { AccountDot, CategoryDot, cx } from './ui'
 
@@ -366,8 +364,3 @@ export function AccountEditor({
   )
 }
 
-/** The colour an account badge uses, for callers that want just the token. */
-export const accountColour = (a: Account) => {
-  const face = accountFace(a)
-  return paintOf(face.slot, face.color)
-}

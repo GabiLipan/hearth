@@ -49,7 +49,7 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   // them from here and from the table.
   accounts: [
     'id', 'name', 'kind', 'visibility', 'ownerId', 'openingBalanceMinor', 'sortOrder',
-    'bookOverride', 'slot', 'icon', 'color',
+    'bookOverride', 'slot', 'icon', 'color', 'ink',
     // Consent, and an ordinary field on the account: `accounts_update` already
     // decides who may change one, and it needs `manage`. Writing it bumps the
     // visibility epoch server-side in BOTH directions — see migration 19 — so

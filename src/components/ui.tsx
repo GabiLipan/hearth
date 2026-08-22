@@ -16,8 +16,10 @@ import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, ChevronDown, Info, Search, type LucideIcon } from 'lucide-react'
 import type { Account, Category } from '../lib/db'
 import { accountFace } from '../lib/accounts'
-import { slotVar } from '../lib/palette'
+import { paintHex, slotVar, tokenHex } from '../lib/palette'
+import { faceInk, needsRing } from '../lib/ink'
 import { appScroller } from '../lib/scroll'
+import { useApp } from '../state/AppContext'
 import { CategoryIcon } from './CategoryIcon'
 import { useSwipeDismiss } from '../hooks/useSwipeDismiss'
 
@@ -1615,34 +1617,82 @@ export function Sheet({
 export function Face({
   slot,
   color,
+  ink,
   icon,
   shape = 'circle',
   size = 36,
+  fill = false,
   className,
 }: {
   /** A palette slot, or undefined for the unstyled grey. */
   slot?: number
   /** A colour of its own, overriding the slot. See `paintOf`. */
   color?: string
+  /**
+   * The mark's colour, overriding the measured one. `fill` only — on a tint the
+   * mark IS the colour and there is nothing to choose.
+   */
+  ink?: string
   icon?: string
   shape?: 'circle' | 'square'
   size?: number
+  /**
+   * A SOLID tile rather than a tint of the colour under itself.
+   *
+   * What accounts wear, and why they wear it is in `faceInk`: the tint derives
+   * both halves from one value, which is legible on the twelve palette slots
+   * and unreadable in dark mode on a custom hex — a bank's own navy is a dark
+   * mark on a nearly-black tile. A solid tile cannot fail that way, because it
+   * is a ground rather than a mix with one.
+   *
+   * Categories keep the tint deliberately. A category's colour is there to tell
+   * it from the eleven others rather than to MATCH something, so it is only
+   * ever a palette slot in practice, and a list of circles is quieter than a
+   * list of filled discs. The badge shapes already say which axis you are
+   * reading; this is the same distinction said again in weight.
+   */
+  fill?: boolean
   className?: string
 }) {
+  const { resolvedTheme } = useApp()
   const painted = color ?? (slot ? slotVar(slot) : undefined)
   const colour = painted ?? 'var(--ink-3)'
+
+  /**
+   * The measured half, and what happens when it cannot be measured.
+   *
+   * `paintHex` reads the resolved token off the document, so it is undefined
+   * wherever there is no document — and, more usefully, wherever a token has
+   * been renamed out from under this. Both fall back to the tint, which is the
+   * behaviour every badge had before any of this existed: a face that is
+   * quieter than intended, never one that is invisible.
+   */
+  const hex = fill ? paintHex(slot, color, resolvedTheme) : undefined
+  const solid = hex !== undefined
+  const mark = solid ? faceInk(hex, ink) : colour
+  const ground = solid ? tokenHex('--surface', resolvedTheme) : undefined
+
   return (
     <span
       className={cx(
         'grid shrink-0 place-items-center',
         shape === 'circle' ? 'rounded-full' : 'rounded-[calc(var(--dot)*0.3)]',
         'size-[var(--dot)] [&_svg]:size-[calc(var(--dot)*0.52)]',
+        // The one failure a free background introduces: a tile the colour of
+        // the card it sits on has no edge at all. Measured rather than
+        // special-cased on white — the dark theme's near-black is the same
+        // problem from the other end. See `needsRing`.
+        solid && ground && needsRing(hex, ground) && 'ring-1 ring-hairline',
         className,
       )}
       style={{
         ['--dot' as string]: `${size}px`,
-        background: painted ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))` : 'var(--surface-2)',
-        color: colour,
+        background: solid
+          ? hex
+          : painted
+            ? `color-mix(in oklab, ${colour} 16%, var(--surface-2))`
+            : 'var(--surface-2)',
+        color: mark,
       }}
       aria-hidden
     >
@@ -1669,7 +1719,18 @@ export function CategoryDot({ category, size = 36, className }: { category?: Cat
  */
 export function AccountDot({ account, size = 36, className }: { account?: Account; size?: number; className?: string }) {
   const face = account ? accountFace(account) : undefined
-  return <Face slot={face?.slot} color={face?.color} icon={face?.icon} shape="square" size={size} className={className} />
+  return (
+    <Face
+      slot={face?.slot}
+      color={face?.color}
+      ink={face?.ink}
+      icon={face?.icon}
+      shape="square"
+      size={size}
+      fill
+      className={className}
+    />
+  )
 }
 
 /* ---------- Progress bar (budgets, goals) ---------- */

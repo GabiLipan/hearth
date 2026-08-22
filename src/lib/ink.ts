@@ -77,3 +77,60 @@ export function inkOn(fill: string): { color: string; dark: boolean } {
   const useDark = dark > light
   return { color: useDark ? DARK_INK : LIGHT_INK, dark: useDark }
 }
+
+/* ---------- a badge drawn as a solid tile ---------- */
+
+/**
+ * The ink an account badge carries, chosen or measured.
+ *
+ * An account badge is a SOLID tile now, and the reason is a failure the tint it
+ * replaced could not avoid. The old recipe derived both halves from one value —
+ * the icon in the colour, on a 16% mix of that colour into the surface — which
+ * is legible for the twelve palette slots, because each of those carries a
+ * light-theme and a dark-theme step. A custom colour is one hex for both. So a
+ * brand navy became a dark mark on a nearly-black tile the moment the app went
+ * dark, and no amount of tuning the 16% saves it: the fill and the mark are the
+ * same colour by construction, and in dark mode both are dark.
+ *
+ * A solid tile has no such failure. It is visible on any ground because it IS a
+ * ground, and the mark on it is whichever of black or white measures better —
+ * the same question `inkOn` already answers for a category's name written onto
+ * its own colour, asked in the one other place the ground differs per badge.
+ *
+ * An explicit `ink` overrides it, and that exists for the one thing measurement
+ * cannot reach: a brand mark in the brand's own colour on a pale tile. `inkOn`
+ * of white is black, correctly, and "navy on white" is not a legibility
+ * question but a decision. It is never the default, so an illegible pair can
+ * only ever be deliberate — which the form measures with `contrast` and says
+ * so about.
+ */
+export function faceInk(fill: string, ink?: string): string {
+  return ink && luminance(ink) !== null ? ink : inkOn(fill).color
+}
+
+/**
+ * How readable a chosen pair is, for a form that wants to say so.
+ *
+ * Not a veto. It is their app and their bank's colours, and a control that
+ * refuses a pair somebody can see perfectly well on their own screen is worse
+ * than one that mentions it. AA for large text and graphics is 3:1, which is
+ * the right bar for a 19px mark rather than the 4.5:1 body text would want.
+ */
+export const GRAPHIC_CONTRAST = 3
+
+/**
+ * Whether a solid tile needs a hairline around it to be seen at all.
+ *
+ * The failure a free background introduces, and the only one it introduces: a
+ * tile the colour of the card it sits on has no edge, so a white account badge
+ * on the light theme is an icon floating in the middle of a row. Measured
+ * rather than special-cased on white, because the same is true of the dark
+ * theme's near-black and of anything close to either.
+ *
+ * The threshold is low on purpose. A ring on a tile that is merely PALE is
+ * visible as a ring, and the tiles are meant to read as marks rather than as
+ * outlined boxes; this fires only where there is essentially no edge to see.
+ */
+export const RING_BELOW = 1.25
+
+export const needsRing = (fill: string, ground: string) => contrast(fill, ground) < RING_BELOW
