@@ -567,10 +567,14 @@ export default function Activity() {
           history, and drops the narrowing without leaving the page. */}
       {drilled && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-accent/8 px-4 py-2.5 ring-1 ring-accent/20 md:mb-2.5 md:py-2">
-          {/* On a phone the sentence takes the whole first line and the two
-              ways out share the second. Squeezed between them it wrapped into a
-              three-word column with a button either side, which is the shape of
-              a toolbar rather than of a sentence. */}
+          {/* On a phone the sentence takes the whole first line ONLY when
+              there are two ways out to share the second — squeezed between
+              them it wrapped into a three-word column with a button either
+              side, which is the shape of a toolbar rather than of a sentence.
+              With one exit there is nothing to share the line with, so the
+              same rule left a short label alone on one line and a single
+              button alone on the next, with the empty half of each between
+              them: a two-line panel carrying one word and one button. */}
           {origin && (
             <button
               type="button"
@@ -583,7 +587,11 @@ export default function Activity() {
               <ChevronLeft size={13} /> {origin.label}
             </button>
           )}
-          <p className="order-1 min-w-0 basis-full text-sm md:order-2 md:basis-auto md:flex-1">
+          <p
+            className={`order-1 min-w-0 text-sm md:order-2 md:basis-auto md:flex-1 ${
+              origin ? 'basis-full' : 'flex-1'
+            }`}
+          >
             <span className="font-medium">{drillLine}</span>
             {book !== 'all' && <span className="text-ink-3">{` · ${BOOK_LABEL[book]}`}</span>}
           </p>
