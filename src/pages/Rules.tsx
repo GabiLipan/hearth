@@ -5,7 +5,8 @@ import type { Rule, Transaction } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import { useAccounts, useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules, useCacheReady } from '../lib/cache'
 import { canEditTransaction, levelOn } from '../lib/accounts'
-import { fullName } from '../lib/categories'
+import { fullName, styleOf } from '../lib/categories'
+import { paintOf } from '../lib/palette'
 import { applyCategory, cleanTitle, conditionWords, coverageOf, normalizePayee, TITLE_MAX } from '../lib/rules'
 import { TxnSelect } from '../components/TxnSelect'
 import { useSyncState } from '../hooks/useSync'
@@ -469,30 +470,59 @@ export default function RulesPage() {
       >
         {preview && (
           <div className="space-y-3">
-            <div className="flex items-start gap-2">
-              <p className="min-w-0 flex-1 text-sm text-ink-2">
-                Everything this rule speaks for. The ticked ones move to{' '}
-                <span className="font-medium text-ink">
-                  {preview.categoryId && catMap.get(preview.categoryId)
-                    ? fullName(catMap.get(preview.categoryId)!, catMap)
-                    : 'that category'}
-                </span>
-                ; the rest are left exactly as they are.
-              </p>
-              {/* The rule itself is one press away rather than restated here:
-                  what it MATCHES is edited in the same sheet that made it, and
-                  a second copy of those fields is a second place for them to
-                  drift. */}
-              <Button
-                size="sm"
-                variant="subtle"
-                onClick={() => {
-                  setPreview(null)
-                  setEditing(preview)
-                }}
-              >
-                Edit rule
-              </Button>
+            {/* The same head the transaction sheet's picker wears, for the
+                same reason the list below it is the same component: it is one
+                act asked at two moments. What the rule MATCHES is edited in
+                the sheet that made it — a second copy of those fields here
+                would be a second place for them to drift — so this states the
+                rule and hands over. */}
+            <div className="rounded-xl bg-surface-2 px-3.5 py-3">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-ink-3">Anything matching</p>
+                  <p className="truncate text-sm font-semibold">“{preview.match}”</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setPreview(null)
+                    setEditing(preview)
+                  }}
+                >
+                  Change
+                </Button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {preview.categoryId && catMap.get(preview.categoryId) && (
+                  <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium ring-1 ring-hairline">
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full"
+                      style={{
+                        background: paintOf(
+                          styleOf(catMap.get(preview.categoryId)!, catMap).slot,
+                          styleOf(catMap.get(preview.categoryId)!, catMap).color,
+                        ),
+                      }}
+                    />
+                    <span className="truncate">{fullName(catMap.get(preview.categoryId)!, catMap)}</span>
+                  </span>
+                )}
+                {cleanTitle(preview.title) && (
+                  <span className="inline-flex min-w-0 items-center rounded-full bg-surface px-2.5 py-1 text-xs font-medium ring-1 ring-hairline">
+                    <span className="truncate">Called “{cleanTitle(preview.title)}”</span>
+                  </span>
+                )}
+                {conditions(preview).map((w) => (
+                  <span
+                    key={w}
+                    className="inline-flex min-w-0 items-center rounded-full bg-surface px-2.5 py-1 text-xs text-ink-2 ring-1 ring-hairline"
+                  >
+                    <span className="truncate">{w}</span>
+                  </span>
+                ))}
+              </div>
             </div>
             <TxnSelect
               rows={coverage.get(preview.id)?.all ?? []}

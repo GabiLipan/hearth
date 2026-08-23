@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
 import { ScanLine, ArrowLeftRight, CalendarClock, HelpCircle, PiggyBank } from 'lucide-react'
@@ -11,11 +11,13 @@ import { accountsInBook } from '../lib/books'
 import { syncNow } from '../lib/session'
 import { scanReceipt } from '../lib/receipt'
 import { canAddTransactions, canEditTransaction, canManageAccount, levelOn } from '../lib/accounts'
-import { fullName, grouped, usableOn } from '../lib/categories'
+import { fullName, grouped, styleOf, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
+import { paintOf } from '../lib/palette'
 import { dateWindow, monthKey, monthLabel, shiftMonth, todayISO } from '../lib/dates'
 import {
+  alreadyFiled,
   learnRule,
   matchKey,
   suggestCategory,
@@ -34,7 +36,7 @@ import { findLikelyDuplicate } from '../lib/dedupe'
 import { fmtFullDate } from '../lib/dates'
 import { create, update, remove } from '../lib/data'
 import { useApp } from '../state/AppContext'
-import { Sheet, Field, TextInput, Select, Segmented, Button, CheckRow } from './ui'
+import { Sheet, Field, TextInput, Select, Segmented, Button, CheckRow, cx } from './ui'
 import { confirmAction } from './confirm'
 import { toast } from './toast'
 import { CategoryPicker } from './CategoryPicker'
@@ -125,6 +127,10 @@ export function TransactionForm({
   const [applyOthers, setApplyOthers] = useState(false)
   const [chosen, setChosen] = useState<Set<string> | null>(null)
   const [picking, setPicking] = useState(false)
+  /** The prompt's checkbox and its label, tied together by hand: they are siblings. */
+  const applyId = useId()
+  /** Whether the picker's rule summary has been unfolded into its fields. */
+  const [editingRule, setEditingRule] = useState(false)
   const [scanState, setScanState] = useState<string | null>(null)
   const amountRef = useRef<HTMLInputElement>(null)
   const receiptRef = useRef<HTMLInputElement>(null)
@@ -180,6 +186,7 @@ export function TransactionForm({
     setApplyOthers(false)
     setChosen(null)
     setPicking(false)
+    setEditingRule(false)
     setContributorGuessed(false)
     setTagSimilar(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -366,8 +373,25 @@ export function TransactionForm({
     return [...map.values()].sort((a, b) => b.date.localeCompare(a.date))
   }, [similar, unnamed])
 
-  /** Null means "all of them" — see `chosen`. */
-  const selectedIds = useMemo(() => chosen ?? new Set(others.map((t) => t.id)), [chosen, others])
+  /**
+   * What is ticked before anybody opens the picker.
+   *
+   * Everything EXCEPT the rows already filed under something that is not the
+   * catch-all. Those are the rows a person decided about by hand, and quietly
+   * refiling them because one new payment happened to be typed is the one
+   * outcome this prompt must not have by default — it was all-or-nothing
+   * before, and "all" included them. One press of the picker's "Filed" chip
+   * takes them back.
+   *
+   * Recomputed rather than frozen, so a row that the payee, the amount or the
+   * account has since brought into range is included; `chosen` overrides it
+   * the moment somebody chooses for themselves.
+   */
+  const defaultChosen = useMemo(
+    () => new Set(others.filter((t) => !alreadyFiled(t, (id) => catMap.get(id)?.name)).map((t) => t.id)),
+    [others, catMap],
+  )
+  const selectedIds = chosen ?? defaultChosen
   const chosenCount = others.filter((t) => selectedIds.has(t.id)).length
 
   /** The rule as it will be learned, in the words the prompt and picker use. */
@@ -877,32 +901,54 @@ export function TransactionForm({
           />
         </div>
 
-        {/* One prompt for both halves of what this row teaches. It sits under
-            the category because that is the later of the two fields it is
-            about — asking before the answer exists reads as a form arguing
-            with you. */}
+        {/*
+          One prompt for both halves of what this row teaches, and a small one.
+
+          It sits under the category because that is the later of the two
+          fields it is about — asking before the answer exists reads as a form
+          arguing with you. It is one line and a button rather than the padded
+          panel with a paragraph behind an ⓘ that it started as: everything
+          that panel explained is now visible in the sheet the button opens,
+          where it is the thing you are looking at rather than a footnote to a
+          form you are trying to finish.
+
+          With nothing ticked there is nothing to switch on, so the checkbox is
+          absent rather than dead — that happens whenever every similar row has
+          already been filed by hand, which is the case this default exists
+          for. The button is the way in either way, and it is the solid one:
+          the subtle variant on an accent-tinted panel was a grey button on a
+          blue-grey ground, which is a button you have to look for.
+        */}
         {others.length > 0 && (
-          <CheckRow
-            tone="accent"
-            checked={applyOthers}
-            onChange={setApplyOthers}
-            label={`Apply this to ${chosenCount} other ${chosenCount === 1 ? 'transaction' : 'transactions'}`}
-            status={applyOthers ? applyWords : undefined}
-            info={
-              <p>
-                {others.length === 1 ? 'One is' : `${others.length} are`} from “{prettyPayee(payee)}”. Choose
-                which, and what each of them gets, below — or in{' '}
-                <Link to="/settings/rules" className="underline underline-offset-2">
-                  Settings › Rules
-                </Link>
-                , at any time afterwards.
-              </p>
-            }
-          >
-            <Button size="sm" variant="subtle" onClick={() => setPicking(true)}>
-              Choose which…
+          <div className="flex items-center gap-2.5 rounded-xl bg-accent/8 px-3 py-2 ring-1 ring-accent/20">
+            {chosenCount > 0 && (
+              <input
+                id={applyId}
+                type="checkbox"
+                checked={applyOthers}
+                onChange={(e) => setApplyOthers(e.target.checked)}
+                className="size-[1.15rem] shrink-0 accent-[var(--accent)]"
+              />
+            )}
+            <label
+              htmlFor={chosenCount > 0 ? applyId : undefined}
+              className={cx('min-w-0 flex-1', chosenCount > 0 && 'cursor-pointer')}
+            >
+              <span className="block truncate text-sm font-medium leading-tight">
+                {chosenCount > 0
+                  ? `Apply to ${chosenCount} other ${chosenCount === 1 ? 'transaction' : 'transactions'}`
+                  : `${others.length} similar ${others.length === 1 ? 'row is' : 'rows are'} already filed`}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-ink-3">
+                {chosenCount > 0 && chosenCount < others.length
+                  ? `${others.length - chosenCount} already filed, left out`
+                  : (applyWords ?? `From “${prettyPayee(payee)}”`)}
+              </span>
+            </label>
+            <Button size="sm" onClick={() => setPicking(true)}>
+              Choose
             </Button>
-          </CheckRow>
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-3">
@@ -1055,7 +1101,7 @@ export function TransactionForm({
               // Closing the picker having ticked something is the answer to the
               // prompt behind it; leaving the master switch off would make the
               // choosing a no-op and blame the reader for it.
-              setApplyOthers(selectedIds.size > 0)
+              setApplyOthers(chosenCount > 0)
             }}
           >
             Done
@@ -1063,45 +1109,89 @@ export function TransactionForm({
         }
       >
         <div className="space-y-3">
-          {/* The rule, editable where it is a rule rather than a fact. The
-              reference is the identity — `normalizePayee` of it is what the
-              rule is keyed on — so it is stated and not offered; the name and
-              the category are what the rule SAYS, and both are bound to the
-              form's own fields rather than copied, so there is one answer on
-              two screens instead of two that can disagree. */}
-          <div className="rounded-xl bg-surface-2 px-4 py-3">
-            <p className="text-sm text-ink-2">
-              Anything from <span className="font-medium text-ink">“{prettyPayee(payee) || 'this payee'}”</span>{' '}
-              is {applyWords ? applyWords.charAt(0).toLowerCase() + applyWords.slice(1) : 'left as it is'}.
-            </p>
-            <div className="mt-2.5 space-y-3">
-              <Field label="Call it">
-                <TextInput
-                  value={title}
-                  maxLength={TITLE_MAX}
-                  onChange={(e) => {
-                    setTitle(e.target.value)
-                    setTitleSuggested(false)
-                  }}
-                  placeholder={kind === 'expense' ? 'e.g. Dinner out' : 'e.g. Salary'}
-                  autoComplete="off"
-                />
-              </Field>
-              {kind === 'expense' && (
-                <div>
-                  <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">File it under</span>
-                  <CategoryPicker
-                    groups={visibleGroups}
-                    byId={catMap}
-                    value={categoryId}
-                    onChange={(id) => {
-                      setCategoryId(id)
-                      setSuggested(false)
-                    }}
+          {/*
+            The rule as a sentence, with the fields folded away behind it.
+
+            This was a grey panel holding a sentence, a text field and the whole
+            twelve-tile category grid, which filled the sheet — so the one thing
+            the sheet exists for, the list of rows, opened below the fold. What
+            somebody needs to see on arrival is what the rule SAYS; changing it
+            is the rarer act and unfolds in place, which is the same disclosure
+            the app uses everywhere it cannot use a popover inside a sheet.
+
+            The reference is stated and not offered: `normalizePayee` of it is
+            the key the rule is stored under, so it is the row's identity rather
+            than an opinion about it. The name and the category are bound to the
+            form's own fields rather than copied into local state — one answer
+            shown twice, which cannot disagree with itself.
+          */}
+          <div className="rounded-xl bg-surface-2 px-3.5 py-3">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-ink-3">Anything from</p>
+                <p className="truncate text-sm font-semibold">“{prettyPayee(payee) || 'this payee'}”</p>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setEditingRule((v) => !v)} aria-expanded={editingRule}>
+                {editingRule ? 'Done' : 'Change'}
+              </Button>
+            </div>
+            {/* What the rule says, as one chip per thing it says, rather than
+                as a sentence: the sentence ran to four lines on a phone the
+                moment a category had a parent and the name had three words,
+                and a rule that takes four lines to read is one nobody checks
+                before pressing the button underneath it. */}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {learnsCategory && categoryId && catMap.get(categoryId) && (
+                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium ring-1 ring-hairline">
+                  <span
+                    aria-hidden
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ background: paintOf(styleOf(catMap.get(categoryId)!, catMap).slot, styleOf(catMap.get(categoryId)!, catMap).color) }}
                   />
-                </div>
+                  <span className="truncate">{fullName(catMap.get(categoryId)!, catMap)}</span>
+                </span>
+              )}
+              {learnsTitle && (
+                <span className="inline-flex min-w-0 items-center rounded-full bg-surface px-2.5 py-1 text-xs font-medium ring-1 ring-hairline">
+                  <span className="truncate">Called “{cleanTitle(title)}”</span>
+                </span>
+              )}
+              {!learnsCategory && !learnsTitle && (
+                <span className="text-xs text-ink-3">Nothing to apply yet — give it a name or a category.</span>
               )}
             </div>
+            {editingRule && (
+              <div className="mt-3 space-y-3 border-t border-hairline pt-3">
+                <Field label="Call it">
+                  <TextInput
+                    value={title}
+                    maxLength={TITLE_MAX}
+                    onChange={(e) => {
+                      setTitle(e.target.value)
+                      setTitleSuggested(false)
+                    }}
+                    placeholder={kind === 'expense' ? 'e.g. Dinner out' : 'e.g. Salary'}
+                    autoComplete="off"
+                  />
+                </Field>
+                {kind === 'expense' && (
+                  <div>
+                    <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">
+                      File it under
+                    </span>
+                    <CategoryPicker
+                      groups={visibleGroups}
+                      byId={catMap}
+                      value={categoryId}
+                      onChange={(id) => {
+                        setCategoryId(id)
+                        setSuggested(false)
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <TxnSelect
@@ -1117,7 +1207,11 @@ export function TransactionForm({
 
           <p className="text-xs text-ink-3">
             Each one gets whatever it is missing: the category if it is filed elsewhere, the name if it still shows
-            what the bank wrote. Nothing else on it changes, and one press of Undo puts them all back.
+            what the bank wrote. One press of Undo puts them all back, and{' '}
+            <Link to="/settings/rules" className="underline underline-offset-2">
+              Settings › Rules
+            </Link>{' '}
+            can do the same at any time afterwards.
           </p>
         </div>
       </Sheet>

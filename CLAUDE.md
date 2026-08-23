@@ -1083,11 +1083,32 @@ the single place a level comes from.
   migration for a fact the seed already states — and a household that renames it
   has said it is no longer the bin.
 
+  Where the two screens differ is the DEFAULT, and deliberately. The form
+  ticks everything except the rows already filed under something that is not
+  the catch-all: the app is offering to touch rows nobody asked it about, and
+  quietly refiling a decision somebody made by hand is the one outcome that
+  must not be the default. Settings still ticks everything the rule would move,
+  because you got there by pressing Apply on that rule — and because "Apply all"
+  beside it means exactly that. Conservative where the app initiates,
+  literal where the person does.
+
   A rule's coverage includes the rows already in the right place, so they can be
   ticked; what actually gets WRITTEN excludes them, and the button counts the
   write rather than the selection. A no-op update is a queued write that changes
   nothing, and a button promising more than it does is the same fault
   `applyCategory` takes such care about with rows that are not yours.
+- **A tile that opens says so with a shape, not a glyph.** `CategoryPicker`'s
+  expandable tiles carried an 11px chevron in the top-right corner: the
+  smallest thing on the screen, nowhere near the centred content it belongs to,
+  and the only corner furniture in an app whose controls are capsules. It is
+  the grabber under a sheet now — a 3px capsule at the foot of the tile, which
+  is the one shape in the language that already means "another layer, and it
+  comes out downwards", which is exactly where the drawer appears. It retracts
+  when the drawer is out. Note the conflict that cost a rebuild: written as
+  `opacity-40` plus `opacity-0` when expanded, the bar never went away —
+  which of two conflicting utilities wins is Tailwind's generated order, not
+  the order they are listed in, so a conditional has to produce ONE value per
+  property.
 - **A rule now answers two questions, and asking once gets one of them wrong.**
   A rule may carry a category, a name, or both (`rules.category_id` is nullable
   as of 20 — categories are only learned from spending, a name is worth learning

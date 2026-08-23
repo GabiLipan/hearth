@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { ChevronDown } from 'lucide-react'
 import type { Category } from '../lib/db'
 import { styleOf, type CategoryStyle } from '../lib/categories'
 import { paintOf } from '../lib/palette'
@@ -177,11 +176,32 @@ function Tile({
           centred flex column the span would otherwise size to its own text. */}
       <span className="w-full truncate text-xs font-medium leading-tight">{name}</span>
       {child && <span className="w-full truncate text-[0.65rem] leading-tight opacity-75">{child}</span>}
+      {/*
+        That this tile has more inside it, said with a shape rather than a
+        glyph.
+
+        It was an 11px chevron in the top-right corner, which is the smallest
+        thing on the screen, is nowhere near the centred content it belongs to,
+        and is the only corner furniture in an app whose controls are capsules.
+        This is the grabber under a sheet — the one shape in the language that
+        already means "there is another layer here, and it comes out
+        downwards", which is exactly where the drawer appears. It reads at a
+        glance across a grid of twelve without ever being read as a control of
+        its own, and it retracts when the drawer is out, because the layer it
+        was promising is now on screen.
+      */}
       {expandable && (
-        <ChevronDown
-          size={11}
+        <span
           aria-hidden
-          className={cx('absolute right-1.5 top-1.5 opacity-50 transition-transform', expanded && 'rotate-180')}
+          className={cx(
+            'absolute bottom-1.5 left-1/2 h-[3px] -translate-x-1/2 rounded-full transition-all duration-200',
+            selected ? 'bg-current' : 'bg-ink-3',
+            // One conditional per property. Written as two — `opacity-40` plus
+            // `opacity-0` when expanded — the second never wins: which of two
+            // conflicting utilities applies is Tailwind's generated order, not
+            // the order they are listed in, and the bar simply stayed on.
+            expanded ? 'w-3 opacity-0' : selected ? 'w-7 opacity-40' : 'w-7 opacity-30',
+          )}
         />
       )}
     </button>
