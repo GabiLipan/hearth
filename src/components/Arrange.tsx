@@ -24,7 +24,7 @@ import {
   type LayoutItem,
   type SectionDef,
 } from '../lib/layout'
-import { Columns, Popover, cx } from './ui'
+import { Columns, Popover, cx, type InfoGround } from './ui'
 import { appScrollX, appScrollY, scrollAppBy } from '../lib/scroll'
 
 /**
@@ -429,6 +429,7 @@ export function Arrange({
             options: optionsFor(def, item),
             controls: def.variants?.length || def.options?.length ? (
               <VariantPicker
+                on={def.ground}
                 def={def}
                 item={item}
                 onVariant={(v) => onLayout(setVariant(layout, item.id, v))}
@@ -605,11 +606,14 @@ function VariantPicker({
   item,
   onVariant,
   onOption,
+  on = 'surface',
 }: {
   def: SectionDef
   item: LayoutItem
   onVariant: (next: string) => void
   onOption: (optionId: string, next: string) => void
+  /** The ground the trigger sits on. See `SectionDef.ground`. */
+  on?: InfoGround
 }) {
   const shapes = def.variants ?? []
   const shape = shapes.find((o) => o.value === currentVariant(def, item)) ?? shapes[0]
@@ -641,8 +645,18 @@ function VariantPicker({
           title="How this is shown"
           className={cx(
             'inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium transition-colors',
-            open ? 'bg-surface-2 text-ink' : 'text-ink-3 hover:bg-surface-2 hover:text-ink-2',
+            on === 'panel'
+              ? 'hover:bg-white/10'
+              : open
+                ? 'bg-surface-2 text-ink'
+                : 'text-ink-3 hover:bg-surface-2 hover:text-ink-2',
           )}
+          // The panel defines its own ink, and the trigger sits on the heading
+          // line beside the ⓘ — so it takes exactly what the ⓘ takes there,
+          // rather than the surface's grey. Stated as a style for the reason
+          // `InfoToggle` gives: there is no Tailwind colour for a per-theme
+          // token.
+          style={on === 'panel' ? { color: open ? 'var(--panel-ink)' : 'var(--panel-ink-2)' } : undefined}
         >
           {shape?.label ?? <SlidersHorizontal size={13} />}
         </button>

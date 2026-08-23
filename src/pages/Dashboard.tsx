@@ -53,7 +53,7 @@ import {
  * width and the accounts in a corner, and the app has no way of knowing that.
  */
 const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
-  { id: 'hero', label: 'Month summary', component: HeroWidget, defaultSpan: 'full', variants: HERO_SHAPES },
+  { id: 'hero', label: 'Month summary', component: HeroWidget, defaultSpan: 'full', ground: 'panel', variants: HERO_SHAPES },
   { id: 'budgets', label: 'Budgets at a glance', component: BudgetGlanceWidget, defaultSpan: 'full' },
   {
     id: 'bills',

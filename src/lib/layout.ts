@@ -66,6 +66,16 @@ export interface SectionDef {
    * an imposition says so here.
    */
   defaultOn?: boolean
+  /**
+   * What the section's own heading is drawn ON, which decides nothing but the
+   * ink of the controls sitting in it.
+   *
+   * `.panel-month` is the app's one painted surface and defines its own ink, so
+   * a picker taking `text-ink-3` — ink for a surface — is a grey word on a
+   * saturated panel. The same distinction the ⓘ beside it already draws; see
+   * `InfoGround`.
+   */
+  ground?: 'surface' | 'panel'
   /** The shapes this section's chart can take. The first is its default. */
   variants?: { value: string; label: string }[]
   /** Everything else it lets you decide. See `OptionDef`. */
