@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db, type Rule, type Transaction } from './db'
 import {
+  alreadyFiled,
   applyCategory,
   applyTitle,
   buildTitleMatcher,
@@ -9,6 +10,7 @@ import {
   conditionWords,
   coverageOf,
   displayName,
+  isCatchAll,
   learnRule,
   matchKey,
   reference,
@@ -16,6 +18,7 @@ import {
   similarTo,
   titleRule,
   unnamedLike,
+  withGroup,
 } from './rules'
 
 let seq = 0
@@ -370,5 +373,46 @@ describe('learning and applying a name', () => {
     expect((await db.transactions.get(mine.id))?.title).toBe('Dinner out')
     expect((await db.transactions.get(theirs.id))?.title).toBeUndefined()
     expect(await db.outbox.count()).toBe(1)
+  })
+})
+
+describe('isCatchAll', () => {
+  it('knows the two the household is seeded with', () => {
+    expect(isCatchAll('Other')).toBe(true)
+    expect(isCatchAll('other income')).toBe(true)
+    expect(isCatchAll(' Other ')).toBe(true)
+  })
+
+  it('is false for a category somebody chose, and for nothing at all', () => {
+    expect(isCatchAll('Groceries')).toBe(false)
+    expect(isCatchAll('Other bits')).toBe(false)
+    expect(isCatchAll(undefined)).toBe(false)
+  })
+})
+
+describe('alreadyFiled', () => {
+  const nameOf = (id: string) => ({ groceries: 'Groceries', other: 'Other' })[id]
+
+  it('is false with no category, with the catch-all, and with a deleted one', () => {
+    expect(alreadyFiled(txn({ payee: 'tesco', categoryId: undefined }), nameOf)).toBe(false)
+    expect(alreadyFiled(txn({ payee: 'tesco', categoryId: 'other' }), nameOf)).toBe(false)
+    expect(alreadyFiled(txn({ payee: 'tesco', categoryId: 'gone' }), nameOf)).toBe(false)
+  })
+
+  it('is true for a category somebody filed it under', () => {
+    expect(alreadyFiled(txn({ payee: 'tesco', categoryId: 'groceries' }), nameOf)).toBe(true)
+  })
+})
+
+describe('withGroup', () => {
+  it('adds and removes a group without disturbing the rest', () => {
+    expect([...withGroup(['a', 'b'], ['b', 'c'], true)]).toEqual(['a', 'b', 'c'])
+    expect([...withGroup(['a', 'b', 'c'], ['b', 'c'], false)]).toEqual(['a'])
+  })
+
+  it('does not mutate what it was given', () => {
+    const before = new Set(['a'])
+    withGroup(before, ['b'], true)
+    expect([...before]).toEqual(['a'])
   })
 })

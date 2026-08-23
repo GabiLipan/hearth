@@ -7,7 +7,7 @@ import { useAccounts, useAllTransactions, useCategories, useCategoryMap, useMyLe
 import { canEditTransaction, levelOn } from '../lib/accounts'
 import { fullName } from '../lib/categories'
 import { applyCategory, cleanTitle, conditionWords, coverageOf, normalizePayee, TITLE_MAX } from '../lib/rules'
-import { TxnName } from '../components/TxnName'
+import { TxnSelect } from '../components/TxnSelect'
 import { useSyncState } from '../hooks/useSync'
 import { useApp } from '../state/AppContext'
 import {
@@ -60,6 +60,15 @@ export default function RulesPage() {
   // fields, so there is nothing here that wants two components.
   const [editing, setEditing] = useState<Rule | null>(null)
   const [preview, setPreview] = useState<Rule | null>(null)
+  /**
+   * Which of the covered rows the apply button will actually touch.
+   *
+   * Seeded when the sheet opens with the ones that would CHANGE — the old
+   * behaviour exactly, so pressing straight through does what it always did —
+   * and everything the rule covers is listed, including the rows already in the
+   * right place, because "and this one too" is a thing you can now say.
+   */
+  const [chosen, setChosen] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
 
@@ -107,10 +116,29 @@ export default function RulesPage() {
 
   const pending = rules.reduce((n, r) => n + (coverage.get(r.id)?.changed.length ?? 0), 0)
 
+  /**
+   * What pressing the button would actually write.
+   *
+   * The ticked rows, less the ones already in the right place: a rule's
+   * coverage includes those, so that "and this one too" can be said about
+   * them, and writing a category a row already has is a queued update that
+   * changes nothing. Counting them would make the button promise more than it
+   * does, which is the same care `applyCategory` takes about rows that are not
+   * yours.
+   */
+  const ticked = (rule: Rule) =>
+    (coverage.get(rule.id)?.all ?? []).filter(
+      (t) => chosen.has(t.id) && t.categoryId !== rule.categoryId && canEdit(t),
+    )
+
+  /** Open the preview, ticking the rows the rule would move. */
+  function openPreview(rule: Rule) {
+    setChosen(new Set((coverage.get(rule.id)?.changed ?? []).filter(canEdit).map((t) => t.id)))
+    setPreview(rule)
+  }
+
   async function apply(rule: Rule) {
-    const list = coverage.get(rule.id)?.changed ?? []
-    // A rule that only says what to call a payee has no coverage — see
-    // `coverageOf` — so there is nothing here to apply.
+    const list = ticked(rule)
     if (list.length === 0 || !rule.categoryId) return
     setBusy(rule.id)
     try {
@@ -291,7 +319,7 @@ export default function RulesPage() {
                         {cov ? `${cov.all.length} match${cov.all.length === 1 ? '' : 'es'}` : '…'}
                       </span>
                       {cov && cov.changed.length > 0 && (
-                        <Button size="sm" variant="subtle" onClick={() => setPreview(r)}>
+                        <Button size="sm" variant="subtle" onClick={() => openPreview(r)}>
                           Apply to {cov.changed.length}
                         </Button>
                       )}
@@ -382,7 +410,7 @@ export default function RulesPage() {
                               size="sm"
                               variant="subtle"
                               disabled={busy !== null}
-                              onClick={() => setPreview(r)}
+                              onClick={() => openPreview(r)}
                             >
                               Apply to {cov.changed.length}
                             </Button>
@@ -417,7 +445,8 @@ export default function RulesPage() {
       )}
 
       {/* The preview is not decoration. Applying a rule rewrites rows in bulk,
-          and there is no undo — seeing which ones first is the whole safeguard. */}
+          and there is no undo — seeing which ones first is the whole safeguard,
+          and choosing among them is the rest of it. */}
       <Sheet
         open={preview !== null}
         onClose={() => setPreview(null)}
@@ -427,41 +456,55 @@ export default function RulesPage() {
           <Button
             size="lg"
             className="w-full"
-            disabled={busy !== null}
+            disabled={busy !== null || !preview || ticked(preview).length === 0}
             onClick={() => preview && void apply(preview)}
           >
-            {busy ? 'Applying…' : `Recategorise ${coverage.get(preview?.id ?? '')?.changed.length ?? 0}`}
+            {busy
+              ? 'Applying…'
+              : !preview || ticked(preview).length === 0
+                ? 'Nothing to move'
+                : `Recategorise ${ticked(preview).length}`}
           </Button>
         }
       >
         {preview && (
           <div className="space-y-3">
-            <p className="text-sm text-ink-2">
-              These are already recorded under something else. They will move to{' '}
-              <span className="font-medium text-ink">
-                {preview.categoryId && catMap.get(preview.categoryId)
-                  ? fullName(catMap.get(preview.categoryId)!, catMap)
-                  : 'that category'}
-              </span>
-              . Anything added by someone else on an account you only contribute to is left alone.
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 flex-1 text-sm text-ink-2">
+                Everything this rule speaks for. The ticked ones move to{' '}
+                <span className="font-medium text-ink">
+                  {preview.categoryId && catMap.get(preview.categoryId)
+                    ? fullName(catMap.get(preview.categoryId)!, catMap)
+                    : 'that category'}
+                </span>
+                ; the rest are left exactly as they are.
+              </p>
+              {/* The rule itself is one press away rather than restated here:
+                  what it MATCHES is edited in the same sheet that made it, and
+                  a second copy of those fields is a second place for them to
+                  drift. */}
+              <Button
+                size="sm"
+                variant="subtle"
+                onClick={() => {
+                  setPreview(null)
+                  setEditing(preview)
+                }}
+              >
+                Edit rule
+              </Button>
+            </div>
+            <TxnSelect
+              rows={coverage.get(preview.id)?.all ?? []}
+              selected={chosen}
+              onSelected={setChosen}
+              catMap={catMap}
+              canEdit={canEdit}
+              targetCategoryId={preview.categoryId}
+            />
+            <p className="text-xs text-ink-3">
+              Anything added by someone else on an account you only contribute to is left alone.
             </p>
-            <ul className="max-h-[46dvh] space-y-1 overflow-y-auto pr-1">
-              {(coverage.get(preview.id)?.changed ?? []).map((t) => (
-                <li key={t.id} className="flex items-center gap-2.5 rounded-xl bg-surface-2/50 px-2.5 py-1.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="flex min-w-0 text-sm font-medium">
-                      <TxnName txn={t} />
-                    </p>
-                    <p className="truncate text-xs text-ink-3">
-                      {t.date} · currently{' '}
-                      {t.categoryId ? (catMap.get(t.categoryId)?.name ?? 'a deleted category') : 'uncategorised'}
-                      {!canEdit(t) && ' · not yours to change'}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold tabular">{money(t.amountMinor)}</span>
-                </li>
-              ))}
-            </ul>
           </div>
         )}
       </Sheet>

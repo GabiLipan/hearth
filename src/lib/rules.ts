@@ -427,6 +427,53 @@ export function similarTo(
   )
 }
 
+/* ---------- choosing which of them ---------- */
+
+/**
+ * The catch-all a household starts with.
+ *
+ * `create_household` seeds "Other" and "Other income" (migration 03), and an
+ * import with nothing to go on lands rows there — so "already has a category"
+ * is not the same question as "has been filed". Both screens that apply a rule
+ * offer one press that takes the properly-filed rows out of the selection, and
+ * this is what that press means: touch the ones nobody has decided about, and
+ * leave a category somebody chose alone.
+ *
+ * Matched by NAME, deliberately. There is no flag on the row and inventing one
+ * would be a migration for a fact the seed already states; a household that
+ * renames the category has said it is no longer the bin, which is the right
+ * answer for the same reason.
+ */
+export const isCatchAll = (name: string | undefined): boolean => /^other(\s+income)?$/i.test((name ?? '').trim())
+
+/**
+ * Whether this row has already been filed somewhere that means something.
+ *
+ * No category at all, a deleted one, or the catch-all all count as "not filed".
+ * `nameOf` rather than the category row, so a caller with a name map does not
+ * have to build a second one.
+ */
+export function alreadyFiled(t: Transaction, nameOf: (id: string) => string | undefined): boolean {
+  if (!t.categoryId) return false
+  const name = nameOf(t.categoryId)
+  return name !== undefined && !isCatchAll(name)
+}
+
+/**
+ * A group of ids added to or removed from a selection, as a new set.
+ *
+ * Pure, and shared by the two screens, so "select the already-filed ones" means
+ * exactly the same thing in the settings list and in the transaction sheet.
+ */
+export function withGroup(selected: Iterable<string>, group: Iterable<string>, on: boolean): Set<string> {
+  const next = new Set(selected)
+  for (const id of group) {
+    if (on) next.add(id)
+    else next.delete(id)
+  }
+  return next
+}
+
 /**
  * Recategorise transactions, skipping any the server would refuse.
  *

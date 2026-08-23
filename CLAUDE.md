@@ -134,7 +134,7 @@ UI  →  data.ts (create/update/remove)  →  Dexie cache   (instant paint)
 Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 `rules.ts` (payee matching, learning — where a payee is filed AND what it is
 called — the conditions beyond the payee that tell two charges from one vendor
-apart, and bulk recategorisation), `bills.ts`
+apart, bulk recategorisation, and which of the covered rows to touch), `bills.ts`
 (suggestions, posting, reconciliation), `imports.ts` (an import recognised
 after the fact, and the two ways of putting a wrong one right — the screen for
 it is `components/ImportHistory.tsx`, in Settings beside the accounts rather
@@ -170,7 +170,9 @@ published by the page and read by the header),
 `api.ts` (the single PostgREST boundary), `mapping.ts` (camel↔snake + writable
 allow-lists), `session.ts` (auth, household, sync orchestration),
 `components/TxnName.tsx` (what a row is called, and the bank's own words after
-it), `components/confirm.tsx` (asking before something irreversible, in the
+it), `components/TxnSelect.tsx` (the rows a rule is about, and which of them to
+touch — the same list wherever a rule is applied from),
+`components/confirm.tsx` (asking before something irreversible, in the
 app's own voice), `components/toast.tsx` (saying what just happened, and offering to take
 it back).
 
@@ -1059,6 +1061,33 @@ the single place a level comes from.
   WHICH rule a save teaches, or correcting the £8.99 charge would quietly
   rewrite the general rule and leave the specific one saying something nobody
   agreed with.
+- **Applying a rule is ONE act, and it was asked twice about two sets.** The
+  transaction form offered "rename 9 others" under the name field and "move 9
+  others here too" under the category picker — the same act, several fields
+  apart, about two overlapping sets of rows, each all-or-nothing. Whether the
+  row in front of you happens to need a name, a category or both is not a
+  distinction worth two controls. It is one prompt now, over the UNION of
+  `similarTo` and `unnamedLike`, and each row gets whatever it is missing when
+  the save runs — so a row in both sets is written once, counted once and undone
+  in one press. The two queries stay separate underneath, which is what stops a
+  category being offered to a transfer leg or a name to nothing.
+
+  Both screens that apply a rule share `TxnSelect`, and the reason is that they
+  were answering the same question two ways: Settings showed a list you could
+  read and not change, the form showed a count and a tick box. The one bulk
+  control worth having beyond all/none is "already filed" — a rule is usually
+  taught because a pile of rows landed in the catch-all, and the rows somebody
+  filed by hand are exactly the ones to lift out of the selection in one press.
+  `isCatchAll` is matched by NAME (`create_household` seeds "Other" and "Other
+  income"), because there is no flag on the row and inventing one would be a
+  migration for a fact the seed already states — and a household that renames it
+  has said it is no longer the bin.
+
+  A rule's coverage includes the rows already in the right place, so they can be
+  ticked; what actually gets WRITTEN excludes them, and the button counts the
+  write rather than the selection. A no-op update is a queued write that changes
+  nothing, and a button promising more than it does is the same fault
+  `applyCategory` takes such care about with rows that are not yours.
 - **A rule now answers two questions, and asking once gets one of them wrong.**
   A rule may carry a category, a name, or both (`rules.category_id` is nullable
   as of 20 — categories are only learned from spending, a name is worth learning

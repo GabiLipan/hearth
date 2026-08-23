@@ -11,7 +11,7 @@ import { accountsInBook } from '../lib/books'
 import { syncNow } from '../lib/session'
 import { scanReceipt } from '../lib/receipt'
 import { canAddTransactions, canEditTransaction, canManageAccount, levelOn } from '../lib/accounts'
-import { grouped, usableOn } from '../lib/categories'
+import { fullName, grouped, usableOn } from '../lib/categories'
 import { useSyncState } from '../hooks/useSync'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { dateWindow, monthKey, monthLabel, shiftMonth, todayISO } from '../lib/dates'
@@ -38,6 +38,7 @@ import { Sheet, Field, TextInput, Select, Segmented, Button, CheckRow } from './
 import { confirmAction } from './confirm'
 import { toast } from './toast'
 import { CategoryPicker } from './CategoryPicker'
+import { TxnSelect } from './TxnSelect'
 import { nameOf } from './PersonDot'
 
 /**
@@ -106,8 +107,24 @@ export function TransactionForm({
   const [suggested, setSuggested] = useState(false)
   /** Whether the name on screen was proposed rather than typed. */
   const [titleSuggested, setTitleSuggested] = useState(false)
-  const [applySimilar, setApplySimilar] = useState(false)
-  const [renameSimilar, setRenameSimilar] = useState(false)
+  /**
+   * Whether what this row teaches is also applied backwards, and to which rows.
+   *
+   * One question now, where there were two. The form asked it once under the
+   * name field ("rename 9 others") and again under the category picker ("move 9
+   * others here too"), which is the same act — apply what I have just taught to
+   * the rows already here — asked twice about two overlapping sets, in two
+   * places, several fields apart. Whether the row you are looking at happens to
+   * need a name, a category or both is not a distinction worth two controls.
+   *
+   * `chosen` is null until somebody opens the picker and changes something,
+   * which means "all of them": a set frozen at the moment the prompt appeared
+   * would silently stop including rows that the payee, the amount or the
+   * account has since brought into range.
+   */
+  const [applyOthers, setApplyOthers] = useState(false)
+  const [chosen, setChosen] = useState<Set<string> | null>(null)
+  const [picking, setPicking] = useState(false)
   const [scanState, setScanState] = useState<string | null>(null)
   const amountRef = useRef<HTMLInputElement>(null)
   const receiptRef = useRef<HTMLInputElement>(null)
@@ -160,8 +177,9 @@ export function TransactionForm({
     }
     setSuggested(false)
     setTitleSuggested(false)
-    setApplySimilar(false)
-    setRenameSimilar(false)
+    setApplyOthers(false)
+    setChosen(null)
+    setPicking(false)
     setContributorGuessed(false)
     setTagSimilar(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -328,6 +346,43 @@ export function TransactionForm({
       // dependency — the query re-runs on the inputs that change the answer.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, settledPayee, settledTitle, editing?.id, userId]) ?? []
+
+  /**
+   * The two sets as one list, which is what the single prompt is about.
+   *
+   * A row can be in either or both — filed somewhere else, still wearing the
+   * bank's words, or both at once — and what it gets is decided per row when
+   * the save runs: the category if it is one of `similar`, the name if it is
+   * one of `unnamed`. Merging them here rather than asking twice is the whole
+   * of the consolidation; keeping the two queries separate is what stops it
+   * offering a category to a transfer leg or a name to nothing.
+   *
+   * Newest first, because the rows somebody recognises are the recent ones.
+   */
+  const others = useMemo(() => {
+    const map = new Map<string, Transaction>()
+    for (const t of similar) map.set(t.id, t)
+    for (const t of unnamed) map.set(t.id, t)
+    return [...map.values()].sort((a, b) => b.date.localeCompare(a.date))
+  }, [similar, unnamed])
+
+  /** Null means "all of them" — see `chosen`. */
+  const selectedIds = useMemo(() => chosen ?? new Set(others.map((t) => t.id)), [chosen, others])
+  const chosenCount = others.filter((t) => selectedIds.has(t.id)).length
+
+  /** The rule as it will be learned, in the words the prompt and picker use. */
+  const learnsCategory = kind === 'expense' && !!categoryId
+  const learnsTitle = !!cleanTitle(title) && !!payee.trim()
+  const applyWords = useMemo(() => {
+    const cat = categoryId ? catMap.get(categoryId) : undefined
+    const parts = [
+      learnsCategory && cat ? `filed under ${fullName(cat, catMap)}` : null,
+      learnsTitle ? `called “${cleanTitle(title)}”` : null,
+    ].filter(Boolean)
+    if (parts.length === 0) return undefined
+    const sentence = parts.join(' and ')
+    return sentence.charAt(0).toUpperCase() + sentence.slice(1)
+  }, [categoryId, catMap, learnsCategory, learnsTitle, title])
 
   /**
    * Whether "I paid for this, but it was the household's" is even a question.
@@ -580,40 +635,41 @@ export function TransactionForm({
     // this row is actually covered by.
     const learntOn = { payee: key, amountMinor: amountMinor ?? undefined, accountId }
     if (kind !== 'expense' && learntFrom) await learnRule(learntOn, { title: learntFrom })
-    if (kind === 'expense') {
-      await learnRule(learntOn, { categoryId: categoryId!, title: learntFrom })
-      // …and, if asked, applies what it just learned backwards. `similar` is
-      // already filtered to what this device may change, so the predicate here
-      // passes everything through.
-      if (applySimilar && similar.length > 0) {
-        // Captured BEFORE the writes: undoing means putting each row back where
-        // it was, and half of them may have had no category at all.
-        const before = similar.map((t) => ({ id: t.id, categoryId: t.categoryId }))
-        const { updated } = await applyCategory(similar, categoryId!, () => true)
-        if (updated > 0) {
-          toast(`${updated} other ${updated === 1 ? 'transaction' : 'transactions'} moved here too`, {
-            undo: async () => {
-              // `undefined` is what clears a field rather than leaving it
-              // alone, which is exactly right for a row that had no category
-              // before. See mapping.ts.
-              for (const row of before) await update('transactions', row.id, { categoryId: row.categoryId })
-            },
-          })
-        }
-      }
-    }
-    // …and the same offer for the name, asked separately because it is a
-    // different set of rows: a name is worth having on income and on transfer
-    // legs, which `similar` deliberately never touches.
-    if (learntTitle && renameSimilar && unnamed.length > 0) {
-      const before = unnamed.map((t) => ({ id: t.id, title: t.title }))
-      const { updated } = await applyTitle(unnamed, learntTitle, () => true)
-      if (updated > 0) {
-        toast(`${updated} other ${updated === 1 ? 'transaction' : 'transactions'} renamed too`, {
+    if (kind === 'expense') await learnRule(learntOn, { categoryId: categoryId!, title: learntFrom })
+
+    /**
+     * …and, if asked, applies what it just learned backwards.
+     *
+     * One pass over one list, where there were two passes over two. Each row
+     * gets whatever the rule has to say about it — the category if it was filed
+     * somewhere else, the name if it was still wearing the bank's words, both
+     * if both — so a row in both sets is written once, counted once, and undone
+     * in one press rather than being reported twice as two facts about itself.
+     *
+     * Both lists are already filtered to what this device may change, so the
+     * predicate passes everything through, and both are intersected with the
+     * selection: a row somebody unticked in the picker is not in either.
+     */
+    if (applyOthers) {
+      const catRows = kind === 'expense' && categoryId ? similar.filter((t) => selectedIds.has(t.id)) : []
+      const nameRows = learntTitle ? unnamed.filter((t) => selectedIds.has(t.id)) : []
+      // Captured BEFORE the writes, one entry per row, holding exactly the
+      // fields about to be overwritten: undoing means putting each row back as
+      // it was, and half of them may have had no category and no name at all.
+      // `undefined` is what CLEARS a field rather than leaving it alone, which
+      // is exactly right for those — see mapping.ts.
+      const before = new Map<string, { categoryId?: string; title?: string }>()
+      for (const t of catRows) before.set(t.id, { ...before.get(t.id), categoryId: t.categoryId })
+      for (const t of nameRows) before.set(t.id, { ...before.get(t.id), title: t.title })
+
+      if (catRows.length > 0) await applyCategory(catRows, categoryId!, () => true)
+      if (nameRows.length > 0) await applyTitle(nameRows, learntTitle!, () => true)
+
+      const n = before.size
+      if (n > 0) {
+        toast(`${n} other ${n === 1 ? 'transaction' : 'transactions'} updated`, {
           undo: async () => {
-            // `undefined` clears rather than leaving alone, which is exactly
-            // right for a row that had no name of its own before.
-            for (const row of before) await update('transactions', row.id, { title: row.title })
+            for (const [id, patch] of before) await update('transactions', id, patch)
           },
         })
       }
@@ -803,22 +859,6 @@ export function TransactionForm({
           </datalist>
         </Field>
 
-
-        {unnamed.length > 0 && (
-          <CheckRow
-            tone="accent"
-            checked={renameSimilar}
-            onChange={setRenameSimilar}
-            label={`Rename ${unnamed.length} other ${unnamed.length === 1 ? 'transaction' : 'transactions'} too`}
-            info={
-              <p>
-                {unnamed.length === 1 ? 'One is' : `${unnamed.length} are`} from &ldquo;{prettyPayee(payee)}&rdquo;
-                and still show what the bank wrote. Their payees are left exactly as they are.
-              </p>
-            }
-          />
-        )}
-
         <div>
           <span className="mb-1.5 block text-sm font-medium text-ink-2">
             Category
@@ -837,23 +877,32 @@ export function TransactionForm({
           />
         </div>
 
-        {similar.length > 0 && (
+        {/* One prompt for both halves of what this row teaches. It sits under
+            the category because that is the later of the two fields it is
+            about — asking before the answer exists reads as a form arguing
+            with you. */}
+        {others.length > 0 && (
           <CheckRow
             tone="accent"
-            checked={applySimilar}
-            onChange={setApplySimilar}
-            label={`Move ${similar.length} other ${similar.length === 1 ? 'transaction' : 'transactions'} here too`}
+            checked={applyOthers}
+            onChange={setApplyOthers}
+            label={`Apply this to ${chosenCount} other ${chosenCount === 1 ? 'transaction' : 'transactions'}`}
+            status={applyOthers ? applyWords : undefined}
             info={
               <p>
-                {similar.length === 1 ? 'One is' : `${similar.length} are`} from “{prettyPayee(payee)}” and filed
-                somewhere else. There is more in{' '}
+                {others.length === 1 ? 'One is' : `${others.length} are`} from “{prettyPayee(payee)}”. Choose
+                which, and what each of them gets, below — or in{' '}
                 <Link to="/settings/rules" className="underline underline-offset-2">
                   Settings › Rules
                 </Link>
-                .
+                , at any time afterwards.
               </p>
             }
-          />
+          >
+            <Button size="sm" variant="subtle" onClick={() => setPicking(true)}>
+              Choose which…
+            </Button>
+          </CheckRow>
         )}
 
         <div className="grid grid-cols-2 gap-3">
@@ -987,6 +1036,91 @@ export function TransactionForm({
 
         {editing && editable && <Linkage txn={editing} onDone={onClose} />}
       </fieldset>
+
+      {/* A layer over the form rather than more of it. What it holds is a list
+          that can run to fifty rows, and a form that grows by fifty rows when
+          you tick something is a form that has lost its Save button. It is the
+          same list Settings › Rules shows for the same act — see `TxnSelect`. */}
+      <Sheet
+        open={picking}
+        onClose={() => setPicking(false)}
+        title="Apply to other transactions"
+        wide
+        footer={
+          <Button
+            size="lg"
+            className="w-full"
+            onClick={() => {
+              setPicking(false)
+              // Closing the picker having ticked something is the answer to the
+              // prompt behind it; leaving the master switch off would make the
+              // choosing a no-op and blame the reader for it.
+              setApplyOthers(selectedIds.size > 0)
+            }}
+          >
+            Done
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          {/* The rule, editable where it is a rule rather than a fact. The
+              reference is the identity — `normalizePayee` of it is what the
+              rule is keyed on — so it is stated and not offered; the name and
+              the category are what the rule SAYS, and both are bound to the
+              form's own fields rather than copied, so there is one answer on
+              two screens instead of two that can disagree. */}
+          <div className="rounded-xl bg-surface-2 px-4 py-3">
+            <p className="text-sm text-ink-2">
+              Anything from <span className="font-medium text-ink">“{prettyPayee(payee) || 'this payee'}”</span>{' '}
+              is {applyWords ? applyWords.charAt(0).toLowerCase() + applyWords.slice(1) : 'left as it is'}.
+            </p>
+            <div className="mt-2.5 space-y-3">
+              <Field label="Call it">
+                <TextInput
+                  value={title}
+                  maxLength={TITLE_MAX}
+                  onChange={(e) => {
+                    setTitle(e.target.value)
+                    setTitleSuggested(false)
+                  }}
+                  placeholder={kind === 'expense' ? 'e.g. Dinner out' : 'e.g. Salary'}
+                  autoComplete="off"
+                />
+              </Field>
+              {kind === 'expense' && (
+                <div>
+                  <span className="mb-1.5 block text-sm font-medium text-ink-2 md:mb-1 md:text-xs">File it under</span>
+                  <CategoryPicker
+                    groups={visibleGroups}
+                    byId={catMap}
+                    value={categoryId}
+                    onChange={(id) => {
+                      setCategoryId(id)
+                      setSuggested(false)
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <TxnSelect
+            rows={others}
+            selected={selectedIds}
+            onSelected={setChosen}
+            catMap={catMap}
+            // `others` is built from two queries that are already filtered to
+            // what this device may write, so everything here is writable.
+            canEdit={() => true}
+            targetCategoryId={learnsCategory ? categoryId : undefined}
+          />
+
+          <p className="text-xs text-ink-3">
+            Each one gets whatever it is missing: the category if it is filed elsewhere, the name if it still shows
+            what the bank wrote. Nothing else on it changes, and one press of Undo puts them all back.
+          </p>
+        </div>
+      </Sheet>
     </Sheet>
   )
 }
