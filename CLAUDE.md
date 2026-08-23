@@ -148,7 +148,9 @@ exist, and remembering the name for next month),
 have taken, what is left unassigned, and what a withdrawal costs which pot),
 `palette.ts` (the twelve slots, the order they are offered in, and a colour of
 your own over the top of one), `categoryTree.ts` (what a drag on the category
-list means, and what it writes),
+list means, and what it writes), `accountOrder.ts` (the same drag on the
+accounts list, flat — and the order the list is in before anybody has dragged
+anything),
 `layout.ts` (which sections a page shows, in what order, how wide, in which
 shape, and what else each one lets you decide — home and Reports share it),
 `drill.ts` (out of a figure and into the rows behind it, and the way back),
@@ -1212,6 +1214,40 @@ the single place a level comes from.
   kept the tint — so on the one screen where you are choosing, the navy icon you
   had just picked was the one you could not see. A preview wrong in the same way
   the old badge was is worse than no preview.
+
+- **A control that seeds itself from its own value can seed itself dead.** The
+  thirteenth swatch in `InkPicker` opens a disclosure conditioned on `custom` —
+  the ink being neither of the two swatches beside it — and it committed the
+  DRAFT, which is seeded from the ink the form opened with. So on an account
+  already saved with White or Black the draft was that same value, committing it
+  changed nothing, `custom` stayed false, and the button did nothing at all,
+  however many times it was pressed. Nothing errored and nothing looked
+  disabled; it was simply inert, on the one control in the row painted with a
+  fixed `text-ink-3` grey over the account's own tile, which is what it got
+  reported as ("greyed out"). `customInkSeed` is the invariant stated instead —
+  whatever it is handed, what comes back is custom — and `IconPicker.test.ts`
+  pins it.
+- **A tick or a pipette on a swatch is measured too.** Both were a hardcoded
+  white with a drop-shadow behind them, which the palette itself disagrees with:
+  the twelve are cut at one lightness, so `inkOn` answers DARK for all
+  twenty-four, and the shadow was propping up the losing choice. On the
+  thirteenth swatch, where the colour is whatever somebody typed, it fails
+  outright — choose a pale brand cream and the tick saying which swatch you had
+  chosen is the one thing in the row you cannot see. `markOn` in
+  `IconPicker.tsx` asks `inkOn`, and keeps white-and-a-shadow only for the case
+  `paintHex` cannot measure at all.
+- **Accounts have a `sortOrder` and until now nothing ever wrote one.** Every
+  account was created at 0, so the list fell back to Dexie's tie-break — primary
+  key order over client-generated uuids, the `toArray()[0]` trap applied to a
+  whole screen. `byOrder` breaks the remaining ties by NAME so a household that
+  has never dragged anything reads alphabetically, and `AccountList` is the
+  category drag with the depth taken out. The gate is the part worth knowing: a
+  move renumbers every row it passes (there is no spare numbering to slot into
+  when everything is 0), and `sortOrder` is an ordinary column, so a reorder is
+  `accounts_update` on ALL of them. One account you hold below `manage` is
+  therefore enough to make the whole list unwritable — the handles are absent
+  and a line says why, rather than the drag queueing writes that dead-letter a
+  minute later.
 - **A goal wears the same face as a category, and now gets to choose it.**
   `goals.slot` and `goals.icon` have existed since the table did and the cards
   have always painted them, but the form offered the first twenty-four keys of

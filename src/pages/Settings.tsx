@@ -55,6 +55,7 @@ import {
   type TransferMode,
 } from '../lib/transfers'
 import { FREQ_WORD, type TransferRoute } from '../lib/routes'
+import { AccountList } from '../components/AccountList'
 import { signOut, joinHousehold, leaveHousehold, syncNow } from '../lib/session'
 import { rpc } from '../lib/api'
 import { fmtFullDate, fmtTime, monthLabel, shiftMonth, thisMonthKey } from '../lib/dates'
@@ -1934,6 +1935,18 @@ function AccountsSection() {
     setOpened((n) => n + 1)
   }
 
+  /**
+   * Whether the list can be dragged into an order.
+   *
+   * All of them or none of them: every account sits at `sortOrder` 0 until
+   * somebody drags one, so there is no spare numbering to slot into and a move
+   * renumbers every row it passes. One account you may not write is therefore
+   * enough to make the whole list unwritable — and a write refused by
+   * `accounts_update` would come back minutes later as a dead letter rather
+   * than as a refusal on screen.
+   */
+  const canReorder = accounts.length > 1 && accounts.every((a) => canManageAccount(levelOn(a.id, levels)))
+
   return (
     <section>
       <SectionTitle
@@ -1945,70 +1958,78 @@ function AccountsSection() {
       >
         Accounts
       </SectionTitle>
-      <Card>
-        <ul className="divide-y divide-hairline">
-          {accounts.map((a) => {
-            const level = levelOn(a.id, levels)
-            // Opening the edit sheet needs `manage`, the same bar as the
-            // accounts_update policy. Below that there is nothing to edit, so
-            // the row is a read-only line rather than a dead button.
-            const editable = canManageAccount(level)
-            // The same bar governs whether the sharing list is knowable at all;
-            // see useGrantsByAccount. Below it, the row's own level chip is the
-            // only honest thing to say about access.
-            const grants = editable ? (grantsByAccount.get(a.id) ?? []) : []
-            const shared = grants.some((g) => g.userId !== userId)
-            return (
-              <li key={a.id}>
-                <button
-                  type="button"
-                  onClick={() => (editable ? openForm(a) : undefined)}
-                  className={cx(
-                    'flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2',
-                    editable ? 'hover:bg-surface-2/50' : 'cursor-default',
-                  )}
-                >
-                  {/* The account's own face, the same badge the Activity table
-                      and the home widget draw — this list was the one place
-                      accounts were named without being shown, so the row you
-                      come here to recolour was the row that never showed the
-                      colour. `AccountDot` goes through `accountFace`, so an
-                      account nobody has styled wears the one its kind implies
-                      rather than a grey hole. */}
-                  <AccountDot account={a} size={32} className="desktop:[--dot:28px]" />
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1.5 font-medium">
-                      <span className="truncate">{a.name}</span>
-                      {/* A struck-through eye means the total is all you get: no
-                          line items, so no Activity, no reports, no budget
-                          contribution. Same glyph as the `balance` badge. */}
-                      {!canSeeTransactionsAt(level) && <EyeOff size={13} className="shrink-0 text-ink-3" />}
-                    </p>
-                    <p className="flex items-center gap-1.5 text-sm text-ink-3">
-                      {a.kind}
-                      {level !== 'owner' && <Chip>{LEVEL_LABEL[level]}</Chip>}
-                    </p>
-                  </div>
-                  {editable &&
-                    (shared ? (
-                      <AccessFaces grants={grants} meId={userId} />
-                    ) : (
-                      /* Nobody else has a grant. Said out loud, because a row
-                         with no faces on it is otherwise indistinguishable from
-                         one whose faces have not loaded. */
-                      <span className="shrink-0 text-ink-3" title="Only you" role="img" aria-label="Only you">
-                        <Lock size={13} />
-                      </span>
-                    ))}
-                  <span className={cx('font-semibold tabular', balanceOf(a, txns, remoteBalances, level) < 0 && 'text-critical-text')}>
-                    {money(balanceOf(a, txns, remoteBalances, level))}
+      <AccountList
+        accounts={accounts}
+        canReorder={canReorder}
+        renderRow={(a) => {
+          const level = levelOn(a.id, levels)
+          // Opening the edit sheet needs `manage`, the same bar as the
+          // accounts_update policy. Below that there is nothing to edit, so
+          // the row is a read-only line rather than a dead button.
+          const editable = canManageAccount(level)
+          // The same bar governs whether the sharing list is knowable at all;
+          // see useGrantsByAccount. Below it, the row's own level chip is the
+          // only honest thing to say about access.
+          const grants = editable ? (grantsByAccount.get(a.id) ?? []) : []
+          const shared = grants.some((g) => g.userId !== userId)
+          return (
+            <button
+              type="button"
+              onClick={() => (editable ? openForm(a) : undefined)}
+              className={cx(
+                'flex w-full items-center gap-3 px-4 py-3 text-left md:px-3 desktop:py-2',
+                editable ? 'hover:bg-surface-2/50' : 'cursor-default',
+              )}
+            >
+              {/* The account's own face, the same badge the Activity table
+                  and the home widget draw — this list was the one place
+                  accounts were named without being shown, so the row you
+                  come here to recolour was the row that never showed the
+                  colour. `AccountDot` goes through `accountFace`, so an
+                  account nobody has styled wears the one its kind implies
+                  rather than a grey hole. */}
+              <AccountDot account={a} size={32} className="desktop:[--dot:28px]" />
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-1.5 font-medium">
+                  <span className="truncate">{a.name}</span>
+                  {/* A struck-through eye means the total is all you get: no
+                      line items, so no Activity, no reports, no budget
+                      contribution. Same glyph as the `balance` badge. */}
+                  {!canSeeTransactionsAt(level) && <EyeOff size={13} className="shrink-0 text-ink-3" />}
+                </p>
+                <p className="flex items-center gap-1.5 text-sm text-ink-3">
+                  {a.kind}
+                  {level !== 'owner' && <Chip>{LEVEL_LABEL[level]}</Chip>}
+                </p>
+              </div>
+              {editable &&
+                (shared ? (
+                  <AccessFaces grants={grants} meId={userId} />
+                ) : (
+                  /* Nobody else has a grant. Said out loud, because a row
+                     with no faces on it is otherwise indistinguishable from
+                     one whose faces have not loaded. */
+                  <span className="shrink-0 text-ink-3" title="Only you" role="img" aria-label="Only you">
+                    <Lock size={13} />
                   </span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      </Card>
+                ))}
+              <span className={cx('font-semibold tabular', balanceOf(a, txns, remoteBalances, level) < 0 && 'text-critical-text')}>
+                {money(balanceOf(a, txns, remoteBalances, level))}
+              </span>
+            </button>
+          )
+        }}
+      />
+      {/* Said rather than left as a missing handle. Ordering is a column on the
+          account row, so it is `accounts_update` like any other edit — and
+          because a move renumbers the whole list it takes all of them, not just
+          the one that moved. */}
+      {!canReorder && accounts.length > 1 && (
+        <p className="mt-2 px-1 text-xs text-ink-3">
+          The order is fixed while the list holds an account somebody else manages — moving one renumbers them
+          all.
+        </p>
+      )}
       <AccountForm
         key={opened}
         account={editing === 'new' ? undefined : (editing ?? undefined)}
@@ -2402,7 +2423,10 @@ function AccountForm({ account, open, onClose }: { account?: Account; open: bool
         name: name.trim(),
         kind,
         openingBalanceMinor: openingMinor,
-        sortOrder: 0,
+        // The end of the list, the way a new category gets the end of its own.
+        // Every account used to be created at 0, so the list fell back to
+        // primary-key order over uuids — see `lib/accountOrder.ts`.
+        sortOrder: await db.accounts.count(),
         slot,
         icon,
         color,

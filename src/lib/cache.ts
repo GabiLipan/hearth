@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { classifyAccounts, classifyFlows, type BookId, type BookMap, type Flow, type MonthRule } from './books'
 import { MONTH_RULE_KEY, parseMonthRule } from './monthRule'
+import { byOrder } from './accountOrder'
 import {
   db,
   getSetting,
@@ -109,8 +110,18 @@ export function useCategories(): Category[] {
   return useLiveQuery(() => db.categories.orderBy('sortOrder').toArray(), [], []) ?? []
 }
 
+/**
+ * Every account, in the order the app shows them.
+ *
+ * `sortOrder` is what a drag on the Settings list writes, and the name is the
+ * tie-break — which until that first drag is the whole of it, since every
+ * account is created at 0. Sorted in memory after the indexed read rather than
+ * by the index alone: Dexie breaks a tie on primary key, and the primary key is
+ * a client-generated uuid, so the list was in an arbitrary order that changed
+ * if an account was deleted and made again. See `lib/accountOrder.ts`.
+ */
 export function useAccounts(): Account[] {
-  return useLiveQuery(() => db.accounts.orderBy('sortOrder').toArray(), [], []) ?? []
+  return useLiveQuery(async () => (await db.accounts.orderBy('sortOrder').toArray()).sort(byOrder), [], []) ?? []
 }
 
 /** Everyone in the household, including you. */

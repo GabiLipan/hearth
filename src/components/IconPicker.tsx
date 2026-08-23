@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { Check, Pipette } from 'lucide-react'
 import { CategoryIcon, ICON_GROUPS, searchIcons } from './CategoryIcon'
 import { SLOT_NAMES, SWATCH_ORDER, isHexColour, paintHex, slotVar } from '../lib/palette'
@@ -8,6 +8,46 @@ import { Face, SearchInput, TextInput, cx } from './ui'
 
 /** The colour a fresh custom swatch opens on, when there is nothing to edit yet. */
 const CUSTOM_SEED = '#7c6cf0'
+
+/**
+ * The tick or the pipette, in whichever of black and white can be read on the
+ * swatch underneath it.
+ *
+ * `inkOn` is the measurement the account badge and the blocks view already
+ * make, asked here for the same reason they ask it: the ground under this mark
+ * is a different colour for every swatch. It was a hardcoded white with a
+ * drop-shadow behind it, which the palette itself disagrees with — the twelve
+ * are cut at one lightness, so black is the more legible ink on all twenty-four
+ * of them — and which fails outright on the thirteenth swatch, where the colour
+ * is whatever somebody typed: pick a bank's cream and the tick saying which
+ * swatch you had chosen was the one thing in the row you could not see.
+ *
+ * `paintHex` is undefined where a colour cannot be measured — off the DOM, or a
+ * token renamed out from under this — and there the old white-and-a-shadow
+ * stands as the fallback, the same "quieter than intended, never invisible"
+ * `Face` falls back to.
+ */
+function markOn(fill: string | undefined): { className?: string; style?: CSSProperties } {
+  if (!fill) return { className: 'text-white drop-shadow' }
+  return { style: { color: inkOn(fill).color } }
+}
+
+/**
+ * Whether a colour is one the thirteenth swatch can hold.
+ *
+ * `InkPicker` reads it as "not one of the two beside it", which is the whole of
+ * what makes that swatch a third answer rather than a duplicate of one of them.
+ */
+export const isCustomInk = (hex: string | undefined): hex is string =>
+  !!hex && isHexColour(hex) && hex !== LIGHT_INK && hex !== DARK_INK
+
+/**
+ * The colour that swatch opens ON, which is never one of the other two.
+ *
+ * Exported so `IconPicker.test.ts` can pin the property the control depends on
+ * and nothing else states: whatever it is handed, what comes back is custom.
+ */
+export const customInkSeed = (draft: string | undefined): string => (isCustomInk(draft) ? draft : CUSTOM_SEED)
 
 /**
  * The twelve palette slots as a row of swatches, and a colour of your own.
@@ -60,12 +100,17 @@ export function SlotPicker({
   label?: string
   hint?: string
 }) {
+  const { resolvedTheme } = useApp()
   const custom = color !== undefined
   const [open, setOpen] = useState(false)
   // What the hex field is showing, which is not what is saved: it holds
   // half-typed values the swatch must not be painted with.
   const [draft, setDraft] = useState(color ?? CUSTOM_SEED)
   const swatch = custom ? color : draft
+  // What pressing the thirteenth swatch commits. The draft can be half typed —
+  // the field holds whatever is in it — and committing `#7c6` would paint the
+  // badge with nothing at all.
+  const seed = isHexColour(draft) ? draft.trim().toLowerCase() : CUSTOM_SEED
 
   const pick = (next: string) => {
     setDraft(next)
@@ -104,7 +149,7 @@ export function SlotPicker({
               )}
               style={{ background: slotVar(s) }}
             >
-              {chosen && <Check size={15} className="text-white drop-shadow" />}
+              {chosen && <Check size={15} {...markOn(paintHex(s, undefined, resolvedTheme))} />}
             </button>
           )
         })}
@@ -114,7 +159,10 @@ export function SlotPicker({
             type="button"
             onClick={() => {
               setOpen((o) => (custom ? !o : true))
-              if (!custom) onColorChange(draft)
+              if (!custom) {
+                setDraft(seed)
+                onColorChange(seed)
+              }
             }}
             title="A colour of your own"
             aria-label="A colour of your own"
@@ -129,8 +177,11 @@ export function SlotPicker({
             style={{ background: custom ? swatch : 'var(--surface-2)' }}
           >
             {custom ? (
-              <Check size={15} className="text-white drop-shadow" />
+              <Check size={15} {...markOn(isHexColour(swatch ?? '') ? swatch : undefined)} />
             ) : (
+              /* The one mark here that is NOT measured: this swatch is empty
+                 until it holds a colour, so what is under the pipette is the
+                 surface, where the surface's own ink is the answer. */
               <Pipette size={15} className="text-ink-3" />
             )}
           </button>
@@ -211,8 +262,22 @@ export function InkPicker({
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(value ?? CUSTOM_SEED)
   const auto = fill ? inkOn(fill).color : LIGHT_INK
-  const custom = value !== undefined && value !== LIGHT_INK && value !== DARK_INK
+  const custom = isCustomInk(value)
   const swatch = custom ? value : draft
+  /**
+   * What pressing the thirteenth swatch commits, and why it is not just
+   * `draft`.
+   *
+   * The trap it exists for: `custom` means "the ink is neither of the two
+   * swatches beside it", and the draft is seeded from the ink the form opened
+   * with. So on an account whose mark is White — chosen a moment ago, or saved
+   * that way and re-opened — the draft WAS white, committing it left the ink
+   * exactly as it was, `custom` stayed false, and the panel this button exists
+   * to open is conditioned on `custom`. The button did nothing at all, however
+   * many times it was pressed, on the greyest-looking control in the row. It
+   * can only ever open onto a colour that is actually a third answer.
+   */
+  const seed = customInkSeed(draft)
   const shown = value ?? auto
   const ratio = fill ? contrast(fill, shown) : undefined
 
@@ -268,7 +333,10 @@ export function InkPicker({
             type="button"
             onClick={() => {
               setOpen((o) => (custom ? !o : true))
-              if (!custom) onChange(draft)
+              if (!custom) {
+                setDraft(seed)
+                onChange(seed)
+              }
             }}
             title="A colour of your own"
             aria-label="A colour of your own"
@@ -283,7 +351,12 @@ export function InkPicker({
             {custom ? (
               <span className="size-3.5 rounded-full" style={{ background: swatch }} />
             ) : (
-              <Pipette size={15} className="text-ink-3" />
+              /* Measured, like the letter beside it: every swatch in this row
+                 is painted with the TILE, so a fixed `text-ink-3` was a mid
+                 grey laid on whatever colour the account happens to be — which
+                 on half the palette reads as a disabled control rather than as
+                 an offer. */
+              <Pipette size={15} {...markOn(fill)} />
             )}
           </button>
         </div>
