@@ -151,8 +151,9 @@ your own over the top of one), `categoryTree.ts` (what a drag on the category
 list means, and what it writes), `accountOrder.ts` (the same drag on the
 accounts list, flat — and the order the list is in before anybody has dragged
 anything),
-`layout.ts` (which sections a page shows, in what order, how wide, in which
-shape, and what else each one lets you decide — home and Reports share it),
+`layout.ts` (which sections a page shows, in what order, how wide AND how tall,
+in which shape, and what else each one lets you decide — home and Reports share
+it),
 `drill.ts` (out of a figure and into the rows behind it, and the way back),
 `sticky.ts` (a filter that outlives leaving the page and dies with the tab), `monthRule.ts` (when this household's month starts, and how that reaches both devices), `books.ts` (the three sets of books, which month each row counts in, what was left over when the month began, and where the money actually is), `sankey.ts` (a period as one balanced flow,
 and where every band goes), `scale.ts` (a value axis with round numbers, shared
@@ -407,8 +408,10 @@ the single place a level comes from.
   in a multi-column layout and cuts a card in half at the column boundary,
   stranding its bottom border at the top of the next column; `column-span: all`
   is unreliable there too. Both the home page and Settings shipped with this.
-  `Columns` in `ui.tsx` lays out flex columns and balances them from measured
-  heights instead — there is no fragmentation context, so nothing can split.
+  What replaced it was `Columns` in `ui.tsx` — flex columns balanced from
+  measured heights, with no fragmentation context for anything to split in —
+  and what replaced THAT is one CSS grid, so `Columns` is gone. The rule it was
+  written for stands: cards are never laid out with CSS `columns`.
 - **`Select` carries `w-full`, so a width passed to it does nothing.** Tailwind
   emits `.w-full` after `.w-40`, so the base class wins however the attribute is
   ordered — the control fills its flex row and squeezes a `flex-1 min-w-0
@@ -1453,8 +1456,8 @@ the single place a level comes from.
   carry it, which also survives being colour-blind.
 
   It is not always at the top, either: every card on this page can be dragged,
-  narrowed to one column or switched off, so the panel has to read as itself in a
-  masonry column half way down.
+  narrowed to one column, made two units tall or switched off, so the panel has
+  to read as itself in the middle column of a grid, half way down the page.
 - **A `divide-*` utility sets only the width.** The colour falls back to the
   child's `currentColor` — which on the month panel is full-strength white, about
   four times too strong for a hairline. The desktop stat strip states its own
@@ -1647,31 +1650,34 @@ the single place a level comes from.
   every figure a pixel off its line, on every chart at once. The scroller also
   needs `pb-2`, because a scrollbar is painted in the bottom of the PADDING box
   and without it a thin one strikes through the month labels.
-- **Document order is not reading order once `Columns` is involved.** Masonry
-  distributes cards down columns, so the second card on the page is the top of
-  column two rather than the second `data-section` in the DOM. `Arrange` carries
+- **Document order is not reading order in a dense grid.** `grid-auto-flow:
+  dense` pulls a narrow card back into a hole an earlier wide one could not
+  fill, so a card can be drawn above one it follows in the array — the same
+  hazard masonry had, from the other direction. `Arrange` carries
   the visible-list index on every measured box rather than implying it from the
   array, and drops boxes of zero size — a section whose data has nothing to show
   renders empty and is hidden, and a zero box at the origin would otherwise win
   "nearest centre" from the far corner of the page.
 - **A card ends where the tallest card beside it ends, and the slack goes to the
-  picture.** Two sections sharing a row, or a masonry column shorter than the one
-  next to it, used to leave a hole in the page down to the next full-width card —
-  visibly so on Reports, where two charts of unequal height sit under a full-width
-  breakdown. `Columns` takes `fill` (every column as tall as the tallest, the
-  slack shared out among the cards in it), rows stretch the same way, and
-  `Arrange` passes `h-full` all the way down so the card itself is a flex column
-  — a height nobody hands on is a card floating at the top of a hole rather than
-  one that filled it. `Fill` in `ui.tsx` is what a chart uses to spend the space.
+  picture.** Two sections sharing a row used to leave a hole in the page down to
+  the next full-width card — visibly so on Reports, where two charts of unequal
+  height sit under a full-width breakdown. Every card is stretched to its grid
+  area now and `Arrange` passes `h-full` all the way down so the card itself is a
+  flex column — a height nobody hands on is a card floating at the top of a hole
+  rather than one that filled it. `Fill` in `ui.tsx` is what a chart uses to
+  spend the space.
 
-  **Only a card that can spend the space is given any**, which is the half that
-  had to be learned twice: stretching a card with nothing in it that grows does
-  not remove the gap, it moves the gap INSIDE the card, where three inches of
-  nothing under a list of payees reads as a fault rather than as spacing. `Fill`
-  marks its box `data-fill` and both layouts ask for it (`has-[[data-fill]]:grow`
-  in a column, `has-[[data-fill]]:self-stretch` in a row); everything else keeps
-  its own height and leaves the slack at the foot of the column, which is where
-  masonry has always left it. The Sankey earns its stretch by taking a `height`
+  **Which card gets the slack was reversed by the grid, deliberately.** Under
+  masonry only a card that could SPEND the height was stretched (`data-fill`);
+  everything else kept its own and left the slack at the foot of its column,
+  where nothing was drawn and nobody saw it — stretching those moved the hole
+  INSIDE the card, where three inches of nothing under a list of payees reads as
+  a fault rather than as spacing. In a grid the slack has nowhere to go: a row
+  is as tall as its tallest card, so a card left at its own height leaves a gap
+  between itself and the card below it, in the middle of the page. Whitespace
+  inside a card reads as a card; whitespace between them reads as a fault. So
+  everything stretches, and `Fill` still does the work wherever there is
+  something in the card that can grow. The Sankey earns its stretch by taking a `height`
   and flooring it at `sankeyHeight(graph)` — bands get thicker, labels stay put.
   Three more things are load-bearing. The stretch cannot disturb the
   balancing it is measured from: after it every column is exactly the tallest
@@ -1685,9 +1691,42 @@ the single place a level comes from.
   what the chart would have been alone and it is never squeezed below it, `max`
   stops "fill the space" next to something very tall from drawing a bar chart
   half a screen high — past it the card keeps the remainder as white space, which
-  is the lesser fault. `Columns` without `fill` is unchanged, which is what
-  Settings wants: a stretched card of prose is a taller box with the same words
-  at the top of it.
+  is the lesser fault.
+- **A card has two sizes now, and only one of them is a number of columns.**
+  `span` is 1..`MAX_SPAN` or `'full'` (which means "this screen's column count",
+  so it stays full when the window changes); `rows` is 1..`MAX_HEIGHT` units of
+  `ROW_UNIT`, and the row track is `minmax(ROW_UNIT, auto)` — a floor, so a card
+  taller than the height it asked for grows its row rather than being cut off.
+  Three things follow. `effectiveHeight` is 1 on a phone whatever was stored: one
+  column is a stack read card after card, where a height is not a comparison with
+  anything, only a hole in the bottom of a card. `nextSpan` is a NO-OP on one
+  column for the sharper version of the same point — the value is shared with
+  every other screen the household signs in on, so cycling it on a phone would
+  quietly rewrite the arrangement made on the laptop. And a drag that reaches the
+  last column stores `'full'` rather than that number, which is the whole
+  difference between "as wide as the page" and "as wide as the page happened to
+  be that day".
+- **The two handles are told apart by where you take hold.** The grabber at the
+  top centre moves a card, the corner at the bottom right resizes it, and both
+  exist only in Customise mode. The whole card is still draggable, so the
+  grabber is an affordance rather than a target to hunt for; the corner is the
+  exception and must be hit, because "bigger" and "somewhere else" cannot both
+  be the meaning of one drag. Two things that bite. The grabber is a `<button>`,
+  so it has to be admitted BEFORE `down()`'s control test, not after — the test
+  that keeps a press on a picker from dragging the card would otherwise swallow
+  the one control whose job is to start the drag. And a press and a drag on the
+  corner are the same pointer sequence, so the corner's click handler (which
+  cycles the width) has to refuse a click that followed a drag, or every resize
+  ends one step past where it was let go.
+- **A resize is measured RELATIVELY, from where the gesture began.** The obvious
+  reading — pointer position less the card's own top-left corner, over one grid
+  step — is wrong because a row track grows to fit a card taller than the height
+  it asked for: a one-unit card is routinely two units tall, so an absolute
+  reading jumps it to three the instant the handle is touched, before the
+  pointer has moved at all. The size asked for is the size it started at plus
+  the steps travelled. The step itself is read off the live grid
+  (`getComputedStyle`'s `columnGap`/`rowGap` resolve to pixels), never stated as
+  a constant, because the gap is a Tailwind class the page passes in.
 - **A wrapper cannot see that its child rendered nothing.** Widgets return null
   all the time (no accounts, no bills due), and `:empty` on the wrapper never
   matches because the wrapper always holds the inner box — and, while arranging,

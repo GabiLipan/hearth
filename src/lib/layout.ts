@@ -1,6 +1,6 @@
 /**
  * A page somebody has arranged: which sections are on it, in what order, how
- * wide each one is, and which shape its chart takes.
+ * wide and how tall each one is, and which shape its chart takes.
  *
  * Shared by the home page and Reports rather than written twice. The two pages
  * hold quite different things — widgets that summarise a month, charts that
@@ -9,20 +9,60 @@
  *
  * Everything here is pure. The gesture lives in `components/Arrange.tsx`, the
  * catalogues live with the pages, and this file is only the rules: what a
- * stored layout means once the catalogue has moved on, and how a list of spans
- * becomes rows on a screen of a given width.
+ * stored layout means once the catalogue has moved on, and what box each
+ * section takes in a grid of a given width.
+ *
+ * ## Why a grid, and not the masonry it replaced
+ *
+ * A card used to be one column, two, or the width of the page, and a run of
+ * one-column cards was packed into balanced masonry columns. That answered
+ * "leave no dead space" and nothing else: a card had no say in its own height,
+ * so a chart worth looking at got exactly as much room as a list of five
+ * payees, and every wide card cut the page into independent bands that could
+ * not be arranged across.
+ *
+ * So both axes are the section's to choose. A section takes `span` columns and
+ * `rows` row units, the row unit is a real length (see `ROW_UNIT`), and the
+ * holes that leaves are filled by the grid's own dense packing rather than by
+ * an arrangement computed here. `placements` is what is left of the old
+ * `bands`: it clamps what was stored to what this screen can actually show,
+ * and the CSS does the rest.
  */
 
 /**
  * How wide a section is, in columns.
  *
- * `'full'` is not `Infinity` spelled differently — it means "however many
+ * `'full'` is not `MAX_SPAN` spelled differently — it means "however many
  * columns this screen has", so a section set to full on a four-column monitor
- * is still full on a phone with one. A number is clamped instead: a two-column
- * section on a one-column phone is one column wide, and goes back to two when
- * the window grows.
+ * is still full on a phone with one. A number is clamped instead: a three-column
+ * section on a two-column laptop is two columns wide, and goes back to three
+ * when the window grows.
  */
-export type Span = 1 | 2 | 'full'
+export type Span = number | 'full'
+
+/** The widest a section may be asked for, whatever the screen turns out to be. */
+export const MAX_SPAN = 4
+
+/**
+ * How tall a section is, in row units — see `ROW_UNIT` for what one is worth.
+ *
+ * One is the ordinary case and behaves exactly as the old layout did: the row
+ * is as tall as the tallest card in it and a card of prose is whatever height
+ * its prose is. Asking for two or three is asking for a picture rather than a
+ * summary, and it is the only way to say so.
+ */
+export const MAX_HEIGHT = 3
+
+/**
+ * The height of one row unit, in pixels, and the one number the grid and the
+ * resize gesture must agree about.
+ *
+ * It is a floor rather than a fixed track: `grid-auto-rows` is
+ * `minmax(ROW_UNIT, auto)`, so a card taller than the room it asked for grows
+ * its row rather than being cut off — which is what lets a section state a
+ * height at all without anybody having to know what its contents measure.
+ */
+export const ROW_UNIT = 116
 
 /**
  * A choice a section offers about itself, beyond which shape it takes.
@@ -61,6 +101,11 @@ export interface SectionDef {
   label: string
   defaultSpan?: Span
   /**
+   * How many row units it opens at. One unless the section is a picture that
+   * is worth nothing small — see `MAX_HEIGHT`.
+   */
+  defaultHeight?: number
+  /**
    * New sections arrive switched on, which is what makes a feature discoverable
    * to somebody who arranged their page a year ago. Anything big enough to be
    * an imposition says so here.
@@ -86,6 +131,11 @@ export interface LayoutItem {
   id: string
   on: boolean
   span: Span
+  /**
+   * How tall, in row units. Absent means one, so every layout stored before
+   * there was a second axis reads exactly as it did.
+   */
+  rows?: number
   /** One of the section's `variants`, or undefined for its default. */
   variant?: string
   /**
@@ -95,9 +145,18 @@ export interface LayoutItem {
   opts?: Record<string, string>
 }
 
-const SPANS: Span[] = [1, 2, 'full']
+const isSpan = (v: unknown): v is Span =>
+  v === 'full' || (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_SPAN)
 
-const isSpan = (v: unknown): v is Span => SPANS.includes(v as Span)
+/**
+ * A stored height, clamped to something this build can draw.
+ *
+ * Undefined rather than 1 when there is nothing to say, so a layout written
+ * before the second axis existed stays byte-identical after a round trip —
+ * the same care `optsOf` takes, and for the same reason.
+ */
+const heightOf = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isInteger(v) && v > 1 ? Math.min(v, MAX_HEIGHT) : undefined
 
 /**
  * A stored layout, reconciled with what the page can actually show today.
@@ -124,6 +183,7 @@ export function normaliseLayout(stored: unknown, catalogue: SectionDef[]): Layou
       id: def.id,
       on: item.on !== false,
       span: isSpan(item.span) ? item.span : (def.defaultSpan ?? 1),
+      rows: heightOf(item.rows ?? def.defaultHeight),
       variant: variantOf(def, item.variant),
       opts: optsOf(def, item.opts),
     })
@@ -131,7 +191,13 @@ export function normaliseLayout(stored: unknown, catalogue: SectionDef[]): Layou
 
   for (const def of catalogue) {
     if (seen.has(def.id)) continue
-    out.push({ id: def.id, on: def.defaultOn !== false, span: def.defaultSpan ?? 1, variant: undefined })
+    out.push({
+      id: def.id,
+      on: def.defaultOn !== false,
+      span: def.defaultSpan ?? 1,
+      rows: heightOf(def.defaultHeight),
+      variant: undefined,
+    })
   }
   return out
 }
@@ -242,68 +308,91 @@ export function setOption(items: LayoutItem[], id: string, optionId: string, val
   return items.map((i) => (i.id === id ? { ...i, opts: { ...i.opts, [optionId]: value } } : i))
 }
 
+/* ---------- how big a section is ---------- */
+
 /**
- * The next width along.
+ * Every width this screen can tell apart, in the order they are offered.
  *
- * Only offers widths this screen can tell apart: on a two-column layout `2` and
- * `full` are the same picture, so the cycle is one → full and back rather than
- * one → two → full with a step that appears to do nothing.
+ * A number equal to the column count is dropped: on two columns `2` and `full`
+ * are the same picture, and a control with a step that appears to do nothing is
+ * a control people press twice and then stop trusting. `full` is always last
+ * because it is the one that keeps meaning something when the window changes.
+ */
+export function spanChoices(columns: number): Span[] {
+  const cols = Math.max(1, columns)
+  const out: Span[] = []
+  for (let n = 1; n < Math.min(cols, MAX_SPAN + 1); n++) out.push(n)
+  out.push('full')
+  return out
+}
+
+/**
+ * The next width along, wrapping.
+ *
+ * A no-op on one column, and that is not a shortcut: every width looks the same
+ * on a phone and the value is SHARED with every other screen this household
+ * signs in on, so a cycle there would quietly rewrite what the card is on the
+ * laptop it was arranged on — a control that appears to do nothing and does
+ * something somewhere else.
  */
 export function nextSpan(span: Span, columns: number): Span {
-  const usable: Span[] = columns >= 3 ? [1, 2, 'full'] : columns === 2 ? [1, 'full'] : [1]
-  const i = usable.indexOf(span)
+  if (columns <= 1) return span
+  const usable = spanChoices(columns)
+  const i = usable.findIndex((s) => s === span)
   return usable[(i + 1) % usable.length] ?? usable[0]
 }
 
 /** How many columns a section actually occupies on a screen this wide. */
 export function effectiveSpan(span: Span, columns: number): number {
-  return span === 'full' ? columns : Math.min(span, columns)
+  const cols = Math.max(1, columns)
+  return span === 'full' ? cols : Math.min(Math.max(1, Math.round(span)), cols)
 }
 
 /**
- * A run of sections, laid out.
+ * How many row units it actually occupies.
  *
- * Two kinds, because two different layouts are right for two different cases:
- *
- *  - `masonry` — a run of one-column sections, packed vertically by `Columns`
- *    so cards of unequal height leave no dead space between them. This is the
- *    ordinary case and it is why the home page looks the way it does.
- *  - `rows` — anything wider. A two-column card cannot join a masonry column
- *    without breaking it, so wide cards are packed into rows of their own,
- *    greedily, up to the column count.
- *
- * A wide section therefore splits the run in two, the way `column-span: all`
- * used to, and the masonry either side of it is independent.
+ * One on a phone, whatever was stored. A single column is a stack of cards read
+ * one after another, where a height is not a comparison with anything — it is
+ * just a card with a hole in the bottom of it, and the section that asked to be
+ * three units tall to hold a chart on a monitor is the one that can least
+ * afford that. The stored value is untouched, so rotating a tablet or opening
+ * the window gives it straight back.
  */
-export type Band =
-  | { kind: 'masonry'; items: LayoutItem[] }
-  | { kind: 'rows'; rows: { item: LayoutItem; span: number }[][] }
+export function effectiveHeight(rows: number | undefined, columns: number): number {
+  if (columns <= 1) return 1
+  return Math.min(Math.max(1, Math.round(rows ?? 1)), MAX_HEIGHT)
+}
 
-export function bands(items: LayoutItem[], columns: number): Band[] {
-  const out: Band[] = []
+export function setHeight(items: LayoutItem[], id: string, rows: number): LayoutItem[] {
+  return items.map((i) => (i.id === id ? { ...i, rows: rows > 1 ? Math.min(rows, MAX_HEIGHT) : undefined } : i))
+}
+
+/**
+ * What box each visible section takes, clamped to this screen.
+ *
+ * All that is left of `bands`, which used to decide the whole arrangement:
+ * which run of cards became a masonry column, which became a row, and where a
+ * wide card cut the page in two. None of that is computed any more — the page
+ * is one CSS grid with dense packing, so the holes a mixture of sizes leaves
+ * are filled by the browser, in the order the sections are already in.
+ *
+ * What remains is the part CSS cannot do: `'full'` means this screen's column
+ * count rather than a number, and a stored size may be wider or taller than
+ * this screen can show.
+ */
+export interface Placement {
+  item: LayoutItem
+  /** Columns, 1..columns. */
+  span: number
+  /** Row units, 1..MAX_HEIGHT. */
+  rows: number
+}
+
+export function placements(items: LayoutItem[], columns: number): Placement[] {
   const cols = Math.max(1, columns)
-
-  for (const item of items) {
-    const span = effectiveSpan(item.span, cols)
-    const last = out[out.length - 1]
-
-    if (span <= 1) {
-      if (last?.kind === 'masonry') last.items.push(item)
-      else out.push({ kind: 'masonry', items: [item] })
-      continue
-    }
-
-    if (last?.kind === 'rows') {
-      const row = last.rows[last.rows.length - 1]
-      const used = row.reduce((s, r) => s + r.span, 0)
-      if (used + span <= cols) {
-        row.push({ item, span })
-        continue
-      }
-      last.rows.push([{ item, span }])
-      continue
-    }
-    out.push({ kind: 'rows', rows: [[{ item, span }]] })
-  }
-  return out
+  return items.map((item) => ({
+    item,
+    span: effectiveSpan(item.span, cols),
+    rows: effectiveHeight(item.rows, cols),
+  }))
 }

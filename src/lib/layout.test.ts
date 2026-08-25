@@ -1,14 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import {
-  bands,
+  MAX_HEIGHT,
+  effectiveHeight,
   effectiveSpan,
   moveTo,
   nextSpan,
   normaliseLayout,
   optionValue,
   optionsFor,
+  placements,
+  setHeight,
   setOption,
   setSpan,
+  spanChoices,
   toggle,
   type LayoutItem,
   type SectionDef,
@@ -28,6 +32,7 @@ const CATALOGUE: SectionDef[] = [
   {
     id: 'donut',
     label: 'Donut',
+    defaultHeight: 2,
     variants: [{ value: 'donut', label: 'Ring' }, { value: 'bars', label: 'Bars' }],
     options: [COUNTS],
   },
@@ -40,11 +45,11 @@ const item = (id: string, over: Partial<LayoutItem> = {}): LayoutItem => ({ id, 
 describe('normaliseLayout', () => {
   it('starts from the catalogue when there is nothing stored', () => {
     expect(normaliseLayout(null, CATALOGUE)).toEqual([
-      { id: 'hero', on: true, span: 'full', variant: undefined },
-      { id: 'donut', on: true, span: 1, variant: undefined },
-      { id: 'trend', on: true, span: 1, variant: undefined },
+      { id: 'hero', on: true, span: 'full', rows: undefined, variant: undefined },
+      { id: 'donut', on: true, span: 1, rows: 2, variant: undefined },
+      { id: 'trend', on: true, span: 1, rows: undefined, variant: undefined },
       // Big enough to be an imposition, so it waits to be asked for.
-      { id: 'flow', on: false, span: 'full', variant: undefined },
+      { id: 'flow', on: false, span: 'full', rows: undefined, variant: undefined },
     ])
   })
 
@@ -77,6 +82,7 @@ describe('normaliseLayout', () => {
       id: 'owed',
       on: true,
       span: 2,
+      rows: undefined,
       variant: undefined,
     })
 
@@ -85,12 +91,20 @@ describe('normaliseLayout', () => {
     const without = normaliseLayout(stored, CATALOGUE)
     expect(without.some((i) => i.id === 'owed')).toBe(false)
     const backOn = normaliseLayout(without, withOwed)
-    expect(backOn[backOn.length - 1]).toEqual({ id: 'owed', on: true, span: 1, variant: undefined })
+    expect(backOn[backOn.length - 1]).toEqual({ id: 'owed', on: true, span: 1, rows: undefined, variant: undefined })
   })
 
   it('refuses a span or a variant the section does not offer', () => {
     const stored = [{ id: 'donut', on: true, span: 7, variant: 'treemap' }]
-    expect(normaliseLayout(stored, CATALOGUE)[0]).toEqual({ id: 'donut', on: true, span: 1, variant: undefined })
+    // Seven columns is not a width any screen has; the section's own default
+    // is what it falls back to, which for the donut is one column, two tall.
+    expect(normaliseLayout(stored, CATALOGUE)[0]).toEqual({
+      id: 'donut',
+      on: true,
+      span: 1,
+      rows: 2,
+      variant: undefined,
+    })
   })
 
   it('keeps a variant the section still offers', () => {
@@ -161,19 +175,35 @@ describe('toggle', () => {
   })
 })
 
-describe('nextSpan', () => {
+describe('spanChoices', () => {
   it('only offers widths the screen can tell apart', () => {
+    // On two columns, "2" and "full" are the same picture, so only one of them
+    // is offered — a step that appears to do nothing is a control people stop
+    // trusting.
+    expect(spanChoices(1)).toEqual(['full'])
+    expect(spanChoices(2)).toEqual([1, 'full'])
+    expect(spanChoices(3)).toEqual([1, 2, 'full'])
+    expect(spanChoices(4)).toEqual([1, 2, 3, 'full'])
+  })
+})
+
+describe('nextSpan', () => {
+  it('cycles the widths this screen has', () => {
+    // One column has nothing to cycle, and the value is shared with the wide
+    // screen it was arranged on — so it stays exactly as it was.
     expect(nextSpan(1, 1)).toBe(1)
-    // On two columns, "2" and "full" are the same picture.
+    expect(nextSpan('full', 1)).toBe('full')
     expect(nextSpan(1, 2)).toBe('full')
     expect(nextSpan('full', 2)).toBe(1)
     expect(nextSpan(1, 4)).toBe(2)
-    expect(nextSpan(2, 4)).toBe('full')
+    expect(nextSpan(2, 4)).toBe(3)
+    expect(nextSpan(3, 4)).toBe('full')
     expect(nextSpan('full', 4)).toBe(1)
   })
 
   it('lands somewhere valid from a width the screen has outgrown', () => {
     expect(nextSpan(2, 2)).toBe(1)
+    expect(nextSpan(4, 2)).toBe(1)
   })
 })
 
@@ -182,32 +212,57 @@ describe('effectiveSpan', () => {
     expect(effectiveSpan(2, 1)).toBe(1)
     expect(effectiveSpan('full', 3)).toBe(3)
     expect(effectiveSpan(2, 4)).toBe(2)
+    expect(effectiveSpan(4, 3)).toBe(3)
   })
 })
 
-describe('bands', () => {
-  it('gathers a run of narrow sections into one masonry band', () => {
-    const out = bands([item('a'), item('b'), item('c')], 3)
-    expect(out).toHaveLength(1)
-    expect(out[0].kind).toBe('masonry')
+describe('effectiveHeight', () => {
+  it('is one on a phone, whatever was stored', () => {
+    // A single column is a stack read one card after another: a height there is
+    // not a comparison with anything, only a hole in the bottom of a card.
+    expect(effectiveHeight(3, 1)).toBe(1)
+    expect(effectiveHeight(undefined, 1)).toBe(1)
   })
 
-  it('a wide section splits the run in two', () => {
-    const out = bands([item('a'), item('w', { span: 'full' }), item('b')], 3)
-    expect(out.map((b) => b.kind)).toEqual(['masonry', 'rows', 'masonry'])
+  it('keeps what was stored on a screen with room for it', () => {
+    expect(effectiveHeight(undefined, 3)).toBe(1)
+    expect(effectiveHeight(2, 3)).toBe(2)
+    expect(effectiveHeight(9, 3)).toBe(MAX_HEIGHT)
+  })
+})
+
+describe('setHeight', () => {
+  it('touches only the section named', () => {
+    const items = [item('a'), item('b')]
+    const out = setHeight(items, 'b', 2)
+    expect(out[0]).toBe(items[0])
+    expect(out[1].rows).toBe(2)
   })
 
-  it('packs consecutive wide sections into a row until the row is full', () => {
-    const out = bands([item('x', { span: 2 }), item('y', { span: 2 }), item('z', { span: 2 })], 4)
-    expect(out).toHaveLength(1)
-    if (out[0].kind !== 'rows') throw new Error('expected rows')
-    expect(out[0].rows.map((r) => r.map((c) => c.item.id))).toEqual([['x', 'y'], ['z']])
+  /**
+   * One is the absence of a height, not a height of one. A layout written
+   * before the second axis existed has no `rows` at all, and going back to the
+   * ordinary size has to leave it that way or every card in the app grows a
+   * key saying nothing.
+   */
+  it('stores nothing at all for the ordinary height', () => {
+    expect(setHeight([item('a', { rows: 3 })], 'a', 1)[0].rows).toBeUndefined()
+    expect(setHeight([item('a')], 'a', 9)[0].rows).toBe(MAX_HEIGHT)
+  })
+})
+
+describe('placements', () => {
+  it('clamps every box to the screen, in the order they were given', () => {
+    const out = placements([item('a', { span: 'full' }), item('b', { span: 3, rows: 2 })], 2)
+    expect(out.map((p) => [p.item.id, p.span, p.rows])).toEqual([
+      ['a', 2, 1],
+      ['b', 2, 2],
+    ])
   })
 
-  it('on one column everything is narrow, so it is all one band', () => {
-    const out = bands([item('a', { span: 'full' }), item('b', { span: 2 })], 1)
-    expect(out).toHaveLength(1)
-    expect(out[0].kind).toBe('masonry')
+  it('on one column everything is one column and one unit tall', () => {
+    const out = placements([item('a', { span: 'full', rows: 3 }), item('b', { span: 2 })], 1)
+    expect(out.every((p) => p.span === 1 && p.rows === 1)).toBe(true)
   })
 })
 

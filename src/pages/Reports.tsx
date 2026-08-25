@@ -156,14 +156,16 @@ const SECTIONS: SectionDef[] = [
     variants: CATEGORY_SHAPES,
     options: [sliceCount('8')],
   },
-  { id: 'spend', label: 'Spending each month', variants: TREND_SHAPES },
-  { id: 'inout', label: 'In vs out', variants: IN_OUT_SHAPES },
+  // Two units tall by default: these draw rather than list, and a chart in a
+  // one-unit box on a three-column screen is a picture nobody can read.
+  { id: 'spend', label: 'Spending each month', defaultHeight: 2, variants: TREND_SHAPES },
+  { id: 'inout', label: 'In vs out', defaultHeight: 2, variants: IN_OUT_SHAPES },
   { id: 'net', label: 'Kept each month', defaultSpan: 'full', variants: NET_SHAPES },
   { id: 'flow', label: 'The whole flow', defaultSpan: 'full', options: [sliceCount('8')] },
   // Household only, and the one figure this whole model makes newly possible:
   // neither of us can see the other's salary, but every contribution ARRIVES in
   // a joint account, which we can both read.
-  { id: 'paidin', label: 'Who paid in', variants: PAID_IN_SHAPES },
+  { id: 'paidin', label: 'Who paid in', defaultHeight: 2, variants: PAID_IN_SHAPES },
   // Everything only. These two are what that book is FOR, now that it has
   // stopped being the other two poured into one pool.
   { id: 'bridge', label: 'How the books add up', defaultSpan: 'full', variants: BRIDGE_SHAPES },
@@ -172,8 +174,8 @@ const SECTIONS: SectionDef[] = [
   { id: 'crossings', label: 'Between our books', defaultSpan: 'full', options: [sliceCount('5')] },
   { id: 'waterfall', label: 'Step by step', defaultSpan: 'full' },
   { id: 'salary', label: 'What each salary turned into', defaultSpan: 'full' },
-  { id: 'committed', label: 'Committed vs chosen' },
-  { id: 'kept', label: 'Share kept' },
+  { id: 'committed', label: 'Committed vs chosen', defaultHeight: 2 },
+  { id: 'kept', label: 'Share kept', defaultHeight: 2 },
   { id: 'payees', label: 'Top payees', options: [rowCount('10')] },
   {
     id: 'heatmap',
@@ -194,8 +196,16 @@ const SECTIONS: SectionDef[] = [
   { id: 'pace', label: 'Pace', defaultSpan: 'full' },
 ]
 
-/** Two columns on a laptop, three on a wide monitor. */
-const COLUMN_STEPS: [number, number][] = [[1024, 2], [1900, 3]]
+/**
+ * Two columns on a tablet, three on a laptop, four on a monitor.
+ *
+ * Lower than they were at every step, and for the reason the home page gives:
+ * a page whose cards can be one, two or three columns wide has nothing to
+ * arrange while the page itself only ever has two. These cards are charts
+ * rather than summaries, so each step comes a little later than the home
+ * page's.
+ */
+const COLUMN_STEPS: [number, number][] = [[900, 2], [1400, 3], [2000, 4]]
 
 /** A chip that opens a short list and reports which of it is chosen. */
 function ChoiceChip<T extends string>({

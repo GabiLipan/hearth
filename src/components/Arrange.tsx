@@ -6,41 +6,53 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Check, EyeOff, Plus, SlidersHorizontal } from 'lucide-react'
+import { Check, EyeOff, GripHorizontal, Plus, SlidersHorizontal } from 'lucide-react'
 import { getSetting, setSetting } from '../lib/db'
 import {
-  bands,
+  MAX_HEIGHT,
+  ROW_UNIT,
   currentVariant,
+  effectiveHeight,
   effectiveSpan,
   moveTo,
   nextSpan,
   normaliseLayout,
   optionValue,
   optionsFor,
+  placements,
+  setHeight,
   setOption,
   setSpan,
   setVariant,
   toggle,
   type LayoutItem,
   type SectionDef,
+  type Span,
 } from '../lib/layout'
-import { Columns, Popover, cx, type InfoGround } from './ui'
+import { Popover, cx, type InfoGround } from './ui'
 import { appScrollX, appScrollY, scrollAppBy } from '../lib/scroll'
 
 /**
  * A page you can rearrange with your hands.
  *
- * ## Why there is no drag handle
+ * ## The two handles
  *
- * Because a handle is a permanent piece of furniture in service of an
- * occasional act. The category list can afford one — it is a list of plain rows
- * with a spare 36px on the trailing edge — but a page of cards cannot: every
- * card already has a heading, a figure and usually a link in the corner where a
- * grip would want to sit, and eight grips are eight pieces of chrome on a page
- * whose whole job is to be read.
+ * A card is moved by the grabber at the top of it and resized by the corner at
+ * the bottom of it, and both appear only in Customise mode — where nothing
+ * inside a card is interactive anyway and a press can mean nothing else.
  *
- * So the card IS the handle — but only in Customise mode, where nothing inside a
- * card is interactive anyway and a press can mean nothing else.
+ * They are handles rather than modes because the two acts are told apart by
+ * WHERE you take hold, which is a thing the hand already knows: the top middle
+ * is where you pick a window up, the bottom corner is where you pull it bigger.
+ * Outside Customise mode neither exists, so the page keeps the property the
+ * whole file is written around — it is a page of figures to be read, not a
+ * board of furniture.
+ *
+ * The whole card stays draggable as well, so the grabber is an affordance
+ * rather than a target to hunt for: it says the card moves, and hitting it
+ * exactly is not the price of moving one. The corner is the exception and must
+ * be hit, because "bigger" and "somewhere else" cannot both be the meaning of
+ * one drag.
  *
  * ## Why a long press does not enter Customise mode
  *
@@ -71,6 +83,21 @@ import { appScrollX, appScrollY, scrollAppBy } from '../lib/scroll'
 
 /** How close to the edge of the screen starts an auto-scroll. */
 const EDGE = 84
+
+/**
+ * A resize in flight: the card, and the size the pointer is currently asking
+ * for. Held here rather than written straight to the layout so that a drag
+ * across three widths is one stored change rather than three — and so that
+ * letting go outside the grid can put the card back exactly as it was.
+ *
+ * `span` and `rows` are the EFFECTIVE numbers, so the preview is what the
+ * screen will actually show; the stored value is worked back out on commit.
+ */
+interface Resize {
+  id: string
+  span: number
+  rows: number
+}
 
 /* ---------- the stored layout ---------- */
 
@@ -138,12 +165,12 @@ export function useLayout(key: string, catalogue: SectionDef[]) {
  * One section's box, and which position in the visible list it belongs to.
  *
  * The index is carried rather than implied by the array's own order, for two
- * reasons that both bite. `Columns` distributes cards down columns, so DOCUMENT
- * order is not reading order — the second card on the page is the top of column
- * two, not the second `data-section` in the DOM. And a section whose data has
- * nothing to show renders empty and is hidden, so it has a box of zero size
- * that must not be allowed to win "nearest centre" from the far corner of the
- * page.
+ * reasons that both bite. The grid packs densely, so DOCUMENT order is not
+ * reading order — a narrow card later in the list is pulled back into a hole an
+ * earlier wide one could not fill, and lands on the screen above the card it
+ * follows in the array. And a section whose data has nothing to show renders
+ * empty and is hidden, so it has a box of zero size that must not be allowed to
+ * win "nearest centre" from the far corner of the page.
  */
 interface Box {
   /** Position in the visible list, which is what `moveTo` counts gaps in. */
@@ -204,6 +231,27 @@ export function Arrange({
 
   const [drag, setDrag] = useState<{ id: string; from: number; dx: number; dy: number } | null>(null)
   const [gapAt, setGapAt] = useState<number | null>(null)
+  const [resize, setResize] = useState<Resize | null>(null)
+  /**
+   * Where the resize began and how big the card was then.
+   *
+   * The gesture is RELATIVE — the size the pointer asks for is the size it
+   * started at plus however many steps it has travelled — rather than measured
+   * from the card's own top-left corner. That is not a refinement: a row track
+   * grows to fit a card taller than the height it asked for, so a card asking
+   * for one unit is routinely two units tall, and an absolute reading would
+   * jump it to three the instant the handle was touched, before the pointer had
+   * moved at all.
+   */
+  const grab = useRef({ x: 0, y: 0, span: 1, rows: 1, col: 1, row: 1 })
+  /**
+   * Whether the corner was DRAGGED rather than pressed.
+   *
+   * A pointer down and up on the same element is also a click, so without this
+   * every resize ends by cycling the width one step past wherever it was let
+   * go — the press meaning of the handle firing on top of its drag meaning.
+   */
+  const dragged = useRef(false)
 
   /** Where the caret goes, in wrapper-relative coordinates. */
   const caret = useMemo(() => {
@@ -300,10 +348,13 @@ export function Arrange({
     if (!editing) return
     // Only the primary button, and never a press that started on a control.
     if (e.button !== 0) return
+    const target = e.target as Element | null
+    // The grabber IS a button, so it has to be admitted before the control
+    // test rather than after it — it is the one control on a card whose whole
+    // job is to start this gesture.
     if (
-      (e.target as Element | null)?.closest(
-        'button, a, input, select, textarea, [role="button"], [data-no-drag]',
-      )
+      !target?.closest('[data-drag-handle]') &&
+      target?.closest('button, a, input, select, textarea, [role="button"], [data-no-drag]')
     ) {
       return
     }
@@ -332,13 +383,99 @@ export function Arrange({
     }
   }
 
+  /* ---------- the corner ---------- */
+
+  /**
+   * One step of the grid, in pixels: a column plus the gutter after it, and a
+   * row unit plus the gutter under it.
+   *
+   * Read off the live grid rather than stated as a constant, because the gap is
+   * a Tailwind class the caller passes in and the column width is whatever the
+   * page is wide. `columnGap`/`rowGap` resolve to pixels in a computed style
+   * even when they were written in rem.
+   */
+  function stepOf(el: HTMLElement) {
+    const cs = getComputedStyle(el)
+    const colGap = parseFloat(cs.columnGap) || 0
+    const rowGap = parseFloat(cs.rowGap) || 0
+    const cols = Math.max(1, columns)
+    return {
+      x: (el.getBoundingClientRect().width + colGap) / cols,
+      y: ROW_UNIT + rowGap,
+    }
+  }
+
+  function grabCorner(e: React.PointerEvent, item: LayoutItem) {
+    if (!editing || e.button !== 0) return
+    const el = wrap.current
+    if (!el) return
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      /* carry on uncaptured — the listeners are on the handle either way */
+    }
+    const step = stepOf(el)
+    grab.current = {
+      x: e.clientX,
+      y: e.clientY,
+      span: effectiveSpan(item.span, columns),
+      rows: effectiveHeight(item.rows, columns),
+      col: step.x,
+      row: step.y,
+    }
+    dragged.current = false
+    setResize({ id: item.id, span: grab.current.span, rows: grab.current.rows })
+  }
+
+  function dragCorner(e: React.PointerEvent) {
+    if (!resize) return
+    const g = grab.current
+    const clamp = (v: number, hi: number) => Math.max(1, Math.min(hi, v))
+    const span = clamp(g.span + Math.round((e.clientX - g.x) / g.col), Math.max(1, columns))
+    // A phone has one height and one width, so the corner has nothing to say
+    // there — see `effectiveHeight`. It is not rendered at all, but a stylus
+    // arriving mid-rotation would otherwise write a size the screen cannot show.
+    const rows = columns <= 1 ? 1 : clamp(g.rows + Math.round((e.clientY - g.y) / g.row), MAX_HEIGHT)
+    if (Math.abs(e.clientX - g.x) > 4 || Math.abs(e.clientY - g.y) > 4) dragged.current = true
+    setResize((was) => (was && was.span === span && was.rows === rows ? was : was && { ...was, span, rows }))
+  }
+
+  /**
+   * Let go: write the size once.
+   *
+   * A width equal to the column count is stored as `'full'` rather than as that
+   * number, which is the whole difference between "as wide as the page" and "as
+   * wide as the page happens to be today" — dragging a card to the right-hand
+   * edge of a three-column screen means the first, and storing `3` would make
+   * it two thirds of a four-column one.
+   */
+  function dropCorner() {
+    if (!resize) return
+    const item = visible.find((i) => i.id === resize.id)
+    setResize(null)
+    if (!item) return
+    let next = layout
+    const span: Span = resize.span >= Math.max(1, columns) ? 'full' : resize.span
+    if (effectiveSpan(item.span, columns) !== resize.span || (span === 'full') !== (item.span === 'full')) {
+      next = setSpan(next, item.id, span)
+    }
+    if (effectiveHeight(item.rows, columns) !== resize.rows) next = setHeight(next, item.id, resize.rows)
+    if (next !== layout) onLayout(next)
+  }
+
   // Escape abandons a drag, as everywhere else in the app.
   useEffect(() => {
-    if (!drag) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && stop()
+    if (!drag && !resize) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      stop()
+      setResize(null)
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [drag, stop])
+  }, [drag, resize, stop])
 
   // Follow the finger past the edge of the screen. The boxes are in document
   // coordinates, so scrolling moves the page under them with nothing to re-measure.
@@ -358,28 +495,55 @@ export function Arrange({
     return () => cancelAnimationFrame(frame)
   }, [drag, reread])
 
+  /**
+   * The whole of both gestures, from the keyboard.
+   *
+   * A corner that has to be dragged is unreachable without a pointer, so the
+   * shift key is the second axis: the arrows alone move a card, and with shift
+   * held they resize it — sideways for the width, up and down for the height,
+   * which is the same picture the corner draws with a hand.
+   */
   function keys(e: React.KeyboardEvent, id: string) {
-    const from = visible.findIndex((i) => i.id === id)
-    if (from < 0) return
+    const at = visible.findIndex((i) => i.id === id)
+    if (at < 0) return
+    const item = visible[at]
     const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp'
     const on = e.key === 'ArrowRight' || e.key === 'ArrowDown'
+    const vertical = e.key === 'ArrowUp' || e.key === 'ArrowDown'
+
+    if (e.shiftKey && (back || on)) {
+      e.preventDefault()
+      const step = on ? 1 : -1
+      if (vertical) {
+        const rows = effectiveHeight(item.rows, columns) + step
+        if (rows >= 1 && rows <= MAX_HEIGHT) onLayout(setHeight(layout, id, rows))
+        return
+      }
+      const span = effectiveSpan(item.span, columns) + step
+      if (span < 1 || span > Math.max(1, columns)) return
+      onLayout(setSpan(layout, id, span >= Math.max(1, columns) ? 'full' : span))
+      return
+    }
+
     if (back || on) {
       e.preventDefault()
-      const next = moveTo(layout, id, back ? from - 1 : from + 2)
+      const next = moveTo(layout, id, back ? at - 1 : at + 2)
       if (next !== layout) onLayout(next)
       return
     }
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
-      const item = visible[from]
       onLayout(setSpan(layout, id, nextSpan(item.span, columns)))
     }
   }
 
-  const section = (item: LayoutItem) => {
+  const section = ({ item, span, rows }: { item: LayoutItem; span: number; rows: number }) => {
     const def = defs.get(item.id)
     if (!def) return null
     const lifted = drag?.id === item.id
+    const sizing = resize?.id === item.id ? resize : null
+    const cols = sizing?.span ?? span
+    const high = sizing?.rows ?? rows
     return (
       <div
         key={item.id}
@@ -394,15 +558,37 @@ export function Arrange({
         // on the wrapper itself cannot see that, because the wrapper always has
         // the inner box (and, while arranging, the controls) inside it; `:has`
         // asks about the inner box instead.
-        // `h-full` all the way down to the card: the box a section is given
-        // can now be taller than the section asked for — a row is as tall as
-        // its tallest card, a stretched column hands out its slack — and a
-        // height nobody passes on is a card floating at the top of a hole
-        // rather than a card that filled it. See `Columns`'s `fill` and `Fill`.
-        className={cx('relative h-full min-w-0 [&:has(>div:empty)]:hidden', editing && 'touch-none select-none')}
-        style={lifted ? { transform: `translate(${drag.dx}px, ${drag.dy}px)`, zIndex: 30 } : undefined}
+        // Every card is as tall as the box the grid gave it, and that is a
+        // deliberate reversal of the rule the masonry layout followed.
+        // There, a card that could not spend the height kept its own and left
+        // the slack at the FOOT of its column, where nothing was ever drawn and
+        // nobody could see it; only a card holding a `Fill` was stretched,
+        // because stretching the others moved the hole inside them.
+        // In a grid the slack has nowhere to go. A row is as tall as the
+        // tallest card in it, so a card left at its own height leaves a gap
+        // between itself and the card below — a hole in the middle of the page
+        // rather than at the bottom of a column. Of the two, whitespace inside
+        // a card reads as a card; whitespace between them reads as a fault, and
+        // it is the exact fault this grid was asked for to remove. `Fill` still
+        // does the work wherever there is something in the card that can grow.
+        className={cx(
+          'relative h-full min-w-0 [&:has(>div:empty)]:hidden',
+          editing && 'touch-none select-none',
+        )}
+        style={{
+          gridColumn: `span ${cols} / span ${cols}`,
+          gridRow: `span ${high} / span ${high}`,
+          ...(lifted ? { transform: `translate(${drag.dx}px, ${drag.dy}px)`, zIndex: 30 } : null),
+          ...(sizing ? { zIndex: 20 } : null),
+        }}
         tabIndex={editing ? 0 : undefined}
-        aria-label={editing ? `${def.label}. Arrow keys to move, Enter to change its width.` : undefined}
+        aria-label={
+          editing
+            ? `${def.label}, ${cols} of ${Math.max(1, columns)} columns wide${
+                columns > 1 ? `, ${high} of ${MAX_HEIGHT} tall` : ''
+              }. Arrow keys to move it, shift and the arrow keys to resize it.`
+            : undefined
+        }
         onPointerDown={(e) => down(e, item.id)}
         onPointerMove={track}
         onPointerUp={finish}
@@ -420,6 +606,7 @@ export function Arrange({
             'h-full [&>*]:flex [&>*]:h-full [&>*]:flex-col',
             editing && 'rounded-2xl ring-2 ring-dashed ring-accent/40 md:rounded-xl',
             lifted && 'scale-[1.02] opacity-95 shadow-2xl ring-accent',
+            sizing && 'ring-accent',
           )}
         >
           {render({
@@ -439,27 +626,85 @@ export function Arrange({
           })}
         </div>
 
-        {editing && !lifted && (
-          <div className="absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">
+        {editing && !lifted && !sizing && (
+          <>
+            {/* The grabber, in the top middle: the one shape in this app that
+                already means "take hold of this", borrowed from the underside
+                of a sheet. Centred rather than in a corner because both corners
+                of a card are spoken for — a heading and a picker on one side, a
+                figure or a link on the other — and because the middle of the
+                top edge is where a window is picked up everywhere else.
+                It does not have to be hit: the whole card is still the handle
+                in Customise mode, and this says so. */}
             <button
               type="button"
-              onClick={() => onLayout(setSpan(layout, item.id, nextSpan(item.span, columns)))}
-              aria-label={`Change the width of ${def.label}`}
-              title="Width"
-              className="grid size-7 place-items-center rounded-full text-ink-2 hover:bg-surface-2 hover:text-ink"
+              data-drag-handle
+              aria-hidden
+              tabIndex={-1}
+              title={`Drag to move ${def.label}`}
+              className={cx(
+                'absolute left-1/2 top-1 z-10 flex h-5 -translate-x-1/2 cursor-grab items-center rounded-full px-2',
+                'bg-surface/90 text-ink-3 shadow-sm ring-1 ring-hairline active:cursor-grabbing',
+              )}
             >
-              <WidthGlyph filled={effectiveSpan(item.span, columns)} of={columns} />
+              <GripHorizontal size={13} />
             </button>
+
+            <div className="absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">
+              <button
+                type="button"
+                onClick={() => onLayout(toggle(layout, item.id))}
+                aria-label={`Hide ${def.label}`}
+                title="Hide"
+                className="grid size-7 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
+              >
+                <EyeOff size={14} />
+              </button>
+            </div>
+
+            {/* The corner, on a screen with more than one column. A phone has
+                one width and one height — see `effectiveHeight` — so a handle
+                there could only write a size that shows up on somebody else's
+                laptop, which is a control that appears to do nothing and does
+                something out of sight. A press cycles the width, which is what
+                the button beside the eye used to do, so the one-tap way to two
+                columns survives the handle replacing it. */}
+            {columns > 1 && (
             <button
               type="button"
-              onClick={() => onLayout(toggle(layout, item.id))}
-              aria-label={`Hide ${def.label}`}
-              title="Hide"
-              className="grid size-7 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
+              data-no-drag
+              onPointerDown={(e) => grabCorner(e, item)}
+              onPointerMove={dragCorner}
+              onPointerUp={dropCorner}
+              onPointerCancel={() => setResize(null)}
+              onClick={() => {
+                if (dragged.current) {
+                  dragged.current = false
+                  return
+                }
+                onLayout(setSpan(layout, item.id, nextSpan(item.span, columns)))
+              }}
+              aria-label={`Resize ${def.label}`}
+              title="Drag to resize"
+              className={cx(
+                'absolute bottom-1 right-1 z-10 grid size-6 cursor-nwse-resize place-items-center',
+                'rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink',
+              )}
             >
-              <EyeOff size={14} />
+              <CornerGlyph />
             </button>
-          </div>
+            )}
+          </>
+        )}
+
+        {/* What the corner is currently asking for, said in numbers over the
+            card it is resizing. A grid step is a big change made in small
+            movements, and without this the only feedback is the page reflowing
+            around a card whose own edges are under your hand. */}
+        {sizing && (
+          <span className="pointer-events-none absolute bottom-2 right-2 z-20 rounded-full bg-accent px-2 py-1 text-xs font-semibold text-accent-ink tabular">
+            {cols} × {high}
+          </span>
         )}
       </div>
     )
@@ -467,37 +712,33 @@ export function Arrange({
 
   return (
     <div>
-      <div ref={wrap} className={cx('relative flex flex-col', gap)}>
-        {bands(visible, columns).map((band, i) =>
-          band.kind === 'masonry' ? (
-            <Columns key={`b${i}`} count={columns} gap={gap} fill>
-              {band.items.map(section)}
-            </Columns>
-          ) : (
-            <div key={`b${i}`} className={cx('flex flex-col', gap)}>
-              {band.rows.map((row, j) => (
-                // Two sections sharing a row end at the same line — but only
-                // the ones with something in them that can grow into it, which
-                // is what `data-fill` marks. See `Columns`: stretching a card
-                // that cannot spend the height moves the gap inside it.
-                <div key={j} className={cx('flex items-start', gap)}>
-                  {row.map(({ item, span }) => (
-                    <div
-                      key={item.id}
-                      className="min-w-0 has-[[data-fill]]:self-stretch"
-                      // `flexGrow` from the span and a zero basis, so two
-                      // sections sharing a row split it by their widths rather
-                      // than by their contents.
-                      style={{ flex: `${span} 1 0%` }}
-                    >
-                      {section(item)}
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          ),
-        )}
+      {/*
+        One grid, not a page of bands.
+        `grid-auto-flow: dense` is what makes a page of mixed sizes worth
+        having: a two-column card that will not fit the tail of a row lets the
+        next one-column card fill it rather than leaving a hole and starting
+        again underneath — which is the cap the masonry-plus-rows arrangement
+        could never get rid of, because a wide card cut the page in two and each
+        half packed itself in ignorance of the other.
+        What it costs is that visual order and DOM order can differ: a later
+        card can be pulled back into an earlier gap. Everything in the drag
+        reads live geometry rather than the array (`begin` measures every
+        `[data-section]` box and carries the index with it), so the caret still
+        lands where the eye is — see `Box`.
+        `grid-auto-rows` is a MINIMUM, so a card taller than the height it asked
+        for grows its row instead of being cut off, and a page of ordinary cards
+        that never ask for a second unit behaves exactly as it used to.
+      */}
+      <div
+        ref={wrap}
+        className={cx('relative grid', gap)}
+        style={{
+          gridTemplateColumns: `repeat(${Math.max(1, columns)}, minmax(0, 1fr))`,
+          gridAutoRows: `minmax(${ROW_UNIT}px, auto)`,
+          gridAutoFlow: 'row dense',
+        }}
+      >
+        {placements(visible, columns).map(section)}
 
         {caret && (
           <div
@@ -528,8 +769,8 @@ export function Arrange({
 
       {editing && (
         <p className="mt-3 px-1 text-center text-xs text-ink-3">
-          Drag a card to move it. The button in its corner changes how wide it is; with a card focused, the
-          arrow keys move it and Enter changes its width.
+          Drag a card by the grip at the top to move it, or its bottom corner to make it wider and taller.
+          With a card focused, the arrow keys move it and shift with the arrow keys resizes it.
         </p>
       )}
 
@@ -558,21 +799,17 @@ export function Arrange({
 }
 
 /**
- * How wide this card is, drawn rather than named.
+ * The corner, drawn as the corner of a card being pulled.
  *
- * "1 of 3 columns" is a sentence; a row of cells with the first one filled is
- * the same fact at a glance, and it keeps meaning the same thing when the
- * window is resized and the column count changes underneath it.
+ * Two strokes rather than the three of a native resize gripper: the handle is
+ * 24px in the corner of a card that is mostly figures, and a third line at this
+ * size reads as texture rather than as a hint.
  */
-function WidthGlyph({ filled, of }: { filled: number; of: number }) {
-  const n = Math.max(1, of)
-  const w = 16
-  const h = 11
-  const cell = w / n
+function CornerGlyph() {
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden>
-      <rect x="0.5" y="0.5" width={w - 1} height={h - 1} rx="2" fill="none" stroke="currentColor" strokeOpacity="0.35" />
-      <rect x="0" y="0" width={Math.min(w, cell * filled)} height={h} rx="2" fill="currentColor" />
+    <svg width="11" height="11" viewBox="0 0 11 11" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+      <path d="M10 4 L4 10" />
+      <path d="M10 8 L8 10" />
     </svg>
   )
 }

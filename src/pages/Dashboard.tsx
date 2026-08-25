@@ -47,10 +47,11 @@ import {
  * What the home page can show, and what each one is called when it is being
  * arranged or is sitting in the row of things that are not shown.
  *
- * The widths here are only DEFAULTS. Everything on this page can be one column,
- * two, or the full width, and which it is is somebody's decision rather than
- * the widget's — a household that lives out of its budgets wants those full
- * width and the accounts in a corner, and the app has no way of knowing that.
+ * The sizes here are only DEFAULTS. Everything on this page can be any number
+ * of columns wide and up to three units tall, and how big it is is somebody's
+ * decision rather than the widget's — a household that lives out of its budgets
+ * wants those full width and the accounts in a corner, and the app has no way
+ * of knowing that.
  */
 const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
   { id: 'hero', label: 'Month summary', component: HeroWidget, defaultSpan: 'full', ground: 'panel', variants: HERO_SHAPES },
@@ -77,6 +78,9 @@ const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
     id: 'donut',
     label: 'Where it went',
     component: DonutWidget,
+    // A ring is worth nothing small, so it opens with room for one. Every
+    // section that draws rather than lists starts at two units here.
+    defaultHeight: 2,
     variants: SLICE_SHAPES,
     options: [sliceCount('6')],
   },
@@ -84,13 +88,14 @@ const WIDGETS: (SectionDef & { component: ComponentType<WidgetProps> })[] = [
     id: 'trend',
     label: 'Spending trend',
     component: TrendWidget,
+    defaultHeight: 2,
     variants: TREND_SHAPES,
     options: [monthWindow('6')],
   },
   // Each of these belongs to ONE book and renders nothing in the others, which
   // is what lets all three sit in one catalogue: the card is hidden rather than
   // empty, and comes back when the lens does.
-  { id: 'paidin', label: 'Who paid in', component: PaidInWidget, variants: PAID_IN_SHAPES },
+  { id: 'paidin', label: 'Who paid in', component: PaidInWidget, defaultHeight: 2, variants: PAID_IN_SHAPES },
   { id: 'bridge', label: 'How the books add up', component: BridgeWidget, defaultSpan: 'full', variants: BRIDGE_SHAPES },
   { id: 'accounts', label: 'Accounts', component: AccountsWidget },
   { id: 'recent', label: 'Recent activity', component: RecentWidget, options: [rowCount('5', 'Rows')] },
@@ -136,7 +141,16 @@ const OWED_WIDGET: SectionDef & { component: ComponentType<WidgetProps> } = {
 }
 
 /** Two columns on a laptop, three on a wide monitor, four on a very wide one. */
-const COLUMN_STEPS: [number, number][] = [[768, 2], [1536, 3], [2200, 4]]
+/**
+ * Two columns on a tablet, three on a laptop, four on a monitor.
+ *
+ * The old steps asked for 1536px before a third column, which is wider than
+ * almost every laptop screen — so the page that can now be arranged two ways
+ * only ever had two of them to arrange into. A card is one third of 1280px at
+ * about 400px, which is comfortably a chart; the fourth waits for 1800 because
+ * a quarter of anything narrower is a column of wrapped words.
+ */
+const COLUMN_STEPS: [number, number][] = [[768, 2], [1280, 3], [1800, 4]]
 
 export default function Dashboard() {
   const navigate = useNavigate()

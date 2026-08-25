@@ -1,9 +1,7 @@
 import {
-  Children,
   useEffect,
   useId,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -91,8 +89,10 @@ export const CHROME_FROST =
 /**
  * How many columns fit, from a list of `[minWidth, columns]` steps.
  *
- * The column count has to be known in JS rather than left to CSS, because the
- * distribution of items into columns happens in JS — see `Columns`.
+ * The column count has to be known in JS rather than left to CSS, because
+ * `Arrange` has to know it too: `'full'` means "this screen's column count",
+ * a stored width wider than the screen is clamped against it, and the resize
+ * gesture measures one column's width from it.
  */
 export function useColumnCount(steps: [number, number][], base = 1) {
   const read = () => {
@@ -138,135 +138,15 @@ export function useWide(): boolean {
 }
 
 /**
- * Lay children out in balanced columns, shortest column first.
- *
- * This replaced CSS `columns`, which was the right tool and worked everywhere
- * except where it mattered: Safari ignores `break-inside: avoid` in a
- * multi-column layout and cuts cards in half at a column boundary, stranding
- * the bottom border of one card at the top of the next column. `column-span`
- * is unreliable there too. Flex columns cannot fragment a child in any engine,
- * because there is no fragmentation context to begin with.
- *
- * The cost is that balancing is ours to do. Children are measured after layout
- * and each is assigned to whichever column is currently shortest, which is what
- * the browser was doing for us before.
- */
-export function Columns({
-  count,
-  gap,
-  fill,
-  children,
-  className,
-}: {
-  count: number
-  /** Tailwind gap classes, applied both between columns and within them. */
-  gap: string
-  /**
-   * Whether a short column should stretch to the height of the tallest one.
-   *
-   * Balancing gets the columns close and cannot get them equal — cards are
-   * whatever height their contents are — so the bottom of a masonry band is
-   * ragged by construction, and with two cards in two columns there is nothing
-   * to balance at all: one simply ends higher than the other and the page has a
-   * hole in it down to the next full-width card. With this on, every column is
-   * as tall as the tallest and the slack is handed to the cards in it to share.
-   *
-   * Only to the cards that can SPEND it, though — the ones holding a `Fill`,
-   * which is what `data-fill` says. Stretching a card that cannot grow does not
-   * remove the gap, it moves the gap inside the card, where it reads as a
-   * mistake rather than as spacing: a list of payees with three inches of
-   * nothing under it. Those keep their own height, and the slack stays at the
-   * foot of the column, which is where a masonry layout has always left it.
-   *
-   * Off altogether for a page of prose-shaped cards (Settings), where nothing
-   * on the page has anything in it that grows.
-   *
-   * Growing every card in the column rather than only the last is deliberate:
-   * one card absorbing a whole column's slack is one chart twice the height of
-   * its neighbour, where a share each is a row of charts that all grew a little.
-   *
-   * The stretch does not disturb the balancing it is measured from. After it,
-   * every column is exactly the tallest column's height, so re-running the
-   * distribution over the grown heights puts every item back where it already
-   * was — a fixed point, not a loop.
-   */
-  fill?: boolean
-  children: ReactNode
-  className?: string
-}) {
-  const items = Children.toArray(children)
-  const [heights, setHeights] = useState<number[]>([])
-  const nodes = useRef<(HTMLDivElement | null)[]>([])
-
-  useLayoutEffect(() => {
-    const measure = () =>
-      setHeights((prev) => {
-        // A ref can be momentarily null while React moves a node between
-        // columns; keeping the last known height stops that reading as zero
-        // and reshuffling everything.
-        const next = nodes.current.map((el, i) => el?.offsetHeight ?? prev[i] ?? 0)
-        return next.length === prev.length && next.every((h, i) => h === prev[i]) ? prev : next
-      })
-    const observer = new ResizeObserver(measure)
-    nodes.current.forEach((el) => el && observer.observe(el))
-    measure()
-    return () => observer.disconnect()
-  }, [items.length])
-
-  const columns = useMemo(() => {
-    const buckets: number[][] = Array.from({ length: count }, () => [])
-    // Fill the columns *in order*, the way CSS columns did — an item goes to
-    // the column its own midpoint lands in, so reading down column one and on
-    // to column two follows the order the items were arranged in. Assigning
-    // each item to whichever column is currently shortest balances marginally
-    // better and scrambles that order, which on a dashboard someone has
-    // arranged by hand is the worse trade.
-    let total = 0
-    for (let i = 0; i < items.length; i++) total += heights[i] ?? 1
-    const target = total / count
-    let filled = 0
-    items.forEach((_, i) => {
-      const height = heights[i] ?? 1
-      const col = target > 0 ? Math.min(count - 1, Math.floor((filled + height / 2) / target)) : i % count
-      buckets[col].push(i)
-      filled += height
-    })
-    return buckets
-  }, [items.length, count, heights])
-
-  return (
-    <div className={cx('flex', fill ? 'items-stretch' : 'items-start', gap, className)}>
-      {columns.map((indices, col) => (
-        <div key={col} className={cx('flex min-w-0 flex-1 flex-col', gap)}>
-          {indices.map((i) => (
-            <div
-              key={i}
-              ref={(el) => {
-                nodes.current[i] = el
-              }}
-              // A child that renders nothing must not still occupy a gap — and
-              // must not be handed a share of the slack either, which is why
-              // the grow is refused to an item that measured as nothing.
-              className={cx('empty:hidden', fill && (heights[i] ?? 1) > 0 && 'has-[[data-fill]]:grow')}
-            >
-              {items[i]}
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
  * The space a card has left, given to whatever inside it can use it.
  *
- * Cards in a row are as tall as the tallest of them, and a card in a stretched
- * masonry column is as tall as its share of the slack makes it. Both leave a
- * card holding more height than its contents asked for, and the honest thing to
- * do with it is give it to the picture: a chart drawn 60px taller is a chart,
- * where 60px of blank card under one is a mistake. So a chart that can be any
- * height goes in here rather than being handed a constant.
+ * Cards in a grid row are as tall as the tallest of them, and a card can now be
+ * told outright to be two or three row units tall. Both leave a card holding
+ * more height than its contents asked for, and the honest thing to do with it
+ * is give it to the picture: a chart drawn 60px taller is a chart, where 60px
+ * of blank card under one is a mistake. So a chart that can be any height goes
+ * in here rather than being handed a constant — and on this page that is what
+ * makes the height axis worth having at all.
  *
  * `min` is what the chart would have been on its own and is a floor, never a
  * squeeze — a card is never SHORTER for being in a row. `max` is the ceiling,
@@ -319,7 +199,7 @@ export function Fill({
 
   return (
     // `data-fill` is how the grid asks "can this card spend a taller box?" —
-    // see `Columns`. A card with nothing in it that grows must not be stretched,
+    // A card with nothing in it that grows must not be stretched,
     // or the gap between two cards simply moves inside one of them.
     <div ref={box} data-fill className="flex-1" style={{ minHeight: min }}>
       <div ref={content}>{children(height)}</div>
