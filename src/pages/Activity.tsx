@@ -365,6 +365,33 @@ export default function Activity() {
   const visible = filtered.slice(0, limit)
   const more = filtered.length > visible.length
 
+  /**
+   * The account every row in view is on, where they are all on one — which is
+   * the only case in which a Balance column can be READ.
+   *
+   * Each figure is true whatever is on screen: it is what that row's own
+   * account held once that row had gone through it. But a column of them down a
+   * list that spans three accounts is a column that does not add up — 1,284
+   * then 43 then 900, none of them differing by the amount printed beside it,
+   * because consecutive rows are answers about different accounts. A bank
+   * statement has this column precisely because every line on it is one
+   * account, and that is the shape it has to be given here too.
+   *
+   * So the column appears when the rows are one account's — which the Account
+   * filter is how you ask for — and is absent otherwise, rather than printing
+   * figures that invite arithmetic nobody can do. Read from `filtered` and not
+   * from `visible`, or scrolling far enough to reach a second account would
+   * make a column vanish mid-page.
+   */
+  const oneAccount = useMemo(() => {
+    let id: string | undefined
+    for (const t of filtered) {
+      if (id === undefined) id = t.accountId
+      else if (id !== t.accountId) return undefined
+    }
+    return id
+  }, [filtered])
+
   // Grow the list when its end comes into view. `more` is a dependency so the
   // observer is rebuilt around the sentinel's new position each time.
   const sentinel = useRef<HTMLDivElement>(null)
@@ -774,11 +801,11 @@ export default function Activity() {
                 which is only the date column's edge while the date column is
                 exactly `w-32`. Everything else states a width too and the payee
                 takes what is left.
-                1040 rather than 880 now that the balance is a column of its
-                own: below that the table scrolls, and on an iPad in portrait it
-                does — which is what the two pinned columns are for. Date and
-                payee are what a row IS; the rest is what it was filed as. */}
-            <ScrollTable minWidth={1040} className="table-fixed">
+                Wider by the balance column when there is one: below that width
+                the table scrolls, and on an iPad in portrait it does — which is
+                what the two pinned columns are for. Date and payee are what a
+                row IS; the rest is what it was filed as. */}
+            <ScrollTable minWidth={oneAccount ? 1040 : 940} className="table-fixed">
               <thead>
                 <tr className={table.head}>
                   <th className={cx(table.th, 'w-32 pl-3', table.pinned)}>Date</th>
@@ -788,8 +815,9 @@ export default function Activity() {
                   <th className={cx(table.th, 'w-32 pr-3 text-right')}>Amount</th>
                   {/* What the account held once this row had gone through it —
                       the column a bank statement has and a list of movements
-                      does not, and the only one you can reconcile against. */}
-                  <th className={cx(table.th, 'w-32 pr-3 text-right')}>Balance</th>
+                      does not, and the only one you can reconcile against. Only
+                      while the list is one account's: see `oneAccount`. */}
+                  {oneAccount && <th className={cx(table.th, 'w-32 pr-3 text-right')}>Balance</th>}
                   {/* Deliberately unlabelled and nearly nothing wide. Inline
                       editing takes over every other cell's click, so without a
                       way through, the sheet — and with it deletion, notes,
@@ -802,7 +830,7 @@ export default function Activity() {
                 {rows.map(({ month, items }) => (
                   <Fragment key={month}>
                     <tr>
-                      <td colSpan={7} className="border-b border-hairline bg-surface-2/40 px-3 py-1.5">
+                      <td colSpan={oneAccount ? 7 : 6} className="border-b border-hairline bg-surface-2/40 px-3 py-1.5">
                         {/* Held at the left edge while the table scrolls
                             sideways, like the two columns under it: a heading
                             that slides away is a band of empty tint over the
@@ -1023,13 +1051,15 @@ export default function Activity() {
                               An account this device does not hold — a published
                               household row — has no balance to state; the dash
                               is that, rather than a zero. */}
-                          <td className={cx(table.cell, 'pr-3 text-right text-ink-3 tabular')}>
-                            {balances.has(t.id) ? (
-                              money(balances.get(t.id) ?? 0)
-                            ) : (
-                              <span title="This row is on an account this device cannot see the rest of.">—</span>
-                            )}
-                          </td>
+                          {oneAccount && (
+                            <td className={cx(table.cell, 'pr-3 text-right text-ink-3 tabular')}>
+                              {balances.has(t.id) ? (
+                                money(balances.get(t.id) ?? 0)
+                              ) : (
+                                <span title="This row is on an account this device cannot see the rest of.">—</span>
+                              )}
+                            </td>
+                          )}
                           <td className={cx(table.cell, 'pr-2 text-right')}>
                             <button
                               type="button"

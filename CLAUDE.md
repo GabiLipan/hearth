@@ -428,6 +428,17 @@ the single place a level comes from.
   The month heading rows are `sticky left-3 w-fit` inside their cell for the
   same gesture: a heading that slides away is a band of tint over rows it no
   longer names.
+- **A running balance can only be READ down one account.** Every figure in
+  Activity's Balance column is true wherever it appears — what that row's own
+  account held once that row had gone through it — and a column of them down a
+  list spanning three accounts does not add up: 1,284 then 43 then 900, none of
+  them differing by the amount printed beside it, because consecutive rows are
+  answers about different accounts. A bank statement has this column precisely
+  because every line on it is one account. So the column is present only while
+  the rows in view are one account's (`oneAccount`, read from `filtered` rather
+  than the paginated `visible`, or scrolling far enough to reach a second
+  account would make a column vanish mid-page), and the Account filter is how
+  you ask for it.
 - **A balance is not a filtered figure.** Activity's Balance column is what the
   account held after each row, computed by `runningBalances` over EVERY
   transaction the device holds — never over what the filters left on screen,
