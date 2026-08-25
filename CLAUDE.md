@@ -1565,6 +1565,24 @@ the single place a level comes from.
   that lands in the middle of typing a transaction. The outbox survives a reload;
   a half-filled form does not.
 
+  **A check in flight must never become a latch.** `inFlight` exists so that
+  three listeners firing on one resume are one check — and joining a run that
+  will never finish is the feature quietly dying. A `fetch` has no timeout of
+  its own, and on iOS one issued as the app goes into the background can hang
+  rather than fail, so the pending promise was returned to every later caller
+  for ever: every press of Check for updates did nothing at all, and closing the
+  app did not clear it, because an installed app is RESTORED rather than
+  launched — same page, same module state, same pending promise. Three parts to
+  the fix and all three are needed: the stamp fetch is aborted after
+  `STAMP_TIMEOUT_MS` and `registration.update()` is raced against a timeout of
+  its own (both are network calls with the same way of never coming back); a run
+  is joined only while it is plausibly still running (`STUCK_MS`), and abandoned
+  after that; and every write goes through a `runToken`, so a straggler that
+  finally answers cannot land a verdict about a moment that has passed over a
+  newer check's. A hung run's `checking` is disowned with it — the button is
+  disabled while that is on screen, so a status left behind by a dead run is a
+  control nobody can press.
+
   **Four ways a check could mislead rather than fail**, all now pinned by
   `updates.test.ts` — which fails against each of them, since a test for this is
   worthless if it only asserts the happy path:

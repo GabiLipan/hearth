@@ -138,6 +138,71 @@ describe('checkForUpdate', () => {
     expect(mod.updateState().status).toBe('current')
   })
 
+  /**
+   * The fault this file was reopened for: "I keep pressing Check for updates
+   * and nothing happens", surviving the app being closed and reopened.
+   *
+   * A `fetch` that never settles is an ordinary thing on iOS — a request issued
+   * as the app goes into the background can hang rather than fail — and the
+   * in-flight promise was joined by every later caller for ever after. Closing
+   * the app did not clear it either: an installed app is restored, not
+   * launched, so the same page and the same pending promise came back.
+   */
+  it('does not wait for ever on a check that hung', async () => {
+    let calls = 0
+    const fetchSpy = vi.fn(() => {
+      calls++
+      // The first check never answers. Nothing rejects; nothing resolves.
+      return calls === 1 ? new Promise<Response>(() => {}) : Promise.resolve(stampResponse(RUNNING))
+    })
+    globalThis.fetch = fetchSpy as unknown as typeof fetch
+    const mod = await load({})
+
+    void mod.checkForUpdate({ manual: true })
+    expect(mod.updateState().status).toBe('checking')
+
+    // While it might still be running, a second press joins it rather than
+    // starting a race — the behaviour the in-flight promise is there for.
+    void mod.checkForUpdate({ manual: true })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    // Past the point where it can plausibly still be running, it is abandoned
+    // and a fresh check goes out.
+    now += 30_000
+    await mod.checkForUpdate({ manual: true })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(mod.updateState().status).toBe('current')
+  })
+
+  /**
+   * And the reason abandoning one is safe: it may still answer, about a moment
+   * that has passed.
+   */
+  it('ignores a straggler that answers after a newer check has spoken', async () => {
+    let release: (r: Response) => void = () => {}
+    let calls = 0
+    globalThis.fetch = vi.fn(() => {
+      calls++
+      return calls === 1
+        ? new Promise<Response>((r) => {
+            release = r
+          })
+        : Promise.resolve(stampResponse(RUNNING))
+    }) as unknown as typeof fetch
+    const mod = await load({ update: async () => {} })
+
+    void mod.checkForUpdate({ manual: true })
+    now += 30_000
+    await mod.checkForUpdate({ manual: true })
+    expect(mod.updateState().status).toBe('current')
+
+    // The first check finally comes back, claiming the server is ahead.
+    release(stampResponse(NEWER))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mod.updateState().status).toBe('current')
+  })
+
   it('waits for the worker to catch up before calling the build stale', async () => {
     globalThis.fetch = (async () => stampResponse(NEWER)) as unknown as typeof fetch
     const reg: FakeRegistration = {}

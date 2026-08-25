@@ -92,6 +92,30 @@ const THROTTLE_MS = 60_000
 const RETRY_MS = 8000
 /** And a slow heartbeat for an app somebody leaves open all day. */
 const HEARTBEAT_MS = 30 * 60_000
+/**
+ * How long the stamp fetch is given before it is abandoned.
+ *
+ * A `fetch` has no timeout of its own, and on iOS one issued as the app goes
+ * into the background can simply never settle — not fail, never settle. That is
+ * the difference between "this check failed" and "this check is still running",
+ * and the second one used to be permanent: see `inFlight`.
+ */
+const STAMP_TIMEOUT_MS = 6_000
+/**
+ * And how long `registration.update()` is given, for the same reason.
+ *
+ * The stamp has already told the truth by this point, so nothing here depends
+ * on the answer — the catch-up loop below watches the registration itself.
+ */
+const UPDATE_TIMEOUT_MS = 6_000
+/**
+ * How long a check may be in flight before another caller stops waiting for it.
+ *
+ * Comfortably longer than a legitimate one: a stamp fetch and then up to
+ * `CATCH_UP_MS` of watching the worker install. Past it, a run is presumed hung
+ * rather than slow.
+ */
+const STUCK_MS = STAMP_TIMEOUT_MS + CATCH_UP_MS + 6_000
 
 let state: UpdateState = { status: 'idle', builtAt: __BUILT_AT__ }
 const listeners = new Set<() => void>()
@@ -123,8 +147,25 @@ let nextAutoCheckAt = 0
  * runs would then interleave their `set` calls: one writing `current` while the
  * other is eight seconds into its catch-up loop and about to write `checking`
  * back over it. The screen would end up on whichever finished last.
+ *
+ * **It must never become a latch, and it was one.** Joining a run that is still
+ * going is right; joining one that will never finish is the feature quietly
+ * dying. A `fetch` that never settles — an ordinary thing on iOS, where a
+ * request issued as the app goes into the background can hang for ever — left
+ * this promise pending, and from then on every press of Check for updates
+ * returned it and did nothing at all. Nothing recovered it either: an installed
+ * app is RESTORED rather than launched, so the same page and the same pending
+ * promise came back however many times the app was closed and reopened. That is
+ * exactly what "I keep pressing it and nothing happens" looks like from here.
+ *
+ * So a run in flight is joined only while it is plausibly still running, and
+ * `runToken` is what makes abandoning one safe: a run whose token is no longer
+ * current writes nothing, so a straggler that finally answers cannot land its
+ * verdict over a newer check's.
  */
 let inFlight: Promise<void> | undefined
+let inFlightSince = 0
+let runToken = 0
 
 /**
  * Register the service worker, and start watching for new versions.
@@ -204,17 +245,74 @@ export function checkForUpdate({ manual = false } = {}): Promise<void> {
   // this would be a lie.
   if (state.status === 'ready') return Promise.resolve()
   if (!manual && Date.now() < nextAutoCheckAt) return Promise.resolve()
-  if (inFlight) return inFlight
+  if (inFlight && Date.now() - inFlightSince < STUCK_MS) return inFlight
 
+  // Anything still running is disowned rather than waited for: it may answer
+  // later, and if it does, `token` is what stops it saying so. Its `checking`
+  // is disowned with it, which matters — the button is disabled while that is
+  // on screen, so a status left behind by a hung run is a control nobody can
+  // press.
+  const token = ++runToken
+  inFlightSince = Date.now()
   if (manual) set({ status: 'checking' })
-  inFlight = run().finally(() => {
-    inFlight = undefined
+  inFlight = run(token).finally(() => {
+    if (token === runToken) inFlight = undefined
   })
   return inFlight
 }
 
-/** One check, start to finish. Never called directly — see `checkForUpdate`. */
-async function run(): Promise<void> {
+/** A promise that settles, whatever the network does. */
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const bell = setTimeout(() => resolve(undefined), ms)
+    work.then(
+      (v) => {
+        clearTimeout(bell)
+        resolve(v)
+      },
+      () => {
+        clearTimeout(bell)
+        resolve(undefined)
+      },
+    )
+  })
+}
+
+/**
+ * What the server says it is serving, or undefined if it could not be asked.
+ *
+ * Aborted rather than merely raced, so a hung request is released instead of
+ * being left holding a connection for the rest of the session.
+ */
+async function fetchStamp(): Promise<string | undefined> {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : undefined
+  const bell = setTimeout(() => ctrl?.abort(), STAMP_TIMEOUT_MS)
+  try {
+    const res = await withTimeout(
+      fetch(`${STAMP_URL}?t=${Date.now()}`, { cache: 'no-store', signal: ctrl?.signal }),
+      STAMP_TIMEOUT_MS,
+    )
+    if (!res?.ok) return undefined
+    return ((await res.json()) as { builtAt?: string }).builtAt
+  } catch {
+    /* handled by the caller, as "could not ask" rather than as "nothing there" */
+    return undefined
+  } finally {
+    clearTimeout(bell)
+  }
+}
+
+/**
+ * One check, start to finish. Never called directly — see `checkForUpdate`.
+ *
+ * `token` is this run's claim on the screen. Every write goes through `commit`,
+ * which drops it if a later check has since started: a run abandoned for taking
+ * too long may still answer, and its answer is about a moment that has passed.
+ */
+async function run(token: number): Promise<void> {
+  const commit = (patch: Partial<UpdateState>) => {
+    if (token === runToken) set(patch)
+  }
   /**
    * Ask the SERVER, not the service worker.
    *
@@ -226,13 +324,7 @@ async function run(): Promise<void> {
    * with `no-store` AND a cache-busting query cannot be answered from a cache
    * by anything in that chain.
    */
-  let serverBuiltAt: string | undefined
-  try {
-    const res = await fetch(`${STAMP_URL}?t=${Date.now()}`, { cache: 'no-store' })
-    if (res.ok) serverBuiltAt = ((await res.json()) as { builtAt?: string }).builtAt
-  } catch {
-    /* handled below, as "could not ask" rather than as "nothing there" */
-  }
+  const serverBuiltAt = await fetchStamp()
 
   if (!serverBuiltAt) {
     // A check that FAILED must never look like a check that succeeded. This
@@ -243,28 +335,27 @@ async function run(): Promise<void> {
     // And it must not spend the throttle either: a question that got no answer
     // is one still worth asking, so the next resume tries again in seconds
     // rather than being turned away for a minute on the strength of it.
-    nextAutoCheckAt = Date.now() + RETRY_MS
-    set({ status: 'offline', checkedAt: Date.now() })
+    if (token === runToken) nextAutoCheckAt = Date.now() + RETRY_MS
+    commit({ status: 'offline', checkedAt: Date.now() })
     return
   }
-  nextAutoCheckAt = Date.now() + THROTTLE_MS
+  if (token === runToken) nextAutoCheckAt = Date.now() + THROTTLE_MS
   if (serverBuiltAt === state.builtAt) {
-    set({ status: 'current', checkedAt: Date.now() })
+    commit({ status: 'current', checkedAt: Date.now() })
     return
   }
 
   // The server is ahead. Whether this device can take the update the clean way
   // depends on the worker catching up, so ask it to, and give it a moment.
-  set({ status: 'checking', checkedAt: Date.now() })
+  commit({ status: 'checking', checkedAt: Date.now() })
   if (!registration) {
-    set({ status: 'stale', checkedAt: Date.now() })
+    commit({ status: 'stale', checkedAt: Date.now() })
     return
   }
-  try {
-    await registration.update()
-  } catch {
-    /* the stamp already told us the truth; the worker is the one struggling */
-  }
+  // Bounded, like the stamp: `update()` fetches `sw.js`, so it is a network
+  // call with all the same ways of never coming back — and the stamp has
+  // already told us the truth, so there is nothing here worth waiting for.
+  await withTimeout(Promise.resolve(registration.update()), UPDATE_TIMEOUT_MS)
   const until = Date.now() + CATCH_UP_MS
   while (Date.now() < until) {
     // A tick BEFORE the first verdict, deliberately. `update()` resolving means
@@ -274,8 +365,9 @@ async function run(): Promise<void> {
     // then give up on an update that was arriving normally, and send the reader
     // to the heavy path for no reason.
     await new Promise((r) => setTimeout(r, 250))
+    if (token !== runToken) return
     if (registration.waiting) {
-      set({ status: 'ready', checkedAt: Date.now() })
+      commit({ status: 'ready', checkedAt: Date.now() })
       return
     }
     if (!registration.installing) {
@@ -285,7 +377,7 @@ async function run(): Promise<void> {
       break
     }
   }
-  set({ status: registration.waiting ? 'ready' : 'stale', checkedAt: Date.now() })
+  commit({ status: registration.waiting ? 'ready' : 'stale', checkedAt: Date.now() })
 }
 
 /**
