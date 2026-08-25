@@ -4,7 +4,7 @@ import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet
 import type { Account, Category, Transaction } from '../lib/db'
 import { paintOf } from '../lib/palette'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
-import { canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn } from '../lib/accounts'
+import { canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn, runningBalances } from '../lib/accounts'
 import { appScrollerTopInset, onAppScroll, scrollAppTo, scrollAppToElement } from '../lib/scroll'
 
 import { update } from '../lib/data'
@@ -129,6 +129,17 @@ export default function Activity() {
   const memberMap = useMemberMap()
   const [book, setBook] = useBook()
   const searching = query.trim().length > 0
+
+  /**
+   * What each account held after each of its rows — the Balance column.
+   *
+   * Over EVERY transaction this device holds and every account it can see, not
+   * over what the filters have left on screen: a running balance of a search
+   * for one shop is a column of numbers that look like balances and are the
+   * sum of that shop's spending. Which also means it survives every filter
+   * unchanged, and only has to be worked out again when the rows themselves do.
+   */
+  const balances = useMemo(() => runningBalances(allAccounts, txns ?? []), [allAccounts, txns])
 
   /**
    * Arriving from a report slice: the same category, month and book that
@@ -758,14 +769,27 @@ export default function Activity() {
               The month heading is a row of its own so the table stays one
               table — a table per month would give each its own column widths. */}
           <Card className="hidden overflow-hidden md:block">
-            <ScrollTable minWidth={880}>
+            {/* `table-fixed`, because two pinned columns need the first one's
+                width to be a NUMBER: `pinnedNext` holds the payee at `left-32`,
+                which is only the date column's edge while the date column is
+                exactly `w-32`. Everything else states a width too and the payee
+                takes what is left.
+                1040 rather than 880 now that the balance is a column of its
+                own: below that the table scrolls, and on an iPad in portrait it
+                does — which is what the two pinned columns are for. Date and
+                payee are what a row IS; the rest is what it was filed as. */}
+            <ScrollTable minWidth={1040} className="table-fixed">
               <thead>
                 <tr className={table.head}>
-                  <th className={cx(table.th, 'w-28 pl-3', table.pinned)}>Date</th>
-                  <th className={table.th}>Payee</th>
+                  <th className={cx(table.th, 'w-32 pl-3', table.pinned)}>Date</th>
+                  <th className={cx(table.th, 'pr-3', table.pinnedNext)}>Payee</th>
                   <th className={cx(table.th, 'w-52')}>Category</th>
                   <th className={cx(table.th, 'w-40')}>Account</th>
                   <th className={cx(table.th, 'w-32 pr-3 text-right')}>Amount</th>
+                  {/* What the account held once this row had gone through it —
+                      the column a bank statement has and a list of movements
+                      does not, and the only one you can reconcile against. */}
+                  <th className={cx(table.th, 'w-32 pr-3 text-right')}>Balance</th>
                   {/* Deliberately unlabelled and nearly nothing wide. Inline
                       editing takes over every other cell's click, so without a
                       way through, the sheet — and with it deletion, notes,
@@ -778,8 +802,15 @@ export default function Activity() {
                 {rows.map(({ month, items }) => (
                   <Fragment key={month}>
                     <tr>
-                      <td colSpan={6} className="border-b border-hairline bg-surface-2/40 px-3 py-1.5">
-                        <MonthHeading month={month} stats={months.get(month)} money={money} dense />
+                      <td colSpan={7} className="border-b border-hairline bg-surface-2/40 px-3 py-1.5">
+                        {/* Held at the left edge while the table scrolls
+                            sideways, like the two columns under it: a heading
+                            that slides away is a band of empty tint over the
+                            rows it belongs to. `w-fit` so it is the heading
+                            that sticks and not the whole cell. */}
+                        <div className="sticky left-3 w-fit">
+                          <MonthHeading month={month} stats={months.get(month)} money={money} dense />
+                        </div>
                       </td>
                     </tr>
                     {items.map((t) => {
@@ -827,7 +858,15 @@ export default function Activity() {
                           {/* Note rides on the same line as the payee — a second
                               line would make row heights uneven and harder to scan. */}
                           <EditableCell
-                            className={cx(table.cell, 'max-w-0 truncate pr-3')}
+                            className={cx(
+                              table.cell,
+                              'max-w-0 truncate pr-3',
+                              table.pinnedNext,
+                              // A pinned cell paints its own opaque fill, so the
+                              // row's tint has to be repeated on it — the same
+                              // reason the date cell above repeats it.
+                              transfer ? 'tint-transfer' : forHousehold && householdTint,
+                            )}
                             editing={open?.field === 'payee'}
                             editable={editable}
                             onStart={() => setCell({ id: t.id, field: 'payee' })}
@@ -977,6 +1016,20 @@ export default function Activity() {
                           >
                             {money(t.amountMinor, { sign: t.amountMinor > 0 })}
                           </EditableCell>
+                          {/* Not editable, and not a `td` anybody can start an
+                              editor in: a balance is the arithmetic of every
+                              row above it, so the way to change it is to change
+                              one of those or the account's opening balance.
+                              An account this device does not hold — a published
+                              household row — has no balance to state; the dash
+                              is that, rather than a zero. */}
+                          <td className={cx(table.cell, 'pr-3 text-right text-ink-3 tabular')}>
+                            {balances.has(t.id) ? (
+                              money(balances.get(t.id) ?? 0)
+                            ) : (
+                              <span title="This row is on an account this device cannot see the rest of.">—</span>
+                            )}
+                          </td>
                           <td className={cx(table.cell, 'pr-2 text-right')}>
                             <button
                               type="button"

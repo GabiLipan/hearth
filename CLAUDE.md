@@ -417,6 +417,26 @@ the single place a level comes from.
   ordered — the control fills its flex row and squeezes a `flex-1 min-w-0
   truncate` sibling to zero width. This is how the sharing list came to show a
   photo and a level with no name between them. Put the width on a wrapper.
+- **Two pinned columns need the first one's width to be a number.** Activity's
+  table pins Date and Payee — what a row IS, against the columns saying what it
+  was filed as — and `table.pinnedNext` holds the second at `left-32`, which is
+  only the first column's edge while that column is exactly `w-32`. In an auto
+  table layout a column is as wide as its widest cell turned out to be, so one
+  long date would slide the two out of step and leave a strip of the
+  scrolled-under table showing between them. Hence `table-fixed` there, and
+  hence every other column states a width and the payee takes the remainder.
+  The month heading rows are `sticky left-3 w-fit` inside their cell for the
+  same gesture: a heading that slides away is a band of tint over rows it no
+  longer names.
+- **A balance is not a filtered figure.** Activity's Balance column is what the
+  account held after each row, computed by `runningBalances` over EVERY
+  transaction the device holds — never over what the filters left on screen,
+  where a search for one shop would produce a column of numbers that look like
+  balances and are the sum of that shop's spending. It counts forwards from the
+  opening balance (where `balanceHistory` walks backwards from today's figure,
+  because that one has to END on the number printed beside it), and it is silent
+  — absent from the map, a dash on screen — about an account this device does
+  not hold, which a published `paid_for_household` row is.
 - **A sticky table column must be opaque.** `table.pinned` paints `--surface`,
   and its hover state is `--row-hover` rather than `surface-2/50`, because at
   50% alpha the columns scrolling underneath are readable straight through it.
@@ -451,6 +471,19 @@ the single place a level comes from.
   of a page change; it lives on `main` instead, mobile only, where the element
   is exactly the width of the viewport. Nothing in the app sets it any more —
   the sheet scroll lock was the last one, and it locks `#app-scroll` now.
+- **Padding inside a scroller is a place content scrolls THROUGH.** The status
+  strip above `md` was `md:pt-[var(--safe-top)]` on `#app-scroll`, which reserves
+  the room and then lets every row travel up into it — under the material iPadOS
+  (and a Mac's own window chrome) paints over the top of a full-screen app. The
+  result was a band of blurred rows across the top of the content column on an
+  installed iPad, which nothing in this codebase drew and no CSS of ours could
+  have removed. The inset is the FRAME's padding now, so the scroller BEGINS
+  below the strip and what shows there is the page's own ground. Two things go
+  with it: the rail no longer adds `--safe-top` to its top margin (the row it is
+  in already starts below the clock, and stating it twice held the rail a status
+  bar lower than the content beside it), and `Notices` still does — an absolutely
+  positioned box resolves against the frame's PADDING box, which includes the
+  padding rather than starting under it.
 - **"Installed" is not the same question as "has a status bar over it".**
   `--safe-top` floors the top inset at 24px where the app is installed and
   `env(safe-area-inset-top)` reports 0 — which is an iPad, where the app is

@@ -282,7 +282,24 @@ export function Layout({ children }: { children: ReactNode }) {
        box, so anything absolutely positioned elsewhere in the app that resolves
        here instead of the initial containing block lands in exactly the same
        place. */
-    <div className="app-frame relative flex flex-col overflow-hidden md:flex-row">
+    /* `md:pt-[var(--safe-top)]` is the status strip, and it is the FRAME's
+        rather than the scroller's — which is the whole of the fix for a band of
+        blurred rows across the top of an installed iPad.
+        It used to be padding on the scroller, and padding inside a scroll
+        container is a place content SCROLLS THROUGH: the rows kept going up
+        into the strip, under the system material iPadOS (and a Mac's own window
+        chrome) paints over the top of a full-screen app, and arrived smeared.
+        Nothing in this codebase drew that blur and no CSS of ours could remove
+        it — the fix is to leave nothing under it worth blurring. With the inset
+        on the frame the scroller BEGINS below the strip, which then shows the
+        page's own ground and nothing else.
+        `box-sizing: border-box` is what makes this free: the frame is exactly
+        the viewport's height, so the padding comes out of the row inside it
+        rather than pushing the tab bar off the bottom. Zero in a browser tab,
+        where `env()` is 0 and the browser's chrome is not the app's problem.
+        The phone is untouched — its own floating header covers this strip and
+        wears the scrim that is meant to be there. */
+    <div className="app-frame relative flex flex-col overflow-hidden md:flex-row md:pt-[var(--safe-top)]">
       {/* Desktop / iPad sidebar — a floating rail rather than a wall.
           Still an ordinary flex item in a frame that does not scroll, so it
           needs nothing to hold it in place and `main` fills whatever width it
@@ -499,7 +516,7 @@ export function Layout({ children }: { children: ReactNode }) {
           up underneath it. Zero on desktop, where the dock is `md:hidden`. */}
       <div
         id={APP_SCROLLER_ID}
-        className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] pb-[var(--tabbar-h,0px)] md:pt-[var(--safe-top)]"
+        className="min-w-0 flex-1 overflow-y-auto pt-[var(--header-h,0px)] pb-[var(--tabbar-h,0px)]"
       >
         {/* Content — fills every pixel the sidebar leaves, at any viewport width.
             Pages decide their own column counts from there. */}
@@ -833,14 +850,12 @@ function Rail({
         'mb-2.5 ml-2.5',
         // The status bar is painted OVER the app on an installed iPad, where
         // the phone header that absorbs it elsewhere is hidden (`md:hidden`) —
-        // so the clock sat inside this card's own top corner. The inset goes
-        // into the top MARGIN rather than the padding: pushing the content down
-        // inside the card leaves the card itself under the clock, frosted
-        // background and rounded corner and all, which is the thing that read
-        // as an overlap. Moving the whole card down puts the status bar over
-        // the page's ground, where it belongs. `--safe-top` rather than the raw
-        // inset because iPadOS reports 0 for a bar it is nevertheless drawing.
-        'mt-[calc(0.625rem_+_var(--safe-top))]',
+        // so the clock sat inside this card's own top corner. The strip is the
+        // FRAME's padding now (see there), so this is an ordinary gutter again:
+        // the whole row, rail and scroller alike, already starts below the
+        // clock. Stating the inset here as well would hold the rail a status
+        // bar's height below the content beside it.
+        'mt-2.5',
         // The same four properties the tab bar wears, stated once in `ui.tsx`.
         CHROME_FROST,
         // Bouncy, like the pill: the width is the one thing about this rail
@@ -1174,6 +1189,11 @@ function Notices() {
       className={cx(
         'pointer-events-none absolute right-0 z-[45] flex flex-col gap-2 px-4 md:px-5 xl:px-6',
         'left-[var(--rail-w,0px)]',
+        // Absolute against the FRAME, and an absolute box resolves against the
+        // padding box — which includes the frame's status-strip padding rather
+        // than starting under it. So the inset is still stated here, where the
+        // scroller no longer needs it. Below `md`, `--header-h` is the floating
+        // discs, which a notice must not park under either.
         'top-[calc(var(--header-h,0px)_+_0.5rem)] md:top-[calc(var(--safe-top)_+_0.75rem)]',
         // Centred on a phone, where the top of the screen is two floating discs
         // and a gap; against the right edge on a wide screen, where the top of

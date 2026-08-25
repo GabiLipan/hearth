@@ -161,6 +161,59 @@ export function balanceOf(
 }
 
 /**
+ * What each account held immediately after each of its transactions.
+ *
+ * The statement column: a row's amount says what moved, and this says where
+ * that left the account — which is the one figure a bank statement has that
+ * this app did not, and the only way to reconcile a list against one.
+ *
+ * Three things it is careful about.
+ *
+ * It counts FORWARDS from the opening balance rather than backwards from
+ * today's figure, unlike `balanceHistory` — which walks back precisely so the
+ * line ends on the number printed beside it. Here every row needs a figure, so
+ * the walk has to visit them all anyway, and starting from the opening balance
+ * means the arithmetic is the account's own from end to end. The last row still
+ * lands exactly on `computeBalance`, which is what the two have to agree about.
+ *
+ * It is computed over EVERY transaction the device holds, never the filtered
+ * list on screen. A running balance of a search for "tesco" is a column of
+ * numbers that look like balances and are not — the sum of one shop's spending
+ * and nothing else. Filtering the page must not change what these say.
+ *
+ * And it is silent about an account this device does not hold. A published
+ * household row is readable without its account being — no balance, no other
+ * rows on it, nothing to add up — so it is absent from the map rather than
+ * given a figure derived from the one row we happen to have. The caller draws
+ * nothing there.
+ *
+ * The order is the ledger's, reversed: date, then `createdAt`, then the id, so
+ * two rows on one day are counted in the order Activity lists them and the
+ * column reads downwards the way the eye does. `createdAt` is missing on a row
+ * this device has only just written — the server stamps it and the next pull
+ * brings it back — so it sorts first among its day, which is where a row
+ * created a moment ago belongs.
+ */
+export function runningBalances(accounts: Account[], txns: Transaction[]): Map<string, number> {
+  const running = new Map(accounts.map((a) => [a.id, a.openingBalanceMinor]))
+  const ordered = txns
+    .filter((t) => running.has(t.accountId))
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        (a.createdAt ?? '').localeCompare(b.createdAt ?? '') ||
+        a.id.localeCompare(b.id),
+    )
+  const out = new Map<string, number>()
+  for (const t of ordered) {
+    const next = (running.get(t.accountId) ?? 0) + t.amountMinor
+    running.set(t.accountId, next)
+    out.set(t.id, next)
+  }
+  return out
+}
+
+/**
  * The last `days` days of an account's balance, one point per day, ending at
  * today's figure.
  *

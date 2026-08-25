@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { format, subDays } from 'date-fns'
-import type { Transaction } from './db'
-import { accountFace, balanceHistory } from './accounts'
+import type { Account, Transaction } from './db'
+import { accountFace, balanceHistory, computeBalance, runningBalances } from './accounts'
 
 const day = (offset: number) => format(subDays(new Date(), offset), 'yyyy-MM-dd')
 
@@ -60,6 +60,53 @@ describe('balanceHistory', () => {
     const series = balanceHistory('a', [txn('a', -500, day(0))], 10_000, 30)
     expect(series[30]).toBe(10_000)
     expect(series[29]).toBe(10_500)
+  })
+})
+
+const account = (id: string, openingBalanceMinor = 0): Account => ({
+  id,
+  name: id,
+  kind: 'current',
+  openingBalanceMinor,
+  sortOrder: 0,
+  updatedAt: 'x',
+})
+
+describe('runningBalances', () => {
+  const a = account('a', 10_000)
+  const b = account('b', 500)
+
+  it('counts each account forwards from its own opening balance', () => {
+    const rows = [txn('a', -2_000, '2026-01-02'), txn('a', 1_000, '2026-01-03'), txn('b', -100, '2026-01-02')]
+    const out = runningBalances([a, b], rows)
+    expect(out.get(rows[0].id)).toBe(8_000)
+    expect(out.get(rows[1].id)).toBe(9_000)
+    // The other account's rows never enter this one's arithmetic.
+    expect(out.get(rows[2].id)).toBe(400)
+  })
+
+  /** The one thing the column and the figure beside the account must agree on. */
+  it('lands the last row exactly on the balance the rest of the app prints', () => {
+    const rows = [txn('a', -2_000, '2026-01-02'), txn('a', 1_000, '2026-01-03')]
+    const out = runningBalances([a], rows)
+    expect(out.get(rows[1].id)).toBe(computeBalance(a, rows))
+  })
+
+  it('reads in the ledger order, oldest first, whatever order it was handed', () => {
+    const rows = [txn('a', 1_000, '2026-01-03'), txn('a', -2_000, '2026-01-02')]
+    const out = runningBalances([a], rows)
+    expect(out.get(rows[1].id)).toBe(8_000)
+    expect(out.get(rows[0].id)).toBe(9_000)
+  })
+
+  /**
+   * A published household row is readable without its account being — there is
+   * no opening balance and no other row on it to add up, so a figure here would
+   * be the sum of the one row we happen to hold, dressed as a balance.
+   */
+  it('says nothing about an account this device does not hold', () => {
+    const rows = [txn('elsewhere', -900, '2026-01-02')]
+    expect(runningBalances([a], rows).has(rows[0].id)).toBe(false)
   })
 })
 

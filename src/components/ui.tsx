@@ -2276,6 +2276,17 @@ export const table = {
    * colour.
    */
   pinned: 'sticky left-0 z-10 bg-surface group-hover:bg-row-hover',
+  /**
+   * The SECOND pinned column, held at the first one's width.
+   *
+   * `left-32` is `w-32`, stated twice because CSS has no way to say "as far
+   * along as the column before me" — which is exactly why the table it is used
+   * on is `table-fixed`. In an auto layout a column is as wide as its widest
+   * cell turned out to be, so a date one character longer than expected would
+   * slide this column's left edge out of step with it and leave a strip of the
+   * scrolled-under table showing between the two.
+   */
+  pinnedNext: 'sticky left-32 z-10 bg-surface group-hover:bg-row-hover',
 }
 
 /**
