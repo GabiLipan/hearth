@@ -1,5 +1,6 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns'
 import type { Transaction } from './db'
+import { importHash } from './csv'
 import { payeeSimilar } from './rules'
 
 /**
@@ -40,4 +41,63 @@ export function findLikelyDuplicate(
     }
   }
   return best
+}
+
+/** What the exact check says about one line of a statement. */
+export interface RepeatFlags {
+  /** This device already holds a row of this shape that no earlier line claimed. */
+  duplicate: boolean
+  /** How many lines in THIS file share the shape, where that is more than one. */
+  sameInFile?: number
+}
+
+/**
+ * Which lines of a statement are re-imports, and which are simply the same
+ * purchase twice.
+ *
+ * Two different questions that were one, and conflating them lost money. The
+ * check was a Set — "have I seen this fingerprint?" — which answers yes to the
+ * second identical line whether the account holds one of them or both, and yes
+ * whether the repeat came from an earlier import or from the very file being
+ * read. So a statement listing two £3.20 coffees imported one of them, called
+ * the other "already imported", and left it unticked.
+ *
+ * Counting separates them:
+ *
+ *  - **Already here.** Each line claims one row of its shape from what this
+ *    device holds, and the next line of that shape has to find its own. Two
+ *    coffees against an account holding one gives one duplicate and one new
+ *    row, which is the arithmetic anybody would do by hand.
+ *  - **Repeated in the file.** That the statement says it twice is the bank
+ *    telling you it happened twice. It is not a duplicate at all; it is
+ *    reported on every line of the set, because "two identical lines" is a fact
+ *    about the pair and marking one of them reads as an accusation against that
+ *    one.
+ *
+ * Order matters and is the file's own: the FIRST line of a shape is the one
+ * matched against history, so in a statement running oldest-first the earliest
+ * purchase is the one recognised as already imported.
+ */
+export function flagRepeats(
+  rows: readonly { date: string; payee: string; amountMinor: number }[],
+  existing: readonly Transaction[],
+): RepeatFlags[] {
+  const held = new Map<string, number>()
+  for (const t of existing) {
+    const key = t.importHash ?? importHash(t)
+    held.set(key, (held.get(key) ?? 0) + 1)
+  }
+  const inFile = new Map<string, number>()
+  for (const r of rows) {
+    const key = importHash(r)
+    inFile.set(key, (inFile.get(key) ?? 0) + 1)
+  }
+  return rows.map((r) => {
+    const key = importHash(r)
+    const remaining = held.get(key) ?? 0
+    const duplicate = remaining > 0
+    if (duplicate) held.set(key, remaining - 1)
+    const n = inFile.get(key) ?? 1
+    return { duplicate, sameInFile: n > 1 ? n : undefined }
+  })
 }

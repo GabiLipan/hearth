@@ -26,7 +26,7 @@ import {
   cleanTitle,
   kindOfAmount,
 } from '../lib/rules'
-import { findLikelyDuplicate } from '../lib/dedupe'
+import { findLikelyDuplicate, flagRepeats } from '../lib/dedupe'
 import { createMany, update } from '../lib/data'
 import { canEditTransaction } from '../lib/accounts'
 import { TxnName } from './TxnName'
@@ -83,6 +83,10 @@ const ABOUT_DUPLICATES = (
       Where the statement knows something your own entry does not — its bank reference above all — it can fill
       that in instead of importing a second copy.
     </p>
+    <p>
+      Two identical lines in one statement are two purchases — the same shop, the same amount, the same day — so
+      both come in, marked. Untick one if your bank has genuinely listed it twice.
+    </p>
     <p>Correct a category here and Hearth remembers it for that payee.</p>
   </>
 )
@@ -100,7 +104,17 @@ interface ReviewRow {
   title?: string
   amountMinor: number
   categoryId?: string
-  duplicate: boolean // exact re-import of a previously imported row
+  duplicate: boolean // exact re-import of a row this device already holds
+  /**
+   * How many lines in THIS file share this row's fingerprint, when more than
+   * one.
+   *
+   * A different thing from `duplicate`, and conflating the two is what made a
+   * second identical purchase disappear: a repeat inside one statement is the
+   * bank saying it happened twice, which is an ordinary Tuesday — two coffees
+   * at the same shop for the same amount. It comes in ticked and says so.
+   */
+  sameInFile?: number
   /** fuzzy match against an existing (usually manual) entry — needs the user's call */
   possibleDup?: { payee: string; title?: string; date: string }
   /**
@@ -230,11 +244,6 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       db.transactions.toArray(),
       db.categories.toArray(),
     ])
-    const existingHashes = new Set(existing.map((t) => t.importHash ?? importHash(t)))
-    // The file's own order, normalised to count up with time, taken BEFORE
-    // anything sorts these rows. Inside a day it is the only evidence there is
-    // about which transaction came first — a statement carries no clock.
-    const order = statementOrder(extracted.map((r) => r.date))
     const fallbackExpense = cats.find((c) => c.kind === 'expense' && c.name === 'Other') ?? cats.find((c) => c.kind === 'expense')
     const fallbackIncome = cats.find((c) => c.kind === 'income') ?? fallbackExpense
     // One matcher per sort, because the answer differs by sign: the same payee
@@ -244,12 +253,18 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     const fromIncomeHistory = buildHistoryMatcher(existing, 'income')
     const fromTitles = buildTitleMatcher(existing)
     const kindOf = (id: string) => cats.find((c) => c.id === id)?.kind
-    const seen = new Set<string>()
+    // The file's own order, normalised to count up with time, taken BEFORE
+    // anything sorts these rows. Inside a day it is the only evidence there is
+    // about which transaction came first — a statement carries no clock.
+    const order = statementOrder(extracted.map((r) => r.date))
+    // Which lines are re-imports and which are the same purchase twice — two
+    // questions that were one, and the second was answered wrongly. See
+    // `flagRepeats`.
+    const repeats = flagRepeats(extracted, existing)
     const matchedIds = new Set<string>()
     const review: ReviewRow[] = extracted.map((r, i) => {
       const hash = importHash(r)
-      const duplicate = existingHashes.has(hash) || seen.has(hash)
-      seen.add(hash)
+      const { duplicate, sameInFile } = repeats[i]
       let match: Transaction | undefined
       if (!duplicate) {
         match = findLikelyDuplicate(r, existing, matchedIds)
@@ -303,6 +318,10 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       return {
         date: r.date,
         seq: order[i],
+        // How many lines of this exact shape the file holds, where that is more
+        // than one. Not a duplicate and not a warning — a fact worth being able
+        // to see, on a row that is coming in either way.
+        sameInFile,
         // Exactly what the statement said. `prettyPayee` used to title-case a
         // stripped-down version of it, which threw away the very string the
         // reference exists to be — the one you can find on your bank's website.
@@ -430,6 +449,10 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   }
 
   const dupCount = rows.filter((r) => r.duplicate).length
+  // Counted as rows rather than as sets: two identical lines are two rows that
+  // both want reading, and "1 repeated" would be a count of something nobody
+  // can point at on the screen.
+  const repeatCount = rows.filter((r) => !r.duplicate && r.sameInFile).length
   const possibleCount = rows.filter((r) => r.possibleDup).length
   const includeCount = rows.filter((r) => r.include).length
   const completeCount = rows.filter((r) => r.complete && r.completes).length
@@ -644,6 +667,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
             <p className="min-w-0 truncate text-sm text-ink-2">
               {rows.length} found
               {dupCount > 0 && <> · {dupCount} already imported</>}
+              {repeatCount > 0 && <> · {repeatCount} repeated in the file</>}
               {possibleCount > 0 && (
                 <>
                   {' '}·{' '}
@@ -692,6 +716,15 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                   <p className="flex min-w-0 text-sm font-medium">
                     <TxnName txn={r} />
                     {r.duplicate && <span className="ml-1.5 shrink-0 text-xs text-ink-3">already imported</span>}
+                    {/* Said on every line of the set rather than on the second
+                        one alone: "2 identical lines in this file" is a fact
+                        about the pair, and marking only one of them reads as an
+                        accusation against that one. */}
+                    {!r.duplicate && r.sameInFile && (
+                      <span className="ml-1.5 shrink-0 text-xs text-ink-3">
+                        {r.sameInFile} identical lines in this file
+                      </span>
+                    )}
                   </p>
                   <p className="truncate text-xs text-ink-3 tabular">
                     {fmtFullDate(r.date)}

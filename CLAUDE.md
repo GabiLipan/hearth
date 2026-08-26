@@ -1159,6 +1159,19 @@ the single place a level comes from.
   picker cannot be answered by accident, and the account then travels with the
   file in sight on every screen, including inside the label of the button that
   writes the rows.
+- **"Have I seen this before" is the wrong question when a purchase can happen
+  twice.** The exact duplicate check was a Set of fingerprints, which answers
+  yes to a second identical line whether the account holds one of them or both,
+  and yes whether the repeat came from an earlier import or from the very file
+  being read. So a statement listing two £3.20 coffees imported one of them and
+  called the other "already imported". `flagRepeats` counts instead, and
+  separates the two questions it had folded into one: each line CLAIMS one held
+  row of its shape and the next line has to find its own (two coffees against an
+  account holding one gives one duplicate and one new row), while a repeat
+  inside the file is not a duplicate at all — it is the bank saying it happened
+  twice, so it comes in ticked and says "2 identical lines in this file" on
+  every line of the set. Marking only the second reads as an accusation against
+  that one.
 - **An import keeps the bank's string exactly, and finishes the rows already
   here.** It used to store `prettyPayee(r.payee)`, which title-cases a
   stripped-down copy — throwing away the one string you can look up on your
