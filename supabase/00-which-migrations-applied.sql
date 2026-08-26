@@ -299,6 +299,17 @@ select '26-account-ink.sql',
        'accounts.ink exists — run 26 BEFORE deploying a client that writes it'
 
 union all
+-- Until this reads true, an imported day comes out in whatever order the random
+-- uuids fell in: a statement carries no time inside a day, so its position in
+-- the file is the bank's only answer to which row came first. Harmless while
+-- nothing printed a running balance; visible the moment something did.
+select '27-statement-order.sql',
+       exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'transactions'
+                  and column_name = 'statement_order'),
+       'transactions.statement_order exists — run 27 BEFORE deploying a client that writes it'
+
+union all
 -- Not a migration: the same trap 09-after-10 sets, now two files along. Both 20
 -- and 21 drop the previous upsert_rule and replace it with a wider one, and 03
 -- and 20 are both still re-runnable — running either AFTER 21 or 22 puts an

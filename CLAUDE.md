@@ -71,6 +71,7 @@ read-only detector that reports which are present — run it when unsure.
 | `24-goal-allocations.sql` | `goal_entries` — a goal is a CLAIM on money already in an account, not a pot you move money into. `assign_to_goal` puts some of what an account holds towards a goal and refuses to let the goals on one account claim more than it has; `settle_goals` takes a withdrawal off what is unassigned first and then off the largest pot |
 | `25-month-rule.sql` | `households.contribution_cutoff_day` + `income_cutoff_day` (null = never shift) and `set_month_rule` — the 25th stops being a constant and becomes two settings; `transactions.book_month` is one row's own answer, and the only thing that can move spending |
 | `26-account-ink.sql` | `accounts.ink` — the MARK on an account's tile, where measuring it is not the answer. Null (the ordinary case) means measure it. Same deploy trap as `23`: run it BEFORE deploying |
+| `27-statement-order.sql` | `transactions.statement_order` — where a row sat in the file it was imported from, counting up with TIME whichever way round the statement ran. Null for anything not imported. Same deploy trap as `23` and `26`: run it BEFORE deploying |
 
 All are re-runnable, with **five ordering traps**, and three of them are the
 same trap. The rule migrations stack: `20` drops the three-argument
