@@ -602,10 +602,15 @@ export function Arrange({
       <div
         key={item.id}
         data-section={item.id}
-        // `touch-action: none` only while arranging: a vertical drag on a card
-        // must not scroll the page then, and must do nothing else the rest of
-        // the time. Outside Customise mode nothing here claims the gesture at
-        // all, so the browser keeps the scroll.
+        // The card does NOT claim the touch, in Customise mode or out of it.
+        // It used to take `touch-action: none` while arranging, which was
+        // right while the card itself was the drag handle — and became a page
+        // that could not be scrolled on a touch screen the moment the handles
+        // took that job over: every widget is a card, so on a phone or an iPad
+        // there was nowhere left to put a finger. The two handles claim the
+        // gesture instead, which is the only place it has to be claimed.
+        // `select-none` stays: a drag that runs over a heading should not
+        // leave the page full of highlighted text.
         // A widget with nothing to say renders nothing — no accounts, no bills
         // due — and its wrapper must disappear with it rather than leaving a
         // gap, or in Customise mode a dashed outline around a void. `:empty`
@@ -627,7 +632,7 @@ export function Arrange({
         // does the work wherever there is something in the card that can grow.
         className={cx(
           'relative h-full min-w-0 [&:has(>div:empty)]:hidden',
-          editing && 'touch-none select-none',
+          editing && 'select-none',
         )}
         style={{
           gridColumn: `span ${cols} / span ${cols}`,
@@ -706,7 +711,10 @@ export function Arrange({
               tabIndex={-1}
               title={`Drag to move ${def.label}`}
               className={cx(
-                'absolute left-1/2 top-0 z-20 flex h-6 w-10 -translate-x-1/2 -translate-y-1/2',
+                // `touch-none` here rather than on the card: this is the one
+                // spot on it where a vertical drag means "move me" instead of
+                // "scroll the page".
+                'absolute left-1/2 top-0 z-20 flex h-6 w-10 -translate-x-1/2 -translate-y-1/2 touch-none',
                 'cursor-grab items-center justify-center rounded-full active:cursor-grabbing',
                 'bg-surface text-ink-3 shadow-md ring-1 ring-hairline',
               )}
@@ -755,7 +763,9 @@ export function Arrange({
                 aria-label={`Resize ${def.label}`}
                 title="Drag to resize"
                 className={cx(
-                  'absolute -bottom-1 -right-1 z-20 grid size-7 cursor-nwse-resize place-items-center',
+                  // As the grabber: without this the browser takes the drag for
+                  // a scroll and cancels the resize on the first move.
+                  'absolute -bottom-1 -right-1 z-20 grid size-7 touch-none cursor-nwse-resize place-items-center',
                   'rounded-full bg-surface text-ink-3 shadow-md ring-1 ring-hairline',
                   resizing ? 'text-accent ring-accent' : 'hover:text-ink',
                 )}

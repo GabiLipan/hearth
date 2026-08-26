@@ -1814,6 +1814,16 @@ the single place a level comes from.
   the handle unmounted on the first frame of the gesture, took the pointer
   capture with it, and the corner behaved exactly like a button that changed the
   size once.
+- **A card must never claim the touch, Customise mode included.** It took
+  `touch-action: none` while arranging, which was right while the card itself
+  was the drag handle and became a page that could not be SCROLLED the moment
+  the handles took that job over: every widget is a card, so on a phone or an
+  iPad there was nowhere left to put a finger. The two handles wear it instead,
+  which is the only place the gesture has to be claimed — and they must, or the
+  browser takes a drag on one for a scroll and cancels it on the first move.
+  `inert` on the card is not part of this and does not need to be: an inert
+  subtree still lets a swipe through to the scroller under it (verified with
+  synthetic touch events, not assumed).
 - **Nothing inside a card is live while the page is being arranged.** The
   card's whole subtree is `inert` in Customise mode. A chart that answers a
   hover with a tooltip, or a tap by drilling into the rows behind it, is a card
