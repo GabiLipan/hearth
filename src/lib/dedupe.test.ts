@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Transaction } from './db'
-import { findLikelyDuplicate, flagRepeats } from './dedupe'
+import { findLikelyDuplicate, flagRepeats, unaccountedFor } from './dedupe'
 
 let seq = 0
 const txn = (over: Partial<Transaction> & { payee: string }): Transaction => ({
@@ -106,5 +106,56 @@ describe('telling a re-import from the same purchase twice', () => {
   it('reads the stored fingerprint where there is one', () => {
     const held = [txn({ payee: 'anything at all', amountMinor: -1, importHash: '2026-03-04|-1200|tesco stores' })]
     expect(flagRepeats([line('TESCO STORES', -1200)], held)[0].duplicate).toBe(true)
+  })
+})
+
+describe('what the statement does not account for', () => {
+  const line = (payee: string, amountMinor: number, date: string) => ({ date, payee, amountMinor })
+  const file = [line('TESCO STORES', -1200, '2026-03-01'), line('BOOTS', -650, '2026-03-10')]
+
+  it('finds a row the file never mentions', () => {
+    const here = [
+      txn({ payee: 'TESCO STORES', amountMinor: -1200, date: '2026-03-01' }),
+      txn({ id: 'ghost', payee: 'GHOST', amountMinor: -999, date: '2026-03-05' }),
+      txn({ payee: 'BOOTS', amountMinor: -650, date: '2026-03-10' }),
+    ]
+    expect(unaccountedFor(file, here).map((t) => t.id)).toEqual(['ghost'])
+  })
+
+  /**
+   * The case that started this: a row imported twice. Counting is what catches
+   * it — asking "is this shape in the file?" answers yes for both copies.
+   */
+  it('finds the extra copy when the app holds more than the file says', () => {
+    const here = [
+      txn({ id: 'one', payee: 'TESCO STORES', amountMinor: -1200, date: '2026-03-01' }),
+      txn({ id: 'two', payee: 'TESCO STORES', amountMinor: -1200, date: '2026-03-01' }),
+    ]
+    expect(unaccountedFor(file, here).map((t) => t.id)).toEqual(['two'])
+  })
+
+  /**
+   * Outside the file's own span it says nothing, and silence is not absence —
+   * without this, importing one month would offer to delete every other month.
+   */
+  it('says nothing about rows outside the period the file covers', () => {
+    const here = [
+      txn({ id: 'before', payee: 'OLD', amountMinor: -100, date: '2026-02-20' }),
+      txn({ id: 'after', payee: 'NEW', amountMinor: -100, date: '2026-04-02' }),
+    ]
+    expect(unaccountedFor(file, here)).toHaveLength(0)
+  })
+
+  it('leaves a row the caller has already paired with a line', () => {
+    // The wizard's fuzzy match: typed as "Dinner out", called
+    // "SQ *THE GOOD FORK 3241" by the bank. Same purchase, different strings.
+    const typed = txn({ id: 'typed', payee: '', title: 'Dinner out', amountMinor: -4250, date: '2026-03-04' })
+    const withDinner = [...file, line('SQ *THE GOOD FORK 3241', -4250, '2026-03-04')]
+    expect(unaccountedFor(withDinner, [typed])).toHaveLength(1)
+    expect(unaccountedFor(withDinner, [typed], new Set(['typed']))).toHaveLength(0)
+  })
+
+  it('says nothing at all about a file with no readable dates', () => {
+    expect(unaccountedFor([], [txn({ payee: 'ANYTHING', amountMinor: -1 })])).toEqual([])
   })
 })

@@ -101,3 +101,64 @@ export function flagRepeats(
     return { duplicate, sameInFile: n > 1 ? n : undefined }
   })
 }
+
+/**
+ * Rows the account holds that the statement does not account for.
+ *
+ * The mirror of the duplicate check, and the half a statement is actually
+ * evidence for: a bank export of a period is the complete list of what happened
+ * on that account in it. So a row here that no line of the file claims is
+ * either something imported twice, something typed that never cleared, or
+ * something that simply is not there.
+ *
+ * Counted rather than merely matched, for the same reason `flagRepeats` counts:
+ * two identical coffees held against one line in the file means ONE of them is
+ * unaccounted for, and a check asking "is this shape in the file?" would answer
+ * yes and let both stand.
+ *
+ * Three things it is careful about, because this feeds a DELETE.
+ *
+ * The span is the file's own. Only rows dated inside the earliest and latest
+ * line of the statement are considered: outside that the file says nothing at
+ * all, and treating silence as absence would offer to delete every row of every
+ * month the export did not cover.
+ *
+ * `claimed` is how the caller says "this held row is spoken for by a line, even
+ * though the fingerprints differ" — the wizard passes what its fuzzy match
+ * already paired, so a dinner somebody typed as "Dinner out" and the
+ * statement calls "SQ *THE GOOD FORK 3241" is not reported as a stranger.
+ *
+ * And it reports rather than decides. A pending row that has not cleared yet
+ * looks exactly like a row that should never have existed; only the person
+ * reading it knows which, which is why nothing here removes anything.
+ */
+export function unaccountedFor(
+  lines: readonly { date: string; payee: string; amountMinor: number }[],
+  onAccount: readonly Transaction[],
+  claimed: ReadonlySet<string> = new Set(),
+): Transaction[] {
+  const dates = lines.map((l) => l.date).filter((d) => d)
+  if (dates.length === 0) return []
+  const from = dates.reduce((a, b) => (a < b ? a : b))
+  const to = dates.reduce((a, b) => (a > b ? a : b))
+
+  const wanted = new Map<string, number>()
+  for (const l of lines) {
+    const key = importHash(l)
+    wanted.set(key, (wanted.get(key) ?? 0) + 1)
+  }
+
+  const out: Transaction[] = []
+  for (const t of onAccount) {
+    if (t.date < from || t.date > to) continue
+    if (claimed.has(t.id)) continue
+    const key = t.importHash ?? importHash(t)
+    const left = wanted.get(key) ?? 0
+    if (left > 0) {
+      wanted.set(key, left - 1)
+      continue
+    }
+    out.push(t)
+  }
+  return out
+}

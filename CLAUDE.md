@@ -1172,6 +1172,21 @@ the single place a level comes from.
   twice, so it comes in ticked and says "2 identical lines in this file" on
   every line of the set. Marking only the second reads as an accusation against
   that one.
+- **A statement is evidence about what is NOT here, and that is the half a
+  ledger cannot check for itself.** A bank export of a period is the complete
+  list of what happened on that account in it, so a row the app holds inside
+  that span which no line claims is either something imported twice or
+  something typed that never cleared. `unaccountedFor` is that reading, and it
+  feeds a DELETE, so three things are load-bearing. It COUNTS, like
+  `flagRepeats`: two identical coffees held against one line means one of them
+  is unaccounted for, where "is this shape in the file?" answers yes for both.
+  The span is the file's own — outside it the statement says nothing, and
+  treating silence as absence would offer to delete every month the export did
+  not cover. And the caller passes what its fuzzy match already paired, so a
+  dinner typed as "Dinner out" and billed as "SQ *THE GOOD FORK 3241" is not
+  reported as a stranger. Nothing is ticked, nothing is assumed, and the
+  confirmation says it cannot be undone — because `deletedAt` is not writable
+  from the client, so a mistake here cannot be re-inserted.
 - **An import keeps the bank's string exactly, and finishes the rows already
   here.** It used to store `prettyPayee(r.payee)`, which title-cases a
   stripped-down copy — throwing away the one string you can look up on your

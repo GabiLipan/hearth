@@ -26,14 +26,14 @@ import {
   cleanTitle,
   kindOfAmount,
 } from '../lib/rules'
-import { findLikelyDuplicate, flagRepeats } from '../lib/dedupe'
-import { createMany, update } from '../lib/data'
+import { findLikelyDuplicate, flagRepeats, unaccountedFor } from '../lib/dedupe'
+import { createMany, remove, update } from '../lib/data'
 import { canEditTransaction } from '../lib/accounts'
 import { TxnName } from './TxnName'
 import { useSyncState } from '../hooks/useSync'
 import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
-import { alertAction } from './confirm'
+import { alertAction, confirmAction } from './confirm'
 import { statementOrder, type ImportBatch } from '../lib/imports'
 import { ImportBatchRow } from './ImportHistory'
 import { Sheet, Button, Field, Select, Segmented, CheckRow, AccountDot, useInfoNote, cx } from './ui'
@@ -161,12 +161,25 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [importedCount, setImportedCount] = useState(0)
   const [completedCount, setCompletedCount] = useState(0)
+  const [removedCount, setRemovedCount] = useState(0)
   const [reading, setReading] = useState(false)
   /** The one just made, offered on the last screen while it is still in mind. */
   const [lastBatch, setLastBatch] = useState<ImportBatch | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const fileNote = useInfoNote('Statement', ABOUT_FILE)
   const reviewNote = useInfoNote('What was found', ABOUT_DUPLICATES)
+  /**
+   * Rows on the account that the statement does not account for, and which of
+   * them to remove.
+   *
+   * A statement is the complete list of what happened on an account in the
+   * period it covers, so a row here that no line claims is either something
+   * imported twice or something typed that never cleared. The app cannot tell
+   * those apart and does not try: they are listed, unticked, and removed only
+   * if somebody says so. See `unaccountedFor`.
+   */
+  const [strangers, setStrangers] = useState<Transaction[]>([])
+  const [toRemove, setToRemove] = useState<Set<string>>(new Set())
 
   function reset() {
     setStep('pick')
@@ -175,6 +188,12 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     setRemembered(false)
     setRows([])
     setReading(false)
+    // The strangers belong to the file that found them, and to the account it
+    // was read against: a second import must not offer to remove rows the last
+    // statement had an opinion about.
+    setStrangers([])
+    setToRemove(new Set())
+    setRemovedCount(0)
     // The account goes too. A statement is imported into the account somebody
     // chose for it, not into whatever the last one went to.
     setAccountId(undefined)
@@ -340,11 +359,43 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     })
     review.sort((a, b) => b.date.localeCompare(a.date))
     setRows(review)
+    // What the file says is NOT here — the other half of reconciling against a
+    // statement. `matchedIds` is what the fuzzy check has already paired, so a
+    // row typed under another name is not reported as a stranger.
+    setStrangers(
+      accountId
+        ? unaccountedFor(extracted, existing.filter((t) => t.accountId === accountId), matchedIds).filter((t) =>
+            canEditTransaction(t, levelOn(t.accountId, levels), userId),
+          )
+        : [],
+    )
+    setToRemove(new Set())
     setStep('review')
   }
 
   async function doImport() {
     if (!accountId) return
+    /**
+     * The rows being taken OUT, asked about before anything is written.
+     *
+     * A delete is a question rather than an undo here, as everywhere else in
+     * the app: `deletedAt` is not writable from the client, so a mistake cannot
+     * be re-inserted — the server would discard the row against its own
+     * tombstone. Hence the confirmation naming the count, and hence nothing is
+     * ticked by default.
+     */
+    if (toRemove.size > 0) {
+      const ok = await confirmAction({
+        title: `Remove ${toRemove.size} ${toRemove.size === 1 ? 'transaction' : 'transactions'}?`,
+        body: [
+          'They are on this account inside the period the statement covers, and the statement does not list them.',
+          'This cannot be undone. Anything that has simply not cleared yet should be left alone.',
+        ],
+        confirmLabel: 'Remove',
+        tone: 'danger',
+      })
+      if (!ok) return
+    }
     const toImport = rows.filter((r) => r.include)
     const now = new Date().toISOString()
     const ids = await createMany('transactions', toImport.map((r) => ({
@@ -385,8 +436,17 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
           { categoryId: r.categoryId },
         )
     }
+    // After the writes, so a failure to import does not leave rows removed for
+    // an import that never happened.
+    let removed = 0
+    for (const t of strangers) {
+      if (!toRemove.has(t.id)) continue
+      await remove('transactions', t.id)
+      removed++
+    }
     setImportedCount(toImport.length)
     setCompletedCount(completed)
+    setRemovedCount(removed)
     /**
      * The batch, named here rather than re-derived.
      *
@@ -784,6 +844,56 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
               </div>
             ))}
           </div>
+          {/* The other direction, and the one a statement is real evidence
+              for: a bank export of a period is the complete list of what
+              happened on that account in it, so a row here that no line claims
+              is either something imported twice or something typed that never
+              cleared. Which of those it is cannot be known from here, so
+              nothing is ticked and nothing is assumed — the list is the point,
+              and removing is a second, deliberate act. */}
+          {strangers.length > 0 && (
+            <div className="rounded-xl bg-surface-2 p-3">
+              <p className="text-sm font-medium">
+                {strangers.length} {strangers.length === 1 ? 'transaction is' : 'transactions are'} not on this
+                statement
+              </p>
+              <p className="mb-2 text-xs text-ink-3">
+                On {accountId ? accountName(accountId) : 'this account'}, inside the period the file covers. Tick
+                anything that should not be here — a row imported twice, or one that never happened. Something you
+                typed that has not cleared yet belongs here and should be left alone.
+              </p>
+              <div className="max-h-40 space-y-1 overflow-y-auto pr-1">
+                {strangers.map((t) => (
+                  <label key={t.id} className="flex items-center gap-2.5 rounded-lg px-1 py-1">
+                    <input
+                      type="checkbox"
+                      checked={toRemove.has(t.id)}
+                      onChange={(e) => {
+                        const next = new Set(toRemove)
+                        if (e.target.checked) next.add(t.id)
+                        else next.delete(t.id)
+                        setToRemove(next)
+                      }}
+                      className="size-4 shrink-0 accent-[var(--accent)]"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      <TxnName txn={t} />
+                    </span>
+                    <span className="shrink-0 text-xs text-ink-3 tabular">{fmtFullDate(t.date)}</span>
+                    <span
+                      className={cx(
+                        'w-20 shrink-0 text-right text-sm font-semibold tabular',
+                        t.amountMinor > 0 && 'text-good-text',
+                      )}
+                    >
+                      {money(t.amountMinor, { sign: t.amountMinor > 0 })}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 pt-1">
             <Button variant="subtle" onClick={() => (csv ? setStep('map') : reset())}>
               Back
@@ -794,10 +904,14 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                 written says where they are going. */}
             <Button
               className="flex-1"
-              disabled={!accountId || (includeCount === 0 && completeCount === 0)}
+              disabled={!accountId || (includeCount === 0 && completeCount === 0 && toRemove.size === 0)}
               onClick={doImport}
             >
-              {includeCount === 0
+              {toRemove.size > 0 && includeCount === 0
+                ? `Remove ${toRemove.size}`
+                : toRemove.size > 0
+                  ? `Import ${includeCount} · remove ${toRemove.size}`
+                  : includeCount === 0
                 ? `Fill in ${completeCount} transaction${completeCount === 1 ? '' : 's'}`
                 : `Import ${includeCount} into ${accountId ? accountName(accountId) : 'an account'}`}
               {includeCount > 0 && completeCount > 0 && `, fill in ${completeCount}`}
@@ -823,6 +937,15 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
               <p className="text-sm text-ink-2">
                 {completedCount} you had already added {completedCount === 1 ? 'was' : 'were'} filled in rather
                 than imported again.
+              </p>
+            )}
+            {/* Said plainly on the way out, because it is the one thing here
+                that took something away. Undoing the import below does not
+                bring these back — a delete is a tombstone, not a draft. */}
+            {removedCount > 0 && (
+              <p className="text-sm text-ink-2">
+                {removedCount} {removedCount === 1 ? 'transaction' : 'transactions'} not on the statement{' '}
+                {removedCount === 1 ? 'was' : 'were'} removed.
               </p>
             )}
           </div>
