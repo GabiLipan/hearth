@@ -775,7 +775,9 @@ export default function Activity() {
                                       pairing mechanism exists to prevent. */}
                                   <span
                                     className={cx(
-                                      'font-semibold tabular',
+                                      // Never wrapped, here as in the table: the
+                                      // payee beside it is what gives way.
+                                      'shrink-0 whitespace-nowrap font-semibold tabular',
                                       transfer ? 'text-ink-3' : t.amountMinor > 0 && 'text-good-text',
                                     )}
                                   >
@@ -1056,7 +1058,12 @@ export default function Activity() {
                           <EditableCell
                             className={cx(
                               table.cell,
-                              'pr-3 text-right font-semibold tabular',
+                              // A figure never wraps. The column is as wide as
+                              // its widest amount and nothing else in the table
+                              // may squeeze it — a five-figure sum broken over
+                              // two lines is unreadable, and it makes the row
+                              // taller than every other row on the page.
+                              'whitespace-nowrap pr-3 text-right font-semibold tabular',
                               transfer ? 'text-ink-3' : t.amountMinor > 0 && 'text-good-text',
                             )}
                             editing={open?.field === 'amount'}
@@ -1075,7 +1082,7 @@ export default function Activity() {
                               household row — has no balance to state; the dash
                               is that, rather than a zero. */}
                           {oneAccount && (
-                            <td className={cx(table.cell, 'pr-3 text-right text-ink-3 tabular')}>
+                            <td className={cx(table.cell, 'whitespace-nowrap pr-3 text-right text-ink-3 tabular')}>
                               {balances.has(t.id) ? (
                                 money(balances.get(t.id) ?? 0)
                               ) : (
