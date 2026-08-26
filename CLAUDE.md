@@ -1080,8 +1080,9 @@ the single place a level comes from.
   card is a minus. Read at face value that files every purchase as INCOME and
   the payment as spending, silently, and nothing downstream can recover it —
   the sign is what `classifyFlows`, `bookTotals`, every budget and every chart
-  read, and `learnRule` only learns a category from `amountMinor < 0`, so an
-  inverted import also teaches the rules nothing while inflating income.
+  read, and a category may only file a row of its own KIND, so an inverted
+  import also teaches every rule the opposite of the truth while inflating
+  income.
   `ColumnMapping.invert` is that third fact. The headers cannot answer it (both
   kinds of file call the column "Amount"), so `looksInverted` asks the rows: a
   statement is mostly spending, so a signed column that is mostly POSITIVE is a
@@ -1201,8 +1202,7 @@ the single place a level comes from.
   property.
 - **A rule now answers two questions, and asking once gets one of them wrong.**
   A rule may carry a category, a name, or both (`rules.category_id` is nullable
-  as of 20 — categories are only learned from spending, a name is worth learning
-  on income too). So there is no single "the matching rule": `categoryRule` and
+  as of 20 — a rule may say only what a payee is called). So there is no single "the matching rule": `categoryRule` and
   `titleRule` each take the longest match that carries the field being asked
   for. Reading both fields off one lookup lets a title-only rule for
   "tesco petrol" shadow the category rule for "tesco", and the fuel silently
@@ -1211,6 +1211,26 @@ the single place a level comes from.
   `category_id` and nothing else. Naming past rows is `applyTitle`, offered
   separately because it is a different set: it includes income and transfer
   legs, which is exactly where a bank string is least readable.
+- **A rule files money IN as readily as money out, and the kind is what keeps
+  that safe.** Categories used to be learned from spending alone — three
+  separate gates, `amountMinor < 0` in `learnRule`'s callers, in the import
+  wizard and in `recategorisable` — so the one row people most want automated,
+  a salary arriving from the same string every month, taught the app nothing
+  and landed in "Other income" for ever. What replaced the gates is the
+  relationship that was always implied: a category has a `kind`, a row has a
+  sign, and **a category may only ever file a row of its own kind**. So
+  `RuleTarget` carries `kind`, `categoryRule` takes a `KindOf` and SKIPS a rule
+  whose category is the wrong sort (rather than stopping there, so "amazon →
+  Shopping" and "amazon → Refunds" can both exist and each sign takes the one
+  that speaks for it), and `filable` replaces `recategorisable`. Three things
+  worth keeping. `kind` is stated on the target, never inferred from
+  `amountMinor` — the transaction form holds the amount UNSIGNED with the
+  direction in a control beside it, so inferring would call every salary an
+  expense. `KindOf` is a required argument for the reason `effectiveMonth`'s
+  month rule is: an optional one makes "file a refund under Groceries" the
+  silent default for the next caller. And `buildHistoryMatcher` takes the kind
+  too, because the same payee can pay you and be paid, and a matcher built from
+  both would hand a salary whatever its employer's expense rows were filed as.
 - **A leg whose partner is invisible is a guess nobody may make.** My partner's
   contribution has its far leg in an account I am not on, so until they link it
   my screen counts money out of the joint account as household spending and

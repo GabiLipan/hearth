@@ -53,7 +53,39 @@ export interface RuleTarget {
   payee: string
   amountMinor?: number
   accountId?: string
+  /**
+   * Which SORT of row this is — money out or money in.
+   *
+   * A rule may now carry an income category ("FPI SMITH J LTD" → Salary), and a
+   * category may only ever file a row of its own kind: a Tesco rule must not
+   * land on a Tesco refund, and a Salary rule must not land on a payment to the
+   * same employer. This is what makes that answerable.
+   *
+   * It is stated rather than read off `amountMinor`, because the amount is a
+   * MAGNITUDE here — the transaction form holds it unsigned and asks with the
+   * sign in a control beside it, so inferring the sign from it would call every
+   * salary an expense. Undefined means "not known", and then no rule is refused
+   * on these grounds: the caller has said nothing, so nothing is concluded.
+   */
+  kind?: CategoryKind
 }
+
+/** Which sort a category files: spending is negative, everything else is in. */
+export type CategoryKind = 'expense' | 'income'
+
+/** What a row's own sign makes it. Transfers are neither and never asked. */
+export const kindOfAmount = (amountMinor: number): CategoryKind =>
+  amountMinor < 0 ? 'expense' : 'income'
+
+/**
+ * What kind a category is, asked of the caller.
+ *
+ * A rule stores a category id and nothing about it, so every question of the
+ * form "may this rule file this row" needs the categories to hand. Passed in
+ * rather than read from the cache, because the two screens that ask already
+ * hold them and a second read would be a second answer.
+ */
+export type KindOf = (categoryId: string) => CategoryKind | undefined
 
 /**
  * How many things beyond the payee this rule insists on.
@@ -122,9 +154,30 @@ function moreSpecific(a: Rule, b: Rule): boolean {
   return ca !== cb ? ca > cb : a.match.length > b.match.length
 }
 
-/** The rule that says where a transaction is filed. */
-export function categoryRule(target: RuleTarget, rules: Rule[]): Rule | undefined {
-  return bestMatch(target, rules, (r) => r.categoryId !== undefined)
+/**
+ * The rule that says where a transaction is filed.
+ *
+ * `kindOf` is required rather than optional, and that is deliberate: since
+ * rules may carry income categories, a caller that does not check the kind
+ * files a refund under Groceries and a salary under whatever the employer's
+ * name last matched. An omitted argument would make that the silent default —
+ * the same reasoning `effectiveMonth` uses for taking the month rule.
+ *
+ * A rule whose category is the wrong sort for this row is SKIPPED rather than
+ * ending the search, so a general rule of the right kind can still win: with
+ * "amazon → Shopping" and "amazon → Refunds" both on file, each sign takes the
+ * one that speaks for it.
+ */
+export function categoryRule(target: RuleTarget, rules: Rule[], kindOf: KindOf): Rule | undefined {
+  return bestMatch(target, rules, (r) => {
+    if (r.categoryId === undefined) return false
+    // Nothing said about this row's sort, so nothing refused on it.
+    if (target.kind === undefined) return true
+    const kind = kindOf(r.categoryId)
+    // A category this device cannot see is not evidence of anything, and
+    // refusing on it would make a rule stop working while the cache filled.
+    return kind === undefined || kind === target.kind
+  })
 }
 
 /** The rule that says what a transaction is called. */
@@ -268,12 +321,21 @@ export async function learnRule(target: RuleTarget | string, what: { categoryId?
  * Builds a fuzzy payee→category matcher from transaction history. Matches when
  * either normalised name contains the other ("tesco" ⊂ "tesco stores london"),
  * preferring the longest known name; recent categorisations win ties.
+ *
+ * Built from one KIND of row at a time, because the answer differs by sign: the
+ * same payee can pay you and be paid, and a matcher built from both would hand
+ * a salary the category its employer's expense rows were filed under. It used
+ * to read spending only and there was no argument — which is the same bug
+ * stated as a default.
  */
-export function buildHistoryMatcher(txns: Transaction[]): (payee: string) => string | undefined {
+export function buildHistoryMatcher(
+  txns: Transaction[],
+  kind: CategoryKind = 'expense',
+): (payee: string) => string | undefined {
   const entries = new Map<string, string>()
   const sorted = [...txns].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   for (const t of sorted) {
-    if (t.amountMinor >= 0 || !t.categoryId) continue
+    if (kindOfAmount(t.amountMinor) !== kind || t.transferId != null || !t.categoryId) continue
     const n = normalizePayee(t.payee)
     if (n.length >= 4) entries.set(n, t.categoryId)
   }
@@ -338,11 +400,12 @@ export function buildTitleMatcher(txns: Transaction[]): (payee: string) => strin
  */
 export async function suggestCategory(target: RuleTarget | string): Promise<string | undefined> {
   const t: RuleTarget = typeof target === 'string' ? { payee: target } : target
-  const rules = await db.rules.toArray()
-  const rule = categoryRule(t, rules)
+  const [rules, categories] = await Promise.all([db.rules.toArray(), db.categories.toArray()])
+  const kinds = new Map(categories.map((c) => [c.id, c.kind]))
+  const rule = categoryRule(t, rules, (id) => kinds.get(id))
   if (rule?.categoryId) return rule.categoryId
   const txns = await db.transactions.toArray()
-  return buildHistoryMatcher(txns)(t.payee)
+  return buildHistoryMatcher(txns, t.kind ?? 'expense')(t.payee)
 }
 
 /** Suggest a name from rules, else fuzzily from what past rows were called. */
@@ -370,12 +433,17 @@ export async function suggestTitle(target: RuleTarget | string): Promise<string 
 //                 Asked at the moment of categorising, when the rule has only
 //                 just been learned and the payee is all we have.
 
-/** A transaction is eligible to be recategorised in bulk. */
-function recategorisable(t: Transaction): boolean {
-  // Income is not what rules are learned from (see learnRule's callers), and a
-  // transfer is neither spending nor income — giving either a category from a
-  // payee rule would be wrong rather than merely unhelpful.
-  return t.amountMinor < 0 && t.transferId == null
+/**
+ * A transaction a category of this kind may be applied to in bulk.
+ *
+ * A transfer is neither spending nor income, so no payee rule may file one —
+ * linking is what decides those, and a category from a merchant's name would be
+ * wrong rather than merely unhelpful. Everything else is eligible for a
+ * category of its OWN sort and no other: this used to read `amountMinor < 0`
+ * with no kind at all, which is the same rule with income left out.
+ */
+function filable(t: Transaction, kind: CategoryKind | undefined): boolean {
+  return t.transferId == null && kind !== undefined && kindOfAmount(t.amountMinor) === kind
 }
 
 export interface RuleCoverage {
@@ -394,13 +462,18 @@ export interface RuleCoverage {
  * would make bulk-applying a general rule quietly undo a specific one — and the
  * preview would have shown you the right count while doing it.
  */
-export function coverageOf(rule: Rule, txns: Transaction[], rules: Rule[]): RuleCoverage {
+export function coverageOf(rule: Rule, txns: Transaction[], rules: Rule[], kindOf: KindOf): RuleCoverage {
   // A rule that only says what to call a payee covers nothing here: applying a
   // rule rewrites `category_id` and nothing else. Naming past rows is
   // `applyTitle`, and it is asked separately because it answers a different
   // question about a different set of rows.
   if (!rule.categoryId) return { all: [], changed: [] }
-  const all = txns.filter((t) => recategorisable(t) && categoryRule(t, rules)?.id === rule.id)
+  const kind = kindOf(rule.categoryId)
+  const all = txns.filter(
+    (t) =>
+      filable(t, kind) &&
+      categoryRule({ ...t, kind: kindOfAmount(t.amountMinor) }, rules, kindOf)?.id === rule.id,
+  )
   return { all, changed: all.filter((t) => t.categoryId !== rule.categoryId) }
 }
 
@@ -415,13 +488,15 @@ export function coverageOf(rule: Rule, txns: Transaction[], rules: Rule[]): Rule
 export function similarTo(
   payee: string,
   categoryId: string,
+  /** The chosen category's own kind: only rows of that sort can be offered. */
+  kind: CategoryKind | undefined,
   txns: Transaction[],
   exceptId?: string,
 ): Transaction[] {
   return txns.filter(
     (t) =>
       t.id !== exceptId &&
-      recategorisable(t) &&
+      filable(t, kind) &&
       t.categoryId !== categoryId &&
       payeeSimilar(t.payee, payee),
   )

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, Pencil, Plus, Trash2, Wand2, Check } from 'lucide-react'
-import type { Rule, Transaction } from '../lib/db'
+import type { Category, Rule, Transaction } from '../lib/db'
 import { create, update, remove as removeRow } from '../lib/data'
 import { useAccounts, useAllTransactions, useCategories, useCategoryMap, useMyLevels, useRules, useCacheReady } from '../lib/cache'
 import { canEditTransaction, levelOn } from '../lib/accounts'
@@ -100,7 +100,8 @@ export default function RulesPage() {
   const coverage = useMemo(() => {
     const map = new Map<string, { all: Transaction[]; changed: Transaction[] }>()
     if (!txns) return map
-    for (const r of rules) map.set(r.id, coverageOf(r, txns, rules))
+    const kindOf = (id: string) => catMap.get(id)?.kind
+    for (const r of rules) map.set(r.id, coverageOf(r, txns, rules, kindOf))
     return map
   }, [rules, txns])
 
@@ -391,13 +392,7 @@ export default function RulesPage() {
                             <option value="" disabled={!r.title}>
                               {r.title ? 'Just the name' : 'No category'}
                             </option>
-                            {categories
-                              .filter((c) => c.kind === 'expense')
-                              .map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {fullName(c, catMap)}
-                                </option>
-                              ))}
+                            <CategoryOptions categories={categories} catMap={catMap} />
                           </Select>
                         </div>
                       </td>
@@ -629,7 +624,6 @@ function RuleSheet({ rule, open, onClose }: { rule?: Rule; open: boolean; onClos
   const categories = useCategories()
   const catMap = useCategoryMap()
   const accounts = useAccounts()
-  const expense = categories.filter((c) => c.kind === 'expense')
 
   const [match, setMatch] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -800,15 +794,50 @@ function RuleSheet({ rule, open, onClose }: { rule?: Rule; open: boolean; onClos
         <Field label="Categorise as" hint="Optional, if you have given it a name.">
           <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">Don’t file it anywhere</option>
-            {expense.map((c) => (
-              <option key={c.id} value={c.id}>
-                {fullName(c, catMap)}
-              </option>
-            ))}
+            <CategoryOptions categories={categories} catMap={catMap} />
           </Select>
         </Field>
       </div>
     </Sheet>
+  )
+}
+
+/**
+ * Every category a rule may file under, spending and income alike, in two
+ * labelled groups.
+ *
+ * Both are offered because a rule may now carry either — the salary that wants
+ * to be Salary rather than Other income is the case the whole thing was missing
+ * — and they are GROUPED because a flat list of both is a list in which the
+ * only wrong answers look exactly like the right ones. Which of the two a rule
+ * ends up in decides which rows it can ever touch: a category only ever files a
+ * transaction of its own sort. See `categoryRule`.
+ */
+function CategoryOptions({
+  categories,
+  catMap,
+}: {
+  categories: Category[]
+  catMap: Map<string, Category>
+}) {
+  const group = (kind: 'expense' | 'income') => categories.filter((c) => c.kind === kind)
+  return (
+    <>
+      <optgroup label="Spending">
+        {group('expense').map((c) => (
+          <option key={c.id} value={c.id}>
+            {fullName(c, catMap)}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="Money in">
+        {group('income').map((c) => (
+          <option key={c.id} value={c.id}>
+            {fullName(c, catMap)}
+          </option>
+        ))}
+      </optgroup>
+    </>
   )
 }
 

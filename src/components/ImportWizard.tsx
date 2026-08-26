@@ -17,7 +17,15 @@ import {
   type ImportRow,
 } from '../lib/csv'
 import { extractRowsFromPDF } from '../lib/pdfImport'
-import { categoryRule, titleRule, learnRule, buildHistoryMatcher, buildTitleMatcher, cleanTitle } from '../lib/rules'
+import {
+  categoryRule,
+  titleRule,
+  learnRule,
+  buildHistoryMatcher,
+  buildTitleMatcher,
+  cleanTitle,
+  kindOfAmount,
+} from '../lib/rules'
 import { findLikelyDuplicate } from '../lib/dedupe'
 import { createMany, update } from '../lib/data'
 import { canEditTransaction } from '../lib/accounts'
@@ -219,8 +227,13 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     const existingHashes = new Set(existing.map((t) => t.importHash ?? importHash(t)))
     const fallbackExpense = cats.find((c) => c.kind === 'expense' && c.name === 'Other') ?? cats.find((c) => c.kind === 'expense')
     const fallbackIncome = cats.find((c) => c.kind === 'income') ?? fallbackExpense
-    const fromHistory = buildHistoryMatcher(existing)
+    // One matcher per sort, because the answer differs by sign: the same payee
+    // can pay you and be paid, and a salary must not inherit the category its
+    // employer's expense rows were filed under.
+    const fromHistory = buildHistoryMatcher(existing, 'expense')
+    const fromIncomeHistory = buildHistoryMatcher(existing, 'income')
     const fromTitles = buildTitleMatcher(existing)
+    const kindOf = (id: string) => cats.find((c) => c.id === id)?.kind
     const seen = new Set<string>()
     const matchedIds = new Set<string>()
     const review: ReviewRow[] = extracted.map((r) => {
@@ -236,13 +249,16 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       // the account is the one being imported into, and the amount is on the
       // row. Anything narrower would silently ignore the conditions on exactly
       // the rows they were written for.
-      const target = { payee: r.payee, amountMinor: r.amountMinor, accountId }
-      let categoryId: string | undefined
-      if (r.amountMinor < 0) {
-        categoryId = categoryRule(target, rules)?.categoryId ?? fromHistory(r.payee) ?? fallbackExpense?.id
-      } else {
-        categoryId = fallbackIncome?.id
-      }
+      const kind = kindOfAmount(r.amountMinor)
+      const target = { payee: r.payee, amountMinor: r.amountMinor, accountId, kind }
+      // Both sorts go through the rules now. Income used to be dropped straight
+      // into "Other income" without asking, so the one row worth automating —
+      // a salary, every month, from the same string — was the one row no rule
+      // could ever reach.
+      const categoryId =
+        kind === 'expense'
+          ? (categoryRule(target, rules, kindOf)?.categoryId ?? fromHistory(r.payee) ?? fallbackExpense?.id)
+          : (categoryRule(target, rules, kindOf)?.categoryId ?? fromIncomeHistory(r.payee) ?? fallbackIncome?.id)
       // The payoff for having learned a name: a statement full of bank strings
       // arrives already reading in English. Asked of the rules first and of
       // what past rows were called second, exactly as the category is — and on
@@ -327,10 +343,15 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       await update('transactions', r.completes.id, r.completes.fills)
       completed++
     }
-    // Learn from every category the user corrected by hand.
+    // Learn from every category the user corrected by hand, whichever way the
+    // money went: a category may only ever file a row of its own kind, so an
+    // income rule cannot reach spending and the reverse.
     for (const r of toImport) {
-      if (r.userTouched && r.amountMinor < 0 && r.categoryId)
-        await learnRule({ payee: r.payee, amountMinor: r.amountMinor, accountId }, { categoryId: r.categoryId })
+      if (r.userTouched && r.categoryId)
+        await learnRule(
+          { payee: r.payee, amountMinor: r.amountMinor, accountId, kind: kindOfAmount(r.amountMinor) },
+          { categoryId: r.categoryId },
+        )
     }
     setImportedCount(toImport.length)
     setCompletedCount(completed)
@@ -696,7 +717,10 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
                     aria-label="Category"
                   >
                     {categories
-                      .filter((c) => c.kind === 'expense' && !c.ownerId)
+                      // The row's own sort: a statement line that paid money in
+                      // can only be filed under an income category, and offering
+                      // the other twenty is offering a wrong answer.
+                      .filter((c) => c.kind === kindOfAmount(r.amountMinor) && !c.ownerId)
                       .map((c) => (
                         // The full path, since a bare "Insurance" is ambiguous
                         // once several categories have one.

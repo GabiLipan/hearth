@@ -32,6 +32,15 @@ const rule = (match: string, categoryId?: string, title?: string, over: Partial<
   ...over,
 })
 
+/**
+ * What kind each category in these tests is.
+ *
+ * Every id ending in `-in` is income; everything else is spending. A rule may
+ * only file a row of its category's own kind, so nearly every question here now
+ * needs an answer to "what sort is this category".
+ */
+const KIND_OF = (id: string): 'expense' | 'income' => (id.endsWith('-in') ? 'income' : 'expense')
+
 const txn = (over: Partial<Transaction> & { payee: string }): Transaction => ({
   id: `t${++seq}`,
   accountId: 'current',
@@ -51,7 +60,7 @@ describe('what a rule covers', () => {
       txn({ payee: 'Sainsburys', categoryId: 'other' }),
     ]
 
-    const cov = coverageOf(r, txns, [r])
+    const cov = coverageOf(r, txns, [r], KIND_OF)
 
     expect(cov.all).toHaveLength(2)
     // Only the one that would actually move is offered.
@@ -69,8 +78,8 @@ describe('what a rule covers', () => {
     const petrol = txn({ payee: 'TESCO PETROL LEEDS', categoryId: 'transport' })
     const shop = txn({ payee: 'TESCO STORES 3241', categoryId: 'other' })
 
-    expect(coverageOf(general, [petrol, shop], rules).all).toEqual([shop])
-    expect(coverageOf(specific, [petrol, shop], rules).all).toEqual([petrol])
+    expect(coverageOf(general, [petrol, shop], rules, KIND_OF).all).toEqual([shop])
+    expect(coverageOf(specific, [petrol, shop], rules, KIND_OF).all).toEqual([petrol])
   })
 
   it('leaves income and transfers alone', () => {
@@ -81,7 +90,28 @@ describe('what a rule covers', () => {
       txn({ payee: 'ACME LTD', amountMinor: -5000, categoryId: 'other' }),
     ]
 
-    expect(coverageOf(r, txns, [r]).all).toHaveLength(1)
+    expect(coverageOf(r, txns, [r], KIND_OF).all).toHaveLength(1)
+  })
+})
+
+describe('what an income rule covers', () => {
+  it('claims the income rows and never the spending ones', () => {
+    const r = rule('amazon', 'refunds-in')
+    const txns = [
+      txn({ payee: 'AMAZON UK', amountMinor: 2400, categoryId: 'other-in' }),
+      txn({ payee: 'AMAZON UK', amountMinor: -2400, categoryId: 'shopping' }),
+    ]
+    const cov = coverageOf(r, txns, [r], KIND_OF)
+    expect(cov.all).toHaveLength(1)
+    expect(cov.all[0].amountMinor).toBe(2400)
+  })
+
+  it('leaves a transfer leg alone whichever way it went', () => {
+    // Linking is what decides a transfer's category; a merchant's name is not
+    // evidence about one.
+    const r = rule('g lipan', 'salary-in')
+    const txns = [txn({ payee: 'G LIPAN 01JAN26', amountMinor: 200_000, transferId: 'tr1' })]
+    expect(coverageOf(r, txns, [r], KIND_OF).all).toHaveLength(0)
   })
 })
 
@@ -94,7 +124,7 @@ describe('transactions similar to the one being categorised', () => {
       txn({ payee: 'Vets4Pets', categoryId: 'other' }),
     ]
 
-    const found = similarTo('PETS AT HOME INS', 'pets', txns, 'self')
+    const found = similarTo('PETS AT HOME INS', 'pets', 'expense', txns, 'self')
 
     expect(found).toHaveLength(2)
     expect(found.map((t) => t.payee)).not.toContain('Vets4Pets')
@@ -106,7 +136,7 @@ describe('transactions similar to the one being categorised', () => {
       txn({ payee: 'Pets At Home', categoryId: 'pets' }),
     ]
 
-    expect(similarTo('Pets At Home', 'pets', txns, 'self')).toHaveLength(0)
+    expect(similarTo('Pets At Home', 'pets', 'expense', txns, 'self')).toHaveLength(0)
   })
 })
 
@@ -192,10 +222,53 @@ describe('what a payee is called', () => {
     const specific = rule('tesco petrol', undefined, 'Petrol')
     const rules = [general, specific]
 
-    expect(categoryRule({ payee: 'TESCO PETROL LEEDS' }, rules)?.id).toBe(general.id)
+    expect(categoryRule({ payee: 'TESCO PETROL LEEDS' }, rules, KIND_OF)?.id).toBe(general.id)
     expect(titleRule({ payee: 'TESCO PETROL LEEDS' }, rules)?.id).toBe(specific.id)
     // And a rule that only files does not claim to name anything.
     expect(titleRule({ payee: 'TESCO STORES 3241' }, rules)).toBeUndefined()
+  })
+
+  /**
+   * The gap this closes: a salary is the row people most want automated, and
+   * until now a category was learned from spending alone — so filing one under
+   * Salary taught the app nothing and the next month's arrived as Other income.
+   */
+  it('files income from a rule, like anything else', () => {
+    // `fpi` is a bank type code and `normalizePayee` strips it, so the rule is
+    // keyed on what is left — which is exactly what `learnRule` stores.
+    const r = rule('smith j ltd', 'salary-in')
+    const target = { payee: 'FPI SMITH J LTD 0293', kind: 'income' as const }
+    expect(categoryRule(target, [r], KIND_OF)?.categoryId).toBe('salary-in')
+  })
+
+  /**
+   * And what makes that safe. One payee can pay you and be paid — a refund from
+   * a shop, a payment to an employer — and a rule that ignored the sign would
+   * file a refund under Groceries and a salary under whatever the employer's
+   * expense rows were filed as. Neither is merely unhelpful: both put money in
+   * the wrong half of every total in the app.
+   */
+  it('refuses a category of the wrong sort for the row', () => {
+    const spending = rule('amazon', 'shopping')
+    const rules = [spending]
+    expect(categoryRule({ payee: 'AMAZON UK', kind: 'expense' }, rules, KIND_OF)?.id).toBe(spending.id)
+    expect(categoryRule({ payee: 'AMAZON UK', kind: 'income' }, rules, KIND_OF)).toBeUndefined()
+  })
+
+  it('lets each sign take the rule that speaks for it', () => {
+    // A wrong-kind rule is skipped rather than ending the search, so the two
+    // live side by side on one payee.
+    const out = rule('amazon', 'shopping')
+    const back = rule('amazon', 'refunds-in')
+    const rules = [out, back]
+    expect(categoryRule({ payee: 'AMAZON UK', kind: 'expense' }, rules, KIND_OF)?.id).toBe(out.id)
+    expect(categoryRule({ payee: 'AMAZON UK', kind: 'income' }, rules, KIND_OF)?.id).toBe(back.id)
+  })
+
+  it('concludes nothing about the sort where the caller has said nothing', () => {
+    // The rules page asks about a rule with no row in front of it.
+    const r = rule('smith j ltd', 'salary-in')
+    expect(categoryRule({ payee: 'FPI SMITH J LTD' }, [r], KIND_OF)?.id).toBe(r.id)
   })
 
   it('tells two charges from one payee apart by their amount', () => {
@@ -205,10 +278,10 @@ describe('what a payee is called', () => {
     const large = rule('vendor a', 'music', undefined, { amountMinMinor: 1299, amountMaxMinor: 1299 })
     const rules = [small, large]
 
-    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -899 }, rules)?.id).toBe(small.id)
-    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -1299 }, rules)?.id).toBe(large.id)
+    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -899 }, rules, KIND_OF)?.id).toBe(small.id)
+    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -1299 }, rules, KIND_OF)?.id).toBe(large.id)
     // And a third price neither rule claims is left alone rather than guessed at.
-    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -450 }, rules)).toBeUndefined()
+    expect(categoryRule({ payee: 'VENDOR A LTD', amountMinor: -450 }, rules, KIND_OF)).toBeUndefined()
   })
 
   it('compares magnitudes, so the sign of the row is not the rule’s business', () => {
@@ -231,8 +304,8 @@ describe('what a payee is called', () => {
     const conditioned = rule('tesco', 'weekly shop', undefined, { amountMinMinor: 4000, amountMaxMinor: 4000 })
     const rules = [longer, conditioned]
 
-    expect(categoryRule({ payee: 'TESCO PETROL LEEDS', amountMinor: -4000 }, rules)?.id).toBe(conditioned.id)
-    expect(categoryRule({ payee: 'TESCO PETROL LEEDS', amountMinor: -3000 }, rules)?.id).toBe(longer.id)
+    expect(categoryRule({ payee: 'TESCO PETROL LEEDS', amountMinor: -4000 }, rules, KIND_OF)?.id).toBe(conditioned.id)
+    expect(categoryRule({ payee: 'TESCO PETROL LEEDS', amountMinor: -3000 }, rules, KIND_OF)?.id).toBe(longer.id)
   })
 
   it('keeps an account-keyed rule off the same payee on another account', () => {
@@ -251,9 +324,9 @@ describe('what a payee is called', () => {
       txn({ payee: 'VENDOR A LTD', amountMinor: -1299, categoryId: 'other' }),
     ]
 
-    expect(coverageOf(small, txns, rules).all).toHaveLength(1)
-    expect(coverageOf(small, txns, rules).all[0].amountMinor).toBe(-899)
-    expect(coverageOf(large, txns, rules).all[0].amountMinor).toBe(-1299)
+    expect(coverageOf(small, txns, rules, KIND_OF).all).toHaveLength(1)
+    expect(coverageOf(small, txns, rules, KIND_OF).all[0].amountMinor).toBe(-899)
+    expect(coverageOf(large, txns, rules, KIND_OF).all[0].amountMinor).toBe(-1299)
   })
 
   it('says what a rule asks for, in the words the screens use', () => {
@@ -274,7 +347,7 @@ describe('what a payee is called', () => {
     const r = rule('the good fork', undefined, 'Dinner out')
     const txns = [txn({ payee: 'SQ *THE GOOD FORK 3241', categoryId: 'other' })]
 
-    expect(coverageOf(r, txns, [r])).toEqual({ all: [], changed: [] })
+    expect(coverageOf(r, txns, [r], KIND_OF)).toEqual({ all: [], changed: [] })
   })
 
   it('learns a name from history, on income as well as spending', () => {

@@ -212,6 +212,10 @@ export function TransactionForm({
       payee: key,
       amountMinor: magnitude === null ? undefined : magnitude,
       accountId,
+      // Which sort of row this is, stated rather than inferred: the amount
+      // above is a magnitude, so nothing about it says which way the money
+      // went. Without this a salary would be offered a spending category.
+      kind,
     }
     const t = setTimeout(async () => {
       const id = await suggestCategory(target)
@@ -234,8 +238,11 @@ export function TransactionForm({
       cancelled = true
       clearTimeout(t)
     }
+    // `kind` is in here because it is now part of the question: the same payee
+    // can have a rule for money out and another for money in, and switching the
+    // toggle has to re-ask rather than leaving the first answer on screen.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payee, title, amount, accountId, open])
+  }, [payee, title, amount, accountId, kind, open])
 
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
@@ -322,9 +329,11 @@ export function TransactionForm({
 
   const similar =
     useLiveQuery(async () => {
-      if (!open || !categoryId || kind !== 'expense' || settledPayee.trim().length < 3) return []
+      if (!open || !categoryId || settledPayee.trim().length < 3) return []
       const all = await db.transactions.toArray()
-      return similarTo(settledPayee, categoryId, all, editing?.id).filter((t) =>
+      // The CATEGORY's kind, not the form's: they agree in every ordinary case,
+      // and where they do not it is the category that decides what it can file.
+      return similarTo(settledPayee, categoryId, catMap.get(categoryId)?.kind, all, editing?.id).filter((t) =>
         canEditTransaction(t, levelOn(t.accountId, levels), userId),
       )
       // `levels` is a fresh Map each render, so it is deliberately not a
@@ -640,10 +649,12 @@ export function TransactionForm({
         createdAt: new Date().toISOString(),
       })
     }
-    // The quiet automation: every save teaches the categoriser — and, since
-    // migration 20, the namer. A name is learned on income too: categories are
-    // only ever learned from spending, but "FPI SMITH J LTD" is precisely the
-    // sort of thing that wants calling "Salary".
+    // The quiet automation: every save teaches the categoriser and the namer,
+    // on income exactly as on spending. It used to learn a category from
+    // spending alone, which left the one row people most want automated —
+    // "FPI SMITH J LTD" every month, wanting to be Salary rather than Other
+    // income — teaching the app nothing at all. What keeps that safe is that a
+    // rule may only file a row of its category's own kind: see `categoryRule`.
     const learntTitle = cleanTitle(title)
     // The reference is what a statement will say next month, so it is the key
     // wherever there is one. Where there is not, the name is the only identity
@@ -657,9 +668,9 @@ export function TransactionForm({
     // for £8.99 rather than the general one for the vendor. `learnRule` writes
     // no conditions of its own — it only uses these to find which existing rule
     // this row is actually covered by.
-    const learntOn = { payee: key, amountMinor: amountMinor ?? undefined, accountId }
-    if (kind !== 'expense' && learntFrom) await learnRule(learntOn, { title: learntFrom })
-    if (kind === 'expense') await learnRule(learntOn, { categoryId: categoryId!, title: learntFrom })
+    const learntOn = { payee: key, amountMinor: amountMinor ?? undefined, accountId, kind }
+    if (categoryId) await learnRule(learntOn, { categoryId, title: learntFrom })
+    else if (learntFrom) await learnRule(learntOn, { title: learntFrom })
 
     /**
      * …and, if asked, applies what it just learned backwards.
@@ -675,7 +686,7 @@ export function TransactionForm({
      * selection: a row somebody unticked in the picker is not in either.
      */
     if (applyOthers) {
-      const catRows = kind === 'expense' && categoryId ? similar.filter((t) => selectedIds.has(t.id)) : []
+      const catRows = categoryId ? similar.filter((t) => selectedIds.has(t.id)) : []
       const nameRows = learntTitle ? unnamed.filter((t) => selectedIds.has(t.id)) : []
       // Captured BEFORE the writes, one entry per row, holding exactly the
       // fields about to be overwritten: undoing means putting each row back as
