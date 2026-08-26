@@ -2362,8 +2362,24 @@ export function ScrollTable({
     if (!el) return
     const read = () => el.toggleAttribute('data-scrolled', el.scrollLeft > 0)
     el.addEventListener('scroll', read, { passive: true })
+    /**
+     * And whenever the table stops being wider than the room it has.
+     *
+     * A scroll event is not guaranteed when the browser CLAMPS `scrollLeft` on
+     * its own — a widened window, a filter that shortened the widest category,
+     * a column that stopped being drawn — and any of those leaves the shade
+     * painted over a table that has nothing passing behind it any more, which
+     * is the state it exists not to be in. Both boxes: the scroller's size and
+     * the table's own.
+     */
+    const observer = new ResizeObserver(read)
+    observer.observe(el)
+    if (table.current) observer.observe(table.current)
     read()
-    return () => el.removeEventListener('scroll', read)
+    return () => {
+      el.removeEventListener('scroll', read)
+      observer.disconnect()
+    }
   }, [])
 
   return (

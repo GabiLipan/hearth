@@ -436,7 +436,11 @@ the single place a level comes from.
   the column. It appears only while the table is actually scrolled sideways
   (`ScrollTable` marks the scroller `data-scrolled`) — a depth cue with nothing
   moving under it is a vertical line in the middle of a table, which is a column
-  divider this app draws nowhere else.
+  divider this app draws nowhere else. Watched with a `ResizeObserver` as well
+  as a scroll listener, because the browser clamps `scrollLeft` to 0 on its own
+  when a table stops overflowing — a widened window, a filter that shortened the
+  widest category — and emits no scroll event for it, which would leave the
+  shade painted over a table with nothing behind it.
 - **Two pinned columns need the first one's width to be a number, and it has to
   be MEASURED.** Activity's table pins Date and Payee — what a row IS, against
   the columns saying what it was filed as — and the second one's `left` has to
