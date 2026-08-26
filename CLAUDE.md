@@ -1835,6 +1835,25 @@ the single place a level comes from.
   back half-drawn over the chart. Note also that a finger emits `pointerleave`
   the moment it lifts, so a `pointerleave` that closes the panel has to check
   `pointerType`, or the linger is over before it starts.
+- **The panel's own button is not a gesture on the chart, and both ways of
+  arranging a tooltip broke it.** "See transactions" inside a tapped panel could
+  not be pressed at all, for two different reasons depending on where the panel
+  lives. Where it is INSIDE the element `useTouchTooltip`'s handlers are bound to
+  (the donut, the insight charts), a touch on the button bubbled to
+  `onPointerDown`, which assumes every touch is a new gesture that has proved
+  nothing: it disarmed, the panel unmounted under the finger, and the browser
+  had nothing left to fire the `click` at — so the tap was swallowed rather than
+  merely missed (verified with synthetic touch events: remove the button between
+  `pointerdown` and `pointerup` and no click event is delivered). Where it is
+  OUTSIDE (`Sankey`, and anything in `MonthScroller`, whose panel is portalled
+  clear of the scroller so it cannot be clipped), the touch reached no handler at
+  all, so nothing cancelled the fade that had been running since the finger lifted
+  off the chart. `TIP_PANEL_ATTR` is the one rule that answers both: a pointer
+  landing on a marked panel keeps what is on screen and restarts the linger when
+  it lifts, and the panels outside the tree spread `handlers` themselves to
+  receive it. The linger is longer where a panel can carry a button
+  (`TIP_ACTION_LINGER_MS`) — the two seconds is measured for READING, and noticing
+  a button and reaching for it with a thumb is not that.
 - **A label drawn `pointer-events-none` is the thing you would reach for.** The
   Sankey's names are, so that a label cannot steal the hover from the band it
   belongs to — which left a name shortened to eighteen characters as the one

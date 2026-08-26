@@ -18,7 +18,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { Receipt } from 'lucide-react'
 import { useChartColors } from '../hooks/useChartColors'
-import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
+import { useTouchTooltip, TIP_FADE_MS, TIP_PANEL_ATTR } from '../hooks/useTouchTooltip'
 import { useApp } from '../state/AppContext'
 import { distinctShades } from '../lib/shade'
 import { inkOn } from '../lib/ink'
@@ -114,6 +114,10 @@ function ChartTip({
   if (!active || rows.length === 0) return null
   return (
     <div
+      // See `TIP_PANEL_ATTR`: this is what stops a touch on the button being
+      // read as a fresh gesture on the chart underneath, which unmounted the
+      // panel before the click could land.
+      {...{ [TIP_PANEL_ATTR]: '' }}
       className={cx(
         'rounded-xl bg-surface px-3 py-2 text-sm shadow-lg ring-1 ring-hairline',
         action && 'pointer-events-auto',
@@ -345,12 +349,19 @@ export function MonthScroller({
   visible,
   height,
   scale,
+  actionable = false,
   children,
 }: {
   count: number
   visible: number
   height: number
   scale: Scale
+  /**
+   * Whether this chart's panel can carry a way through to the rows behind it.
+   * Only the linger depends on it — a panel with a button in it has to outlast
+   * noticing the button. See `TIP_ACTION_LINGER_MS`.
+   */
+  actionable?: boolean
   /**
    * The chart, given the element its `Tooltip` should portal into and what its
    * `active` should be. A render prop rather than a plain child because both
@@ -371,7 +382,7 @@ export function MonthScroller({
    * one thing here that is not Recharts', and it holds the panel for every
    * chart that scrolls, so all four fade the same way.
    */
-  const touch = useTouchTooltip()
+  const touch = useTouchTooltip(undefined, actionable)
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -459,6 +470,13 @@ export function MonthScroller({
       <div
         ref={setTip}
         aria-hidden
+        // The panel inside this layer is outside the element the gesture is
+        // bound to, so a touch on its button reaches no handler and nothing
+        // cancels the fade that has been running since the finger lifted. It
+        // carries them itself, and `TIP_PANEL_ATTR` is what tells them this is
+        // the panel rather than the chart.
+        {...touch.handlers}
+        {...{ [TIP_PANEL_ATTR]: '' }}
         className="pointer-events-none absolute left-0 top-0 z-30"
         style={{ opacity: touch.fading ? 0 : 1, transition: `opacity ${TIP_FADE_MS}ms linear` }}
       />
@@ -744,7 +762,7 @@ export function SpendBars({
   )
 
   return (
-    <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
+    <MonthScroller count={data.length} visible={visible} height={height} scale={scale} actionable={Boolean(onPickMonth)}>
       {(portal, shown, coarse) => (shape === 'bars' ? (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%" {...pickProps(data, onPickMonth, coarse)}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
@@ -841,7 +859,7 @@ export function IncomeSpendBars({
   )
   return (
     <div>
-      <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
+      <MonthScroller count={data.length} visible={visible} height={height} scale={scale} actionable={Boolean(onPickMonth)}>
         {(portal, shown, coarse) => (shape === 'bars' ? (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="30%" barGap={2} {...pickProps(data, onPickMonth, coarse)}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
@@ -960,7 +978,7 @@ export function NetLine({
     />
   )
   return (
-    <MonthScroller count={data.length} visible={visible} height={height} scale={scale}>
+    <MonthScroller count={data.length} visible={visible} height={height} scale={scale} actionable={Boolean(onPickMonth)}>
       {(portal, shown, coarse) => (shape === 'bars' ? (
         <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="35%" {...pickProps(data, onPickMonth, coarse)}>
           <CartesianGrid vertical={false} stroke={c.grid} strokeWidth={1} />
@@ -1342,7 +1360,7 @@ export function CategoryDonut({
   const startAngle = 90
   const endAngle = 90 - 360 * sweep
   /** A tapped slice, like a tapped bar, needs an ending given to it. */
-  const touch = useTouchTooltip()
+  const touch = useTouchTooltip(undefined, Boolean(onPick))
   /**
    * What a click on an arc does, decided when it happens rather than by the
    * props it was given.

@@ -76,6 +76,47 @@ export const TIP_HOLD_MS = 400
  * be repeated, while a scroll misread as a tap is the fault being fixed.
  */
 export const TIP_SLOP = 10
+/**
+ * And how long it stays when there is something in it to PRESS.
+ *
+ * The two-second linger is measured for reading: a name, an amount, and the
+ * chart back before you have decided you want it. A panel carrying "See
+ * transactions" is asking for something else — the button has to be noticed,
+ * reached for and hit, and two seconds is not enough to do that with a thumb,
+ * which is what "it disappears when I try to click it" was. It is only ever the
+ * touch path that has a button at all, so nothing on a mouse changes.
+ */
+export const TIP_ACTION_LINGER_MS = 5000
+
+/**
+ * The panel says so about itself, so the gesture can tell it from the chart.
+ *
+ * A tooltip lives in one of two places depending on the chart — inside the
+ * element the handlers are bound to (the donut, the insight charts) or outside
+ * it (`Sankey`, and anything in `MonthScroller`, whose panel is portalled clear
+ * of the scroller so it cannot be clipped). BOTH arrangements broke the button
+ * inside it, in opposite ways, and this one attribute is what fixes each:
+ *
+ *   - **In-tree**, a touch on the button bubbled to the chart's own
+ *     `onPointerDown`, which is written to assume every touch is a new gesture
+ *     that has proved nothing. It disarmed, the panel unmounted under the
+ *     finger, and the `click` that would have followed had nothing left to land
+ *     on — so the tap did not merely miss, it could never have hit.
+ *   - **Outside**, the touch reached no handler at all, so nothing cancelled
+ *     the fade that had been running since the finger lifted off the chart.
+ *
+ * So a pointer that lands on a marked panel is not a gesture on the chart: it
+ * keeps what is on screen, and lifting from it starts the linger again from
+ * there. The panels outside the tree spread `handlers` themselves; the ones
+ * inside get it by bubbling.
+ */
+export const TIP_PANEL_ATTR = 'data-tip-panel'
+
+/** Did this pointer land on the panel rather than on the chart? */
+export function fromPanel(target: unknown): boolean {
+  const el = target as { closest?: (sel: string) => unknown } | null
+  return typeof el?.closest === 'function' ? !!el.closest(`[${TIP_PANEL_ATTR}]`) : false
+}
 
 /** A touch in progress: where it began, and whether it has been ruled out. */
 export interface TouchStart {
@@ -142,9 +183,9 @@ export interface TouchTooltip {
   armed: boolean
   /** Bind to the element the pointer lands on. */
   handlers: {
-    onPointerDown: (e: { pointerType: string; clientX?: number; clientY?: number }) => void
-    onPointerMove: (e: { pointerType?: string; clientX?: number; clientY?: number }) => void
-    onPointerUp: (e: { pointerType: string }) => void
+    onPointerDown: (e: { pointerType: string; clientX?: number; clientY?: number; target?: unknown }) => void
+    onPointerMove: (e: { pointerType?: string; clientX?: number; clientY?: number; target?: unknown }) => void
+    onPointerUp: (e: { pointerType: string; target?: unknown }) => void
     onPointerCancel: (e: { pointerType: string }) => void
   }
   /** The pointer is still here — cancel any pending fade. */
@@ -154,8 +195,11 @@ export interface TouchTooltip {
 /**
  * @param onGone Called once the panel is finished, for a chart that draws its
  *   own and has to clear the state behind it.
+ * @param actionable Whether this chart's panel can carry a way through to the
+ *   rows behind it. Only the linger depends on it — see `TIP_ACTION_LINGER_MS`.
  */
-export function useTouchTooltip(onGone?: () => void): TouchTooltip {
+export function useTouchTooltip(onGone?: () => void, actionable = false): TouchTooltip {
+  const linger = actionable ? TIP_ACTION_LINGER_MS : TIP_LINGER_MS
   const [phase, setPhase] = useState<Phase>('shown')
   const [coarse, setCoarse] = useState(false)
   /** Whether this gesture has earned a panel. A mouse starts armed. */
@@ -206,13 +250,13 @@ export function useTouchTooltip(onGone?: () => void): TouchTooltip {
     if (pointerType === 'mouse') return
     clear()
     timers.current.push(
-      setTimeout(() => to('fading'), TIP_LINGER_MS),
+      setTimeout(() => to('fading'), linger),
       setTimeout(() => {
         to('gone')
         done.current?.()
-      }, TIP_LINGER_MS + TIP_FADE_MS),
+      }, linger + TIP_FADE_MS),
     )
-  }, [])
+  }, [linger])
 
   useEffect(() => clear, [])
 
@@ -226,6 +270,13 @@ export function useTouchTooltip(onGone?: () => void): TouchTooltip {
     armed,
     handlers: {
       onPointerDown: (e) => {
+        // Touching the panel is not touching the chart. Keeping what is on
+        // screen is the whole of it: disarming here is what used to pull the
+        // button out from under the finger before the click could land.
+        if (fromPanel(e.target)) {
+          keep()
+          return
+        }
         saw(e.pointerType)
         clear()
         if (e.pointerType === 'mouse') {
@@ -246,6 +297,10 @@ export function useTouchTooltip(onGone?: () => void): TouchTooltip {
         )
       },
       onPointerMove: (e) => {
+        if (fromPanel(e.target)) {
+          keep()
+          return
+        }
         const start = touch.current
         if (!start) {
           // A mouse arriving after a touch gesture was killed. On a laptop with
@@ -268,6 +323,13 @@ export function useTouchTooltip(onGone?: () => void): TouchTooltip {
         keep()
       },
       onPointerUp: (e) => {
+        // Lifting off the panel starts the linger again from here, so reading
+        // one thing in it and then reaching for the button is two gestures the
+        // panel survives rather than one race against a timer.
+        if (fromPanel(e.target)) {
+          release(e.pointerType)
+          return
+        }
         const start = touch.current
         touch.current = null
         if (e.pointerType !== 'mouse') {

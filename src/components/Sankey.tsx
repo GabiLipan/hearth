@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Receipt } from 'lucide-react'
 import { useChartColors } from '../hooks/useChartColors'
-import { useTouchTooltip, TIP_FADE_MS } from '../hooks/useTouchTooltip'
+import { useTouchTooltip, TIP_FADE_MS, TIP_PANEL_ATTR } from '../hooks/useTouchTooltip'
 import { useApp } from '../state/AppContext'
 import { layoutFlow, type FlowGraph, type FlowNode } from '../lib/sankey'
 import { cx } from './ui'
@@ -182,7 +182,7 @@ export function Sankey({
    * while the finger is down and fades a few seconds after it lifts. The same
    * gesture everywhere else in the app — see `useTouchTooltip`.
    */
-  const touch = useTouchTooltip(() => setHovered(null))
+  const touch = useTouchTooltip(() => setHovered(null), Boolean(onPick))
 
   /**
    * What names a band: the band itself, the ribbon leaving it, and the strip
@@ -462,6 +462,11 @@ export function Sankey({
       {shown && hoveredNode && (
         <div
           ref={setPanel}
+          // Drawn outside the SVG the gesture is bound to, so the panel keeps
+          // itself alive: without this a touch on the button below reaches no
+          // handler at all and the fade started by the lift runs on regardless.
+          {...touch.handlers}
+          {...{ [TIP_PANEL_ATTR]: '' }}
           // Follows the pointer, clamped to the card so a band near the right
           // edge does not open a panel off it.
           // Above the diagram and outside the scrolling box, so nothing clips
