@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Transaction } from './db'
-import { statementOrder, importBatches } from './imports'
+import { matchStatement, statementOrder, importBatches } from './imports'
 
 const NOW = Date.parse('2026-08-18T12:00:00.000Z')
 
@@ -129,5 +129,86 @@ describe('the statement\'s own order', () => {
 
   it('says nothing about an empty file', () => {
     expect(statementOrder([])).toEqual([])
+  })
+})
+
+describe('lining a statement up against what is already here', () => {
+  const line = (date: string, payee: string, amountMinor: number) => ({ date, payee, amountMinor, valid: true })
+
+  it('matches on the same fingerprint the duplicate check uses, and writes nothing else', () => {
+    const rows = [line('2026-01-02', 'TESCO STORES 3241', -1200), line('2026-01-02', 'AMAZON.CO.UK', -949)]
+    const here = [
+      txn({ id: 'a', date: '2026-01-02', payee: 'AMAZON.CO.UK', amountMinor: -949 }),
+      txn({ id: 'b', date: '2026-01-02', payee: 'TESCO STORES 3241', amountMinor: -1200 }),
+    ]
+
+    const plan = matchStatement(rows, statementOrder(rows.map((r) => r.date)), here)
+
+    expect(plan.matched.map((m) => [m.txn.id, m.seq])).toEqual([
+      ['b', 0],
+      ['a', 1],
+    ])
+    expect(plan.unmatchedLines).toBe(0)
+    expect(plan.unmatchedRows).toHaveLength(0)
+  })
+
+  /**
+   * Two identical charges on one day are the case nothing can resolve — same
+   * shop, same amount, same date, and no clock anywhere. What matters is that
+   * they take two DIFFERENT rows rather than both taking the first, so the day
+   * still has the right number of positions in it.
+   */
+  it('gives two identical charges two different rows', () => {
+    const rows = [line('2026-01-02', 'COFFEE', -320), line('2026-01-02', 'COFFEE', -320)]
+    const here = [
+      txn({ id: 'x', date: '2026-01-02', payee: 'COFFEE', amountMinor: -320 }),
+      txn({ id: 'y', date: '2026-01-02', payee: 'COFFEE', amountMinor: -320 }),
+    ]
+
+    const plan = matchStatement(rows, statementOrder(rows.map((r) => r.date)), here)
+
+    expect(new Set(plan.matched.map((m) => m.txn.id)).size).toBe(2)
+    expect(plan.matched.map((m) => m.seq).sort()).toEqual([0, 1])
+  })
+
+  it('says what it could not place, in both directions', () => {
+    const rows = [line('2026-01-02', 'TESCO', -1200), line('2026-01-03', 'A SHOP NOT IMPORTED', -500)]
+    const here = [
+      txn({ id: 'a', date: '2026-01-02', payee: 'TESCO', amountMinor: -1200 }),
+      txn({ id: 'typed', date: '2026-01-09', payee: 'Dinner out', amountMinor: -3000 }),
+    ]
+
+    const plan = matchStatement(rows, statementOrder(rows.map((r) => r.date)), here)
+
+    expect(plan.matched).toHaveLength(1)
+    // A line the account has never seen: not an error, just not a repair.
+    expect(plan.unmatchedLines).toBe(1)
+    // And a row the statement never mentioned keeps whatever order it had.
+    expect(plan.unmatchedRows.map((t) => t.id)).toEqual(['typed'])
+  })
+
+  it('offers only the rows whose order would actually change', () => {
+    const rows = [line('2026-01-02', 'TESCO', -1200), line('2026-01-03', 'BOOTS', -500)]
+    const here = [
+      { ...txn({ id: 'a', date: '2026-01-02', payee: 'TESCO', amountMinor: -1200 }), statementOrder: 0 },
+      txn({ id: 'b', date: '2026-01-03', payee: 'BOOTS', amountMinor: -500 }),
+    ]
+
+    const plan = matchStatement(rows, statementOrder(rows.map((r) => r.date)), here)
+
+    expect(plan.matched).toHaveLength(2)
+    // `a` already sits where the file says; only `b` is a write.
+    expect(plan.changed.map((m) => m.txn.id)).toEqual(['b'])
+  })
+
+  it('matches a row typed by hand, which has no reference to compare', () => {
+    // The weaker claim `findLikelyDuplicate` makes: nobody types
+    // "SQ *THE GOOD FORK 3241", so amount and date carry it alone.
+    const rows = [line('2026-01-02', 'SQ *THE GOOD FORK 3241', -4250)]
+    const here = [txn({ id: 'typed', date: '2026-01-02', payee: '', title: 'Dinner', amountMinor: -4250 })]
+
+    const plan = matchStatement(rows, statementOrder(rows.map((r) => r.date)), here)
+
+    expect(plan.matched.map((m) => m.txn.id)).toEqual(['typed'])
   })
 })

@@ -76,7 +76,7 @@ import {
   type UnownedAccount,
 } from '../lib/accounts'
 import { CategoryTree } from '../components/CategoryTree'
-import { ImportsSection } from '../components/ImportHistory'
+import { ImportsSection, StatementOrderSection } from '../components/ImportHistory'
 import { IconPicker, InkPicker, SlotPicker } from '../components/IconPicker'
 import { PersonDot, nameOf } from '../components/PersonDot'
 
@@ -1129,6 +1129,10 @@ const GROUPS: Group[] = [
         {/* Beside the accounts an import lands in, and above the two other
             things on this screen that are about undoing something. */}
         <ImportsSection />
+        {/* The other thing you do to an import after the fact, and the reason
+            it is here rather than in the wizard: putting right what you have
+            already brought in is not part of bringing in the next thing. */}
+        <StatementOrderSection />
         <CurrencySection />
         <OwedSection />
         <Recoverable />

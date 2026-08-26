@@ -1,12 +1,23 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Undo2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ListOrdered, Undo2 } from 'lucide-react'
 import { db, type Transaction } from '../lib/db'
 import { useAccounts, useMyLevels } from '../lib/cache'
 import { canAddTransactions, canEditTransaction, levelOn } from '../lib/accounts'
-import { importBatches, moveImport, undoImport, type ImportBatch } from '../lib/imports'
+import { update } from '../lib/data'
+import {
+  applyStatementOrder,
+  importBatches,
+  matchStatement,
+  moveImport,
+  readStatement,
+  statementOrder,
+  undoImport,
+  type ImportBatch,
+  type StatementPlan,
+} from '../lib/imports'
 import { useSyncState } from '../hooks/useSync'
 import { fmtDay, fmtFullDate } from '../lib/dates'
-import { confirmAction } from './confirm'
+import { alertAction, confirmAction } from './confirm'
 import { toast } from './toast'
 import { AccountDot, Button, Card, Select, SectionTitle, useInfoNote } from './ui'
 
@@ -65,6 +76,202 @@ export function ImportsSection() {
             ))}
           </div>
         )}
+      </Card>
+    </section>
+  )
+}
+
+/* ---------- the order a statement was in ---------- */
+
+const ORDER_ABOUT = (
+  <>
+    <p>
+      A statement carries no clock inside a day, so the order the bank listed it in is the only answer to which of
+      two transactions on the same date came first. An import used to throw that away.
+    </p>
+    <p>
+      Give it a statement covering rows that are already here — a year to date, the whole account — and it writes
+      that order onto them. Nothing is added, removed or refiled: it matches each line to a transaction you already
+      have, and sets one field on it.
+    </p>
+  </>
+)
+
+/**
+ * Set the order of transactions already here, from the statement they came off.
+ *
+ * A repair rather than an import, and it lives beside the import history for
+ * the reason that list lives here at all: what you have already done is not
+ * part of doing the next thing. Nothing on this screen creates a transaction.
+ *
+ * The account is asked for BEFORE the file and starts empty, which is the same
+ * discipline the wizard follows — a control that must be answered cannot be
+ * answered by accident, and here it decides which rows are even considered.
+ *
+ * There is deliberately no column-mapping step. A mapping that is wrong cannot
+ * import anything wrong from here; it simply matches nothing, and "0 of 418
+ * lines matched" is a better answer than four questions about columns. See
+ * `readStatement`.
+ */
+export function StatementOrderSection() {
+  const accounts = useAccounts()
+  const levels = useMyLevels()
+  const { userId } = useSyncState()
+  const note = useInfoNote('Order from a statement', ORDER_ABOUT)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const [accountId, setAccountId] = useState('')
+  const [reading, setReading] = useState(false)
+  const [plan, setPlan] = useState<StatementPlan | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const mine = accounts.filter((a) => canAddTransactions(levelOn(a.id, levels)))
+
+  async function onFile(file: File) {
+    if (!accountId) return
+    setReading(true)
+    setPlan(null)
+    try {
+      const rows = await readStatement(file)
+      if (rows.filter((r) => r.valid).length === 0) {
+        await alertAction('Nothing in that file could be read as a statement', [
+          'No line in it looked like a date, a description and an amount.',
+          'A scanned or photographed PDF has no text to read — a CSV export from your bank will work.',
+        ])
+        return
+      }
+      // The file's own order, taken over every line so the positions match the
+      // document rather than the subset that parsed.
+      const seqs = statementOrder(rows.map((r) => r.date))
+      const onAccount = await db.transactions.where('accountId').equals(accountId).toArray()
+      setPlan(matchStatement(rows, seqs, onAccount))
+    } catch {
+      await alertAction('That file could not be read', 'Try a CSV export from your bank instead.')
+    } finally {
+      setReading(false)
+    }
+  }
+
+  async function apply() {
+    if (!plan) return
+    setSaving(true)
+    try {
+      const { updated, skipped, before } = await applyStatementOrder(plan.changed, (t) =>
+        canEditTransaction(t, levelOn(t.accountId, levels), userId),
+      )
+      setPlan(null)
+      // A real undo, not an offer of one: this is an UPDATE, so putting every
+      // row back where it was is another write of the same kind — including the
+      // rows that carried no order at all, where the way back is `undefined`.
+      toast(
+        skipped > 0
+          ? `${updated} in order · ${skipped} are not yours to change`
+          : `${updated} ${updated === 1 ? 'transaction' : 'transactions'} put in order`,
+        {
+          undo:
+            updated > 0
+              ? async () => {
+                  for (const [id, was] of before) await update('transactions', id, { statementOrder: was })
+                }
+              : undefined,
+        },
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const account = accounts.find((a) => a.id === accountId)
+
+  return (
+    <section>
+      <SectionTitle>Order from a statement</SectionTitle>
+      <Card className="space-y-3 p-4 md:p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="min-w-0 text-sm text-ink-2 md:text-xs">
+            Put transactions already here back in the order the bank listed them
+          </p>
+          {note.toggle}
+        </div>
+        {note.body}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={accountId}
+            onChange={(e) => {
+              setAccountId(e.target.value)
+              setPlan(null)
+            }}
+            aria-label="Account"
+          >
+            <option value="">Which account…</option>
+            {mine.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+          <Button
+            variant="subtle"
+            size="sm"
+            disabled={!accountId || reading || saving}
+            onClick={() => fileRef.current?.click()}
+          >
+            <ListOrdered size={15} />
+            {reading ? 'Reading…' : 'Choose a statement'}
+          </Button>
+          {account && <AccountDot account={account} size={22} />}
+        </div>
+
+        {plan && (
+          <div className="space-y-2 rounded-xl bg-surface-2 p-3">
+            <p className="text-sm">
+              <span className="font-semibold tabular">{plan.matched.length}</span>{' '}
+              {plan.matched.length === 1 ? 'line matches a transaction' : 'lines match transactions'} here
+              {plan.changed.length !== plan.matched.length && (
+                <>
+                  {' · '}
+                  <span className="tabular">{plan.changed.length}</span> to change
+                </>
+              )}
+            </p>
+            {/* Both of the ways a statement and an account can disagree, said
+                plainly: neither is an error, and a repair that hid them would
+                be a repair nobody could check. */}
+            <p className="text-xs text-ink-3">
+              {plan.unmatchedLines > 0 && (
+                <>
+                  {plan.unmatchedLines} {plan.unmatchedLines === 1 ? 'line' : 'lines'} in the file had nothing here to
+                  match — those are transactions you have not imported.{' '}
+                </>
+              )}
+              {plan.unmatchedRows.length > 0 && (
+                <>
+                  {plan.unmatchedRows.length}{' '}
+                  {plan.unmatchedRows.length === 1 ? 'transaction here was' : 'transactions here were'} not on the
+                  statement, and keep the order they have.
+                </>
+              )}
+            </p>
+            <Button size="sm" disabled={saving || plan.changed.length === 0} onClick={() => void apply()}>
+              {plan.changed.length === 0
+                ? 'Already in this order'
+                : `Set the order of ${plan.changed.length} ${plan.changed.length === 1 ? 'row' : 'rows'}`}
+            </Button>
+          </div>
+        )}
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,.pdf,text/csv,application/pdf"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void onFile(f)
+            e.target.value = ''
+          }}
+        />
       </Card>
     </section>
   )

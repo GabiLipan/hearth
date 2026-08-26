@@ -137,9 +137,10 @@ Key files: `db.ts` (schema + cache), `data.ts` (the only write path),
 called — the conditions beyond the payee that tell two charges from one vendor
 apart, bulk recategorisation, and which of the covered rows to touch), `bills.ts`
 (suggestions, posting, reconciliation), `imports.ts` (an import recognised
-after the fact, and the two ways of putting a wrong one right — the screen for
-it is `components/ImportHistory.tsx`, in Settings beside the accounts rather
-than on the way in to the next import),
+after the fact, the two ways of putting a wrong one right, and bringing a
+statement back in for its ORDER alone — the screen for all three is
+`components/ImportHistory.tsx`, in Settings beside the accounts rather than on
+the way in to the next import),
 `transfers.ts` (pairing and linking),
 `routes.ts` (recurring movements, derived from confirmed transfers),
 `unexplained.ts` (the blind spot, and asking the person who can see past it),
@@ -457,6 +458,23 @@ the single place a level comes from.
   The month heading rows are `sticky left-3 w-fit` inside their cell for the
   same gesture: a heading that slides away is a band of tint over rows it no
   longer names.
+- **A statement can be brought in for its ORDER alone.** Settings › Accounts ›
+  "Order from a statement" takes a file covering rows that are already here — a
+  year to date, a whole account — matches each line to a transaction with the
+  duplicate check's own fingerprint, and writes `statementOrder` and nothing
+  else: no row is created, removed or refiled. It exists because the order can
+  only be captured at import and every row imported before migration 27 has
+  none, so without it the fix would apply to next month and never to the year
+  behind it. Four things it is careful about. The account is asked for BEFORE
+  the file and starts empty, as in the wizard. There is deliberately no
+  column-mapping step: a wrong mapping here cannot import anything wrong, it
+  simply matches nothing, and "0 of 418 lines matched" is a better answer than
+  four questions about columns. It reports BOTH kinds of disagreement — lines
+  with nothing here, rows here that were not on the statement — because a repair
+  nobody can check is a repair nobody should run. And it offers a real undo
+  rather than a confirmation, because unlike a delete this is an ordinary
+  UPDATE: `applyStatementOrder` hands back what each row carried, `undefined`
+  included.
 - **A statement's order is EVIDENCE, not a tie-break.** Inside a day a bank
   export carries no time, so its own row order is the only answer there is to
   which of two rows dated the second of January came first — and Hearth threw it
