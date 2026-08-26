@@ -4,7 +4,7 @@ import { Search, Upload, Receipt, ChevronDown, ChevronLeft, ChevronRight, Wallet
 import type { Account, Category, Transaction } from '../lib/db'
 import { paintOf } from '../lib/palette'
 import { useAccountMap, useAccounts, useAllTransactions, useBook, useBooks, useCategories, useCategoryMap, useGrantsByAccount, useMemberMap, useMyLevels } from '../lib/cache'
-import { canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn, runningBalances } from '../lib/accounts'
+import { byLedger, canAddTransactions, canEditTransaction, canSeeTransactionsAt, levelOn, runningBalances } from '../lib/accounts'
 import { appScrollerTopInset, onAppScroll, scrollAppTo, scrollAppToElement } from '../lib/scroll'
 
 import { update } from '../lib/data'
@@ -250,7 +250,10 @@ export default function Activity() {
         return false
       return true
     })
-    return list.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
+    // `byLedger`, not a comparator written out here: the Balance column is
+    // this list walked backwards, and the two are only each other's reverse
+    // while they agree about rows that tie. See `byLedger`.
+    return list.sort(byLedger)
   }, [txns, catFilter, catMap, accountFilter, asDrill, accounts, query, book, books])
 
   /**

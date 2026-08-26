@@ -456,6 +456,21 @@ the single place a level comes from.
   The month heading rows are `sticky left-3 w-fit` inside their cell for the
   same gesture: a heading that slides away is a band of tint over rows it no
   longer names.
+- **Two orderings that are reverses of each other stop being reverses the
+  moment something ties.** Activity's list and its Balance column are one
+  decision — the balances are the list walked backwards — and they were written
+  as two comparators: the page sorted on date and `createdAt` descending and
+  left ties wherever Dexie had them, `runningBalances` sorted ascending and
+  broke ties on the id. That is only a reverse while nothing ties, and an
+  IMPORT ties every row it writes: the rows go in inside one transaction and
+  `now()` is the transaction's clock, so forty rows of a statement carry one
+  identical stamp. Dexie then returns them in primary-key order, which is id
+  ascending — the same order the balance counted them in — so the column
+  stepped DOWN the page instead of up and a day's first purchase read as though
+  it had happened last. `byLedger` is the one comparator now, ties broken on
+  the id, and `runningBalances` is `-byLedger`. The tie-break is arbitrary
+  (nothing in a statement says which of two rows stamped the same second came
+  first) and that is fine: it only has to be stable and shared.
 - **A running balance can only be READ down one account.** Every figure in
   Activity's Balance column is true wherever it appears — what that row's own
   account held once that row had gone through it — and a column of them down a

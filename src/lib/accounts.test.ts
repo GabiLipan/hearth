@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { format, subDays } from 'date-fns'
 import type { Account, Transaction } from './db'
-import { accountFace, balanceHistory, computeBalance, runningBalances } from './accounts'
+import { accountFace, balanceHistory, byLedger, computeBalance, runningBalances } from './accounts'
 
 const day = (offset: number) => format(subDays(new Date(), offset), 'yyyy-MM-dd')
 
-const txn = (accountId: string, amountMinor: number, date: string): Transaction => ({
-  id: `${accountId}${date}${amountMinor}`,
+const txn = (accountId: string, amountMinor: number, date: string, id?: string): Transaction => ({
+  id: id ?? `${accountId}${date}${amountMinor}`,
   accountId,
   date,
   payee: 'x',
@@ -90,6 +90,54 @@ describe('runningBalances', () => {
     const rows = [txn('a', -2_000, '2026-01-02'), txn('a', 1_000, '2026-01-03')]
     const out = runningBalances([a], rows)
     expect(out.get(rows[1].id)).toBe(computeBalance(a, rows))
+  })
+
+  /**
+   * The invariant the column rests on, and the one that was broken: the
+   * balances are this list walked BACKWARDS, so reading them from the bottom of
+   * the page upwards steps by each row's own amount.
+   *
+   * The case that broke it is an import. Every row of a statement goes in
+   * inside one transaction and `now()` is the transaction's clock, so all forty
+   * carry an identical `createdAt` — and two orderings that are reverses of
+   * each other only while nothing ties then stop being reverses at all. The
+   * page listed a day in one order and the balance counted it in the same one,
+   * so the column stepped down the page instead of up: an opening balance of
+   * £3,597.93 less £8.70 appeared on the row at the TOP of the second of
+   * January rather than the bottom.
+   */
+  /**
+   * The discriminating half, and where the fault actually was.
+   *
+   * `runningBalances` broke ties on the id and Activity's own sort did not, so
+   * a tie left the page in whatever order Dexie returned — primary-key order,
+   * which is id ASCENDING. Two orderings that are reverses of each other only
+   * while nothing ties are not reverses at all once something does, and a
+   * statement import ties every row it writes.
+   */
+  it('breaks a tie on the id, so the page is the exact reverse of the balances', () => {
+    // As Dexie hands them back, which is where the page used to leave them.
+    const rows = [txn('a', -870, '2026-01-02', 'aaa'), txn('a', -949, '2026-01-02', 'zzz')]
+    expect([...rows].sort(byLedger).map((r) => r.id)).toEqual(['zzz', 'aaa'])
+  })
+
+  it('steps in the order Activity lists, even when every stamp is identical', () => {
+    const rows = [
+      txn('a', -870, '2026-01-02', 'zzz'),
+      txn('a', -949, '2026-01-02', 'aaa'),
+      txn('a', -50_568, '2026-01-02', 'mmm'),
+    ]
+    const listed = [...rows].sort(byLedger)
+    const out = runningBalances([a], rows)
+
+    // The bottom row of the day is its earliest: the opening balance, less it.
+    const bottom = listed[listed.length - 1]
+    expect(out.get(bottom.id)).toBe(a.openingBalanceMinor + bottom.amountMinor)
+
+    // And every row above differs from the one below by exactly its own amount.
+    for (let i = listed.length - 2; i >= 0; i--) {
+      expect(out.get(listed[i].id)).toBe(out.get(listed[i + 1].id)! + listed[i].amountMinor)
+    }
   })
 
   it('reads in the ledger order, oldest first, whatever order it was handed', () => {

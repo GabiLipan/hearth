@@ -161,6 +161,43 @@ export function balanceOf(
 }
 
 /**
+ * The order a ledger is listed in: newest first.
+ *
+ * One function because two things have to agree about it EXACTLY, and when
+ * they did not the Balance column was nonsense: Activity sorted by date and
+ * `createdAt` descending and left ties in whatever order Dexie returned them,
+ * while `runningBalances` sorted ascending and broke ties on the id. Those are
+ * only reverses of each other while no two rows tie — and an import ties every
+ * row it writes, because the rows go in inside one transaction and `now()` is
+ * the TRANSACTION's clock, so a statement of forty rows carries one identical
+ * stamp. Dexie then hands them back in primary-key order, which is id
+ * ascending, so the page listed a day's rows in the same order the balance
+ * counted them: the column stepped DOWN the page instead of up, and a day's
+ * first purchase read as though it had happened last. £3,597.93 less £8.70 on
+ * the row at the TOP of the second of January.
+ *
+ * So: one comparator, and the balance is it walked backwards. The tie-break on
+ * the id is arbitrary — nothing in a statement says which of two rows stamped
+ * the same second came first — but it is STABLE and it is shared, which is all
+ * the column needs to be true.
+ *
+ * `createdAt` is missing on a row this device has only just written — the
+ * server stamps it and the next pull brings it back — so a missing one stands
+ * in as the furthest-off stamp there is, which puts a row created a moment ago
+ * at the top of its day rather than the bottom. Empty string would do the
+ * opposite, silently.
+ */
+const NEWEST = '9999-12-31T23:59:59Z'
+
+export function byLedger(a: Transaction, b: Transaction): number {
+  return (
+    b.date.localeCompare(a.date) ||
+    (b.createdAt ?? NEWEST).localeCompare(a.createdAt ?? NEWEST) ||
+    b.id.localeCompare(a.id)
+  )
+}
+
+/**
  * What each account held immediately after each of its transactions.
  *
  * The statement column: a row's amount says what moved, and this says where
@@ -187,23 +224,12 @@ export function balanceOf(
  * given a figure derived from the one row we happen to have. The caller draws
  * nothing there.
  *
- * The order is the ledger's, reversed: date, then `createdAt`, then the id, so
- * two rows on one day are counted in the order Activity lists them and the
- * column reads downwards the way the eye does. `createdAt` is missing on a row
- * this device has only just written — the server stamps it and the next pull
- * brings it back — so it sorts first among its day, which is where a row
- * created a moment ago belongs.
+ * The order is `byLedger`, walked backwards, and it MUST be exactly that — see
+ * the note there. Anything else and the column stops being a running balance.
  */
 export function runningBalances(accounts: Account[], txns: Transaction[]): Map<string, number> {
   const running = new Map(accounts.map((a) => [a.id, a.openingBalanceMinor]))
-  const ordered = txns
-    .filter((t) => running.has(t.accountId))
-    .sort(
-      (a, b) =>
-        a.date.localeCompare(b.date) ||
-        (a.createdAt ?? '').localeCompare(b.createdAt ?? '') ||
-        a.id.localeCompare(b.id),
-    )
+  const ordered = txns.filter((t) => running.has(t.accountId)).sort((a, b) => -byLedger(a, b))
   const out = new Map<string, number>()
   for (const t of ordered) {
     const next = (running.get(t.accountId) ?? 0) + t.amountMinor
