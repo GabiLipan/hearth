@@ -573,10 +573,10 @@ select,
  * cell is what turns the join into a depth: the pinned column is simply nearer.
  *
  * `translateX(100%)` puts it past the cell's own right edge, so it darkens the
- * moving columns and never the pinned text. It is drawn whether or not the
- * table is scrolled — the alternative is a scroll listener per table, and at
- * this weight an unscrolled table reads as a column division rather than as a
- * shadow.
+ * moving columns and never the pinned text. It appears only once something is
+ * actually passing behind — `ScrollTable` marks the scroller — because a depth
+ * cue with nothing moving under it is a vertical line in the middle of a table,
+ * which is a column divider this app draws nowhere else.
  *
  * It cannot share an element with `.fade-x`: a mask applies to an element's
  * pseudo-elements as well as its content, so the shade would be masked away
@@ -591,7 +591,17 @@ select,
   width: 10px;
   transform: translateX(100%);
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
   background: linear-gradient(to right, var(--pin-shade), transparent);
+}
+[data-scrolled] .pin-edge::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pin-edge::after {
+    transition: none;
+  }
 }
 
 /* Recharts positions its tooltip inside the chart container and sets no

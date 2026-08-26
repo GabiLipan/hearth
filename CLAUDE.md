@@ -433,15 +433,22 @@ the single place a level comes from.
   last pinned cell, so one thing passes behind another instead of two sharp
   edges of text meeting. The shade is black in BOTH themes: a shadow is an
   absence of light, and a pale one in the dark theme reads as a glow coming off
-  the column.
-- **Two pinned columns need the first one's width to be a number.** Activity's
-  table pins Date and Payee — what a row IS, against the columns saying what it
-  was filed as — and `table.pinnedNext` holds the second at `left-32`, which is
-  only the first column's edge while that column is exactly `w-32`. In an auto
-  table layout a column is as wide as its widest cell turned out to be, so one
-  long date would slide the two out of step and leave a strip of the
-  scrolled-under table showing between them. Hence `table-fixed` there, and
-  hence every other column states a width and the payee takes the remainder.
+  the column. It appears only while the table is actually scrolled sideways
+  (`ScrollTable` marks the scroller `data-scrolled`) — a depth cue with nothing
+  moving under it is a vertical line in the middle of a table, which is a column
+  divider this app draws nowhere else.
+- **Two pinned columns need the first one's width to be a number, and it has to
+  be MEASURED.** Activity's table pins Date and Payee — what a row IS, against
+  the columns saying what it was filed as — and the second one's `left` has to
+  equal the first one's width exactly, or a strip of the scrolled-under table
+  shows between them. Stating both (`w-32` and `left-32`) makes them agree only
+  under `table-fixed`, which prices every other column at a stated width too —
+  and a category longer than its column then wraps or is cut, when what it wants
+  is simply to be wider. So the layout is auto, `ScrollTable` measures the first
+  header cell with a border-box `ResizeObserver` and publishes `--pin-next`, and
+  `table.pinnedNext` reads that. Only ONE column may then carry `w-full max-w-0`
+  — the payee — which is what makes it take the slack and give it back first
+  while every other column sizes to its own contents.
   The month heading rows are `sticky left-3 w-fit` inside their cell for the
   same gesture: a heading that slides away is a band of tint over rows it no
   longer names.

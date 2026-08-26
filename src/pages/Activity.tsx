@@ -796,28 +796,34 @@ export default function Activity() {
               The month heading is a row of its own so the table stays one
               table — a table per month would give each its own column widths. */}
           <Card className="hidden overflow-hidden md:block">
-            {/* `table-fixed`, because two pinned columns need the first one's
-                width to be a NUMBER: `pinnedNext` holds the payee at `left-32`,
-                which is only the date column's edge while the date column is
-                exactly `w-32`. Everything else states a width too and the payee
-                takes what is left.
+            {/* An AUTO layout, so every column is as wide as its own contents:
+                a category is a name somebody chose and a table that cuts it in
+                half is a table that cannot be read. Only the payee is allowed
+                to run out of room, because only it can be arbitrarily long and
+                it is the column with the most to spare — `w-full max-w-0` is
+                what makes it take all the slack and give it back first.
+                The two pinned columns still have to agree on where the second
+                one starts, which under a fixed layout came free. `ScrollTable`
+                measures it instead: see `--pin-next`.
                 Wider by the balance column when there is one: below that width
                 the table scrolls, and on an iPad in portrait it does — which is
                 what the two pinned columns are for. Date and payee are what a
                 row IS; the rest is what it was filed as. */}
-            <ScrollTable minWidth={oneAccount ? 1040 : 940} className="table-fixed">
+            <ScrollTable minWidth={oneAccount ? 1040 : 940}>
               <thead>
                 <tr className={table.head}>
-                  <th className={cx(table.th, 'w-32 pl-3', table.pinned)}>Date</th>
-                  <th className={cx(table.th, 'pr-3', table.pinnedNext, table.pinEdge)}>Payee</th>
-                  <th className={cx(table.th, 'w-52')}>Category</th>
-                  <th className={cx(table.th, 'w-40')}>Account</th>
-                  <th className={cx(table.th, 'w-32 pr-3 text-right')}>Amount</th>
+                  <th className={cx(table.th, 'whitespace-nowrap px-3 pl-3', table.pinned)}>Date</th>
+                  {/* The one column that gives way. Everything else is as wide
+                      as it needs to be; this takes what is left and fades. */}
+                  <th className={cx(table.th, 'w-full pr-3', table.pinnedNext, table.pinEdge)}>Payee</th>
+                  <th className={cx(table.th, 'whitespace-nowrap')}>Category</th>
+                  <th className={cx(table.th, 'whitespace-nowrap')}>Account</th>
+                  <th className={cx(table.th, 'whitespace-nowrap pr-3 text-right')}>Amount</th>
                   {/* What the account held once this row had gone through it —
                       the column a bank statement has and a list of movements
                       does not, and the only one you can reconcile against. Only
                       while the list is one account's: see `oneAccount`. */}
-                  {oneAccount && <th className={cx(table.th, 'w-32 pr-3 text-right')}>Balance</th>}
+                  {oneAccount && <th className={cx(table.th, 'whitespace-nowrap pr-3 text-right')}>Balance</th>}
                   {/* Deliberately unlabelled and nearly nothing wide. Inline
                       editing takes over every other cell's click, so without a
                       way through, the sheet — and with it deletion, notes,
@@ -865,7 +871,10 @@ export default function Activity() {
                           <EditableCell
                             className={cx(
                               table.cell,
-                              'pl-3 whitespace-nowrap text-ink-3 tabular',
+                              // Both paddings, now that the column is as wide
+                              // as its own contents: under the old fixed layout
+                              // the stated width carried the gap to the payee.
+                              'whitespace-nowrap px-3 text-ink-3 tabular',
                               table.pinned,
                               // The pinned column paints its own opaque fill, so
                               // the row's tint cannot reach it — it has to be
@@ -888,14 +897,17 @@ export default function Activity() {
                           <EditableCell
                             className={cx(
                               table.cell,
-                              // `max-w-0` is what makes a table cell shrink to
-                              // its column's width instead of its content's, so
-                              // the fade inside it has an edge to happen at.
+                              // `w-full max-w-0` is the pair that makes this
+                              // the column that gives way: the width claims
+                              // every pixel the other columns did not want, and
+                              // the max-width lets it shrink below its own
+                              // content rather than pushing the table wider.
+                              // Nothing else in the table may carry them.
                               // No `overflow-hidden` here, deliberately: the
                               // inner span clips the text, and hiding overflow
                               // on the cell would clip `pin-edge`'s shade too,
                               // which is drawn just OUTSIDE its right edge.
-                              'max-w-0 pr-3',
+                              'w-full max-w-0 pr-3',
                               table.pinnedNext,
                               table.pinEdge,
                               // A pinned cell paints its own opaque fill, so the
@@ -966,7 +978,7 @@ export default function Activity() {
                               />
                             }
                           >
-                            <span className={cx('flex items-center gap-1.5', table.fade)}>
+                            <span className="flex items-center gap-1.5 whitespace-nowrap">
                               {/* Linking strips the category off both legs, so
                                   for a transfer this column is where the far
                                   account belongs — "Uncategorised" is true and
@@ -975,9 +987,7 @@ export default function Activity() {
                               {transfer && !cat ? (
                                 <>
                                   <ArrowLeftRight size={14} className="shrink-0 text-accent" />
-                                  <span className={cx('text-ink-2', table.fade)}>
-                                    {transferLine(t, partnerLeg.get(t.id), accMap)}
-                                  </span>
+                                  <span className="text-ink-2">{transferLine(t, partnerLeg.get(t.id), accMap)}</span>
                                 </>
                               ) : (
                                 <>
@@ -987,7 +997,7 @@ export default function Activity() {
                                   >
                                     <CategoryIcon icon={cat?.icon ?? parent?.icon} size={14} />
                                   </span>
-                                  <span className={table.fade}>
+                                  <span>
                                     {parent && <span className="text-ink-3">{parent.name} · </span>}
                                     <span className="text-ink-2">{cat?.name ?? 'Uncategorised'}</span>
                                   </span>
@@ -1014,7 +1024,7 @@ export default function Activity() {
                               />
                             }
                           >
-                            <span className={cx('flex items-center gap-2', table.fade)}>
+                            <span className="flex items-center gap-2 whitespace-nowrap">
                               {/* A published row is on an account this device
                                   does not hold, so there is no face and no name
                                   to draw. It says WHO rather than which card —
@@ -1023,19 +1033,19 @@ export default function Activity() {
                               {acc ? (
                                 <>
                                   <AccountDot account={acc} size={22} />
-                                  <span className={table.fade}>{acc.name}</span>
+                                  <span>{acc.name}</span>
                                 </>
                               ) : forHousehold ? (
                                 <>
                                   <HouseholdMark icon book={book} payer={payerOf(t)} />
-                                  <span className={cx('text-ink-3', table.fade)}>
+                                  <span className="text-ink-3">
                                     {payerOf(t) ? `${payerOf(t)}’s account` : 'A personal account'}
                                   </span>
                                 </>
                               ) : (
                                 <>
                                   <AccountDot account={undefined} size={22} />
-                                  <span className="truncate">—</span>
+                                  <span>—</span>
                                 </>
                               )}
                             </span>

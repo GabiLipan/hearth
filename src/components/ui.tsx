@@ -2277,16 +2277,20 @@ export const table = {
    */
   pinned: 'sticky left-0 z-10 bg-surface group-hover:bg-row-hover',
   /**
-   * The SECOND pinned column, held at the first one's width.
+   * The SECOND pinned column, held at the first one's measured width.
    *
-   * `left-32` is `w-32`, stated twice because CSS has no way to say "as far
-   * along as the column before me" — which is exactly why the table it is used
-   * on is `table-fixed`. In an auto layout a column is as wide as its widest
-   * cell turned out to be, so a date one character longer than expected would
-   * slide this column's left edge out of step with it and leave a strip of the
-   * scrolled-under table showing between the two.
+   * CSS has no way to say "as far along as the column before me", and the two
+   * have to agree exactly: a pixel out and a strip of the scrolled-under table
+   * shows between them. It was `left-32` against a `table-fixed` layout, which
+   * agreed by making the first column a stated width — at the price of every
+   * other column being a stated width too, so a long category wrapped or was
+   * cut instead of simply making its column wider.
+   *
+   * `ScrollTable` measures the first header cell instead and publishes it as
+   * `--pin-next`, so the columns can size to their contents again. The fallback
+   * is the old constant, for the frame before the measurement lands.
    */
-  pinnedNext: 'sticky left-32 z-10 bg-surface group-hover:bg-row-hover',
+  pinnedNext: 'sticky left-[var(--pin-next,8rem)] z-10 bg-surface group-hover:bg-row-hover',
   /**
    * The right-hand edge of the LAST pinned column: a few pixels of shade over
    * whatever is scrolling under it, so the join reads as depth rather than as
@@ -2319,9 +2323,52 @@ export function ScrollTable({
   className?: string
   children: ReactNode
 }) {
+  const table = useRef<HTMLTableElement>(null)
+
+  /**
+   * The first column's width, published as `--pin-next` for a table that pins
+   * two columns — see `table.pinnedNext`.
+   *
+   * Measured rather than stated, so the columns can be sized by their contents:
+   * the alternative is a fixed layout, where the offset is knowable because
+   * every column's width was declared, and where a category longer than its
+   * declared width has nowhere to go.
+   *
+   * `border-box`, because a header cell's padding is part of where the next
+   * column starts; and observed on the cell rather than read once, since a
+   * column's width follows its widest cell and that changes as rows arrive.
+   */
+  useLayoutEffect(() => {
+    const first = table.current?.querySelector('thead th')
+    if (!(first instanceof HTMLElement)) return
+    const write = () => table.current?.style.setProperty('--pin-next', `${first.offsetWidth}px`)
+    const observer = new ResizeObserver(write)
+    observer.observe(first, { box: 'border-box' })
+    write()
+    return () => observer.disconnect()
+  }, [])
+
+  /**
+   * Whether anything is actually passing behind the pinned columns.
+   *
+   * The shade `.pin-edge` draws is a depth cue, and a depth cue with nothing
+   * moving under it is just a vertical line in the middle of the table — a
+   * column divider this app draws nowhere else. So it appears with the scroll
+   * and fades out when the table comes back to its left edge.
+   */
+  const box = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const read = () => el.toggleAttribute('data-scrolled', el.scrollLeft > 0)
+    el.addEventListener('scroll', read, { passive: true })
+    read()
+    return () => el.removeEventListener('scroll', read)
+  }, [])
+
   return (
-    <div className="overflow-x-auto overscroll-x-contain">
-      <table className={cx('w-full text-sm', className)} style={{ minWidth }}>
+    <div ref={box} className="overflow-x-auto overscroll-x-contain">
+      <table ref={table} className={cx('w-full text-sm', className)} style={{ minWidth }}>
         {children}
       </table>
     </div>
