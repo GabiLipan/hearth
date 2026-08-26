@@ -2287,6 +2287,18 @@ export const table = {
    * scrolled-under table showing between the two.
    */
   pinnedNext: 'sticky left-32 z-10 bg-surface group-hover:bg-row-hover',
+  /**
+   * The right-hand edge of the LAST pinned column: a few pixels of shade over
+   * whatever is scrolling under it, so the join reads as depth rather than as
+   * two sharp edges of text meeting. See `.pin-edge` in `index.css` for why it
+   * cannot share an element with `.fade-x`.
+   */
+  pinEdge: 'pin-edge',
+  /**
+   * Text that runs out rather than being cut off with an ellipsis. Goes on an
+   * inner element, never on the cell wearing `pinEdge`.
+   */
+  fade: 'fade-x',
 }
 
 /**

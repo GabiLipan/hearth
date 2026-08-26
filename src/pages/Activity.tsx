@@ -809,7 +809,7 @@ export default function Activity() {
               <thead>
                 <tr className={table.head}>
                   <th className={cx(table.th, 'w-32 pl-3', table.pinned)}>Date</th>
-                  <th className={cx(table.th, 'pr-3', table.pinnedNext)}>Payee</th>
+                  <th className={cx(table.th, 'pr-3', table.pinnedNext, table.pinEdge)}>Payee</th>
                   <th className={cx(table.th, 'w-52')}>Category</th>
                   <th className={cx(table.th, 'w-40')}>Account</th>
                   <th className={cx(table.th, 'w-32 pr-3 text-right')}>Amount</th>
@@ -888,8 +888,16 @@ export default function Activity() {
                           <EditableCell
                             className={cx(
                               table.cell,
-                              'max-w-0 truncate pr-3',
+                              // `max-w-0` is what makes a table cell shrink to
+                              // its column's width instead of its content's, so
+                              // the fade inside it has an edge to happen at.
+                              // No `overflow-hidden` here, deliberately: the
+                              // inner span clips the text, and hiding overflow
+                              // on the cell would clip `pin-edge`'s shade too,
+                              // which is drawn just OUTSIDE its right edge.
+                              'max-w-0 pr-3',
                               table.pinnedNext,
+                              table.pinEdge,
                               // A pinned cell paints its own opaque fill, so the
                               // row's tint has to be repeated on it — the same
                               // reason the date cell above repeats it.
@@ -918,6 +926,7 @@ export default function Activity() {
                               />
                             }
                           >
+                            <span className={cx('block', table.fade)}>
                             {transfer ? (
                               <span
                                 title="One side of a transfer between accounts — it counts as neither spending nor income."
@@ -936,6 +945,7 @@ export default function Activity() {
                                 is one line, so both are inside one truncating span. */}
                             <TxnName txn={t} className="font-medium" />
                             {t.note && <span className="ml-2 text-ink-3">{t.note}</span>}
+                            </span>
                           </EditableCell>
                           {/* Both halves, with the parent dimmed: a row filed
                               under "Supermarket" is unreadable without knowing
@@ -956,7 +966,7 @@ export default function Activity() {
                               />
                             }
                           >
-                            <span className="flex items-center gap-1.5 truncate">
+                            <span className={cx('flex items-center gap-1.5', table.fade)}>
                               {/* Linking strips the category off both legs, so
                                   for a transfer this column is where the far
                                   account belongs — "Uncategorised" is true and
@@ -965,7 +975,7 @@ export default function Activity() {
                               {transfer && !cat ? (
                                 <>
                                   <ArrowLeftRight size={14} className="shrink-0 text-accent" />
-                                  <span className="truncate text-ink-2">
+                                  <span className={cx('text-ink-2', table.fade)}>
                                     {transferLine(t, partnerLeg.get(t.id), accMap)}
                                   </span>
                                 </>
@@ -977,7 +987,7 @@ export default function Activity() {
                                   >
                                     <CategoryIcon icon={cat?.icon ?? parent?.icon} size={14} />
                                   </span>
-                                  <span className="truncate">
+                                  <span className={table.fade}>
                                     {parent && <span className="text-ink-3">{parent.name} · </span>}
                                     <span className="text-ink-2">{cat?.name ?? 'Uncategorised'}</span>
                                   </span>
@@ -1004,7 +1014,7 @@ export default function Activity() {
                               />
                             }
                           >
-                            <span className="flex items-center gap-2 truncate">
+                            <span className={cx('flex items-center gap-2', table.fade)}>
                               {/* A published row is on an account this device
                                   does not hold, so there is no face and no name
                                   to draw. It says WHO rather than which card —
@@ -1013,12 +1023,12 @@ export default function Activity() {
                               {acc ? (
                                 <>
                                   <AccountDot account={acc} size={22} />
-                                  <span className="truncate">{acc.name}</span>
+                                  <span className={table.fade}>{acc.name}</span>
                                 </>
                               ) : forHousehold ? (
                                 <>
                                   <HouseholdMark icon book={book} payer={payerOf(t)} />
-                                  <span className="truncate text-ink-3">
+                                  <span className={cx('text-ink-3', table.fade)}>
                                     {payerOf(t) ? `${payerOf(t)}’s account` : 'A personal account'}
                                   </span>
                                 </>

@@ -417,6 +417,23 @@ the single place a level comes from.
   ordered — the control fills its flex row and squeezes a `flex-1 min-w-0
   truncate` sibling to zero width. This is how the sharing list came to show a
   photo and a level with no name between them. Put the width on a wrapper.
+- **A cut-off word says "there was more" with three characters; a fade says it
+  with none.** `.fade-x` is `overflow: hidden` plus a mask that takes the last
+  1.5rem to transparent, and it replaced `truncate` everywhere in Activity's
+  table — in columns that tight, an ellipsis is three characters of payee
+  spent saying that the payee did not fit. The gradient is positional on the
+  BOX, so a cell whose text ends before the ramp is untouched: nothing fades
+  unless something is genuinely running off the edge. It cannot share an element
+  with `.pin-edge`, because a mask applies to an element's pseudo-elements too
+  and would take the shade with it — the cell wears the shade, an inner span
+  wears the fade — and the cell must NOT hide its own overflow, or it clips the
+  shade drawn just outside its right edge.
+- **A pinned column meets the scrolling ones at a hard line unless something
+  softens it.** `.pin-edge` draws ten pixels of `--pin-shade` just outside the
+  last pinned cell, so one thing passes behind another instead of two sharp
+  edges of text meeting. The shade is black in BOTH themes: a shadow is an
+  absence of light, and a pale one in the dark theme reads as a glow coming off
+  the column.
 - **Two pinned columns need the first one's width to be a number.** Activity's
   table pins Date and Payee — what a row IS, against the columns saying what it
   was filed as — and `table.pinnedNext` holds the second at `left-32`, which is
@@ -1768,18 +1785,32 @@ the single place a level comes from.
   last column stores `'full'` rather than that number, which is the whole
   difference between "as wide as the page" and "as wide as the page happened to
   be that day".
-- **The two handles are told apart by where you take hold.** The grabber at the
-  top centre moves a card, the corner at the bottom right resizes it, and both
-  exist only in Customise mode. The whole card is still draggable, so the
-  grabber is an affordance rather than a target to hunt for; the corner is the
-  exception and must be hit, because "bigger" and "somewhere else" cannot both
-  be the meaning of one drag. Two things that bite. The grabber is a `<button>`,
-  so it has to be admitted BEFORE `down()`'s control test, not after — the test
-  that keeps a press on a picker from dragging the card would otherwise swallow
-  the one control whose job is to start the drag. And a press and a drag on the
-  corner are the same pointer sequence, so the corner's click handler (which
-  cycles the width) has to refuse a click that followed a drag, or every resize
-  ends one step past where it was let go.
+- **The two handles are told apart by where you take hold, and nothing else on
+  the card starts either gesture.** The grabber at the top centre moves a card,
+  the corner at the bottom right resizes it, both only in Customise mode. The
+  card itself was the drag handle for one release, on the reasoning that a
+  grabber is permanent furniture in service of an occasional act — what that
+  produced was a page where every press moved something: no way to touch a card
+  to steady it, no way to change your mind half way through, and on a phone no
+  way to scroll the page at all without catching a card. Three things that bite.
+  The grabber is a `<button>`, so `down()` tests for `[data-drag-handle]` FIRST
+  and ignores everything else. A press and a drag on the corner are the same
+  pointer sequence, so the corner's click handler (which cycles the width) has
+  to refuse a click that followed a drag, or every resize ends one step past
+  where it was let go. And the corner's move and up listeners are on `window`,
+  not on the handle: the card re-renders on every step of a resize, and an
+  earlier version rendered the handles only while nothing was being resized — so
+  the handle unmounted on the first frame of the gesture, took the pointer
+  capture with it, and the corner behaved exactly like a button that changed the
+  size once.
+- **Nothing inside a card is live while the page is being arranged.** The
+  card's whole subtree is `inert` in Customise mode. A chart that answers a
+  hover with a tooltip, or a tap by drilling into the rows behind it, is a card
+  behaving like a card at the moment you are treating it as a tile — you reach
+  for the corner, a tooltip opens under your finger, and a press that misses the
+  handle navigates to Activity. `inert` is hit testing, the tab order and the
+  accessibility tree in one word; `pointer-events-none` would leave the card
+  focusable and still readable as a chart.
 - **A resize is measured RELATIVELY, from where the gesture began.** The obvious
   reading — pointer position less the card's own top-left corner, over one grid
   step — is wrong because a row track grows to fit a card taller than the height

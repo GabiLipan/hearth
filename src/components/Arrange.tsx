@@ -38,21 +38,31 @@ import { appScrollX, appScrollY, scrollAppBy } from '../lib/scroll'
  * ## The two handles
  *
  * A card is moved by the grabber at the top of it and resized by the corner at
- * the bottom of it, and both appear only in Customise mode — where nothing
- * inside a card is interactive anyway and a press can mean nothing else.
+ * the bottom of it, and both exist only in Customise mode.
  *
  * They are handles rather than modes because the two acts are told apart by
  * WHERE you take hold, which is a thing the hand already knows: the top middle
  * is where you pick a window up, the bottom corner is where you pull it bigger.
- * Outside Customise mode neither exists, so the page keeps the property the
- * whole file is written around — it is a page of figures to be read, not a
- * board of furniture.
  *
- * The whole card stays draggable as well, so the grabber is an affordance
- * rather than a target to hunt for: it says the card moves, and hitting it
- * exactly is not the price of moving one. The corner is the exception and must
- * be hit, because "bigger" and "somewhere else" cannot both be the meaning of
- * one drag.
+ * **Nothing else on the card starts either gesture.** The card itself was the
+ * drag handle for a while, on the reasoning that a grabber is a permanent piece
+ * of furniture in service of an occasional act and that in Customise mode a
+ * press on a card can mean nothing else. What that produced was a page where
+ * every press moved something: there is no way to touch a card to steady it, to
+ * read the figure you are about to rearrange around, or to change your mind
+ * half way through — and on a phone, no way to scroll the page at all without
+ * catching a card. A handle is smaller than a card on purpose. The card knows
+ * how to be moved; it does not volunteer.
+ *
+ * ## And nothing inside a card is live while it is being arranged
+ *
+ * The whole subtree is `inert` in Customise mode. A chart that answers a hover
+ * with a tooltip, or a tap by drilling into the rows behind it, is a card
+ * behaving like a card at the moment you are treating it as a tile — you reach
+ * for the corner, the tooltip opens under your finger, and a press that misses
+ * the handle navigates to Activity. `inert` takes hit testing, the tab order
+ * and the accessibility tree together, which is what makes this one line rather
+ * than a `pointer-events-none` that still leaves the card focusable.
  *
  * ## Why a long press does not enter Customise mode
  *
@@ -245,6 +255,18 @@ export function Arrange({
    */
   const grab = useRef({ x: 0, y: 0, span: 1, rows: 1, col: 1, row: 1 })
   /**
+   * The size the corner is currently asking for, as a ref as well as state.
+   *
+   * The gesture runs on `window` listeners — see `grabCorner` — which are
+   * created once, at pointer-down, and would otherwise read the layout and the
+   * preview as they were in that one render for the whole drag.
+   */
+  const sizing = useRef<Resize | null>(null)
+  const live = useRef({ layout, columns, visible })
+  useEffect(() => {
+    live.current = { layout, columns, visible }
+  })
+  /**
    * Whether the corner was DRAGGED rather than pressed.
    *
    * A pointer down and up on the same element is also a click, so without this
@@ -348,16 +370,10 @@ export function Arrange({
     if (!editing) return
     // Only the primary button, and never a press that started on a control.
     if (e.button !== 0) return
-    const target = e.target as Element | null
-    // The grabber IS a button, so it has to be admitted before the control
-    // test rather than after it — it is the one control on a card whose whole
-    // job is to start this gesture.
-    if (
-      !target?.closest('[data-drag-handle]') &&
-      target?.closest('button, a, input, select, textarea, [role="button"], [data-no-drag]')
-    ) {
-      return
-    }
+    // The grabber and nothing else. Everything else on the card — including
+    // the card itself — is something to look at while arranging, not something
+    // that moves when touched. See the note at the top of this file.
+    if (!(e.target as Element | null)?.closest('[data-drag-handle]')) return
     e.preventDefault()
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
@@ -405,17 +421,25 @@ export function Arrange({
     }
   }
 
+  /**
+   * Take hold of the corner.
+   *
+   * The listeners go on `window` rather than on the handle, which is what makes
+   * this a DRAG rather than a press. Pointer capture on the handle is not
+   * enough on its own: the card re-renders on every step of the resize, and
+   * anything that unmounts or replaces the handle mid-gesture — as an earlier
+   * version of this did, by rendering the handles only while nothing was being
+   * resized — takes the capture with it. The pointer then travels over a
+   * control that is no longer there, no further event arrives, and the whole
+   * thing behaves like a button that changed the size once.
+   */
   function grabCorner(e: React.PointerEvent, item: LayoutItem) {
     if (!editing || e.button !== 0) return
     const el = wrap.current
     if (!el) return
     e.preventDefault()
     e.stopPropagation()
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId)
-    } catch {
-      /* carry on uncaptured — the listeners are on the handle either way */
-    }
+
     const step = stepOf(el)
     grab.current = {
       x: e.clientX,
@@ -426,20 +450,47 @@ export function Arrange({
       row: step.y,
     }
     dragged.current = false
-    setResize({ id: item.id, span: grab.current.span, rows: grab.current.rows })
+    sizing.current = { id: item.id, span: grab.current.span, rows: grab.current.rows }
+    setResize(sizing.current)
+
+    const move = (ev: PointerEvent) => {
+      ev.preventDefault()
+      dragCorner(ev.clientX, ev.clientY)
+    }
+    const done = (commit: boolean) => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+      if (commit) dropCorner()
+      else {
+        sizing.current = null
+        setResize(null)
+      }
+    }
+    const up = () => done(true)
+    // The system taking the gesture away is not a drop, here as everywhere
+    // else in this file.
+    const cancel = () => done(false)
+    window.addEventListener('pointermove', move, { passive: false })
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
   }
 
-  function dragCorner(e: React.PointerEvent) {
-    if (!resize) return
+  function dragCorner(x: number, y: number) {
+    const at = sizing.current
+    if (!at) return
     const g = grab.current
+    const cols = Math.max(1, live.current.columns)
     const clamp = (v: number, hi: number) => Math.max(1, Math.min(hi, v))
-    const span = clamp(g.span + Math.round((e.clientX - g.x) / g.col), Math.max(1, columns))
-    // A phone has one height and one width, so the corner has nothing to say
-    // there — see `effectiveHeight`. It is not rendered at all, but a stylus
-    // arriving mid-rotation would otherwise write a size the screen cannot show.
-    const rows = columns <= 1 ? 1 : clamp(g.rows + Math.round((e.clientY - g.y) / g.row), MAX_HEIGHT)
-    if (Math.abs(e.clientX - g.x) > 4 || Math.abs(e.clientY - g.y) > 4) dragged.current = true
-    setResize((was) => (was && was.span === span && was.rows === rows ? was : was && { ...was, span, rows }))
+    const span = clamp(g.span + Math.round((x - g.x) / g.col), cols)
+    // A phone has one width and one height, so there is nothing to drag
+    // vertically for — see `effectiveHeight`. The handle is not rendered there
+    // at all; this is the guard for a rotation mid-gesture.
+    const rows = cols <= 1 ? 1 : clamp(g.rows + Math.round((y - g.y) / g.row), MAX_HEIGHT)
+    if (Math.abs(x - g.x) > 4 || Math.abs(y - g.y) > 4) dragged.current = true
+    if (at.span === span && at.rows === rows) return
+    sizing.current = { ...at, span, rows }
+    setResize(sizing.current)
   }
 
   /**
@@ -452,17 +503,20 @@ export function Arrange({
    * it two thirds of a four-column one.
    */
   function dropCorner() {
-    if (!resize) return
-    const item = visible.find((i) => i.id === resize.id)
+    const at = sizing.current
+    sizing.current = null
     setResize(null)
+    if (!at) return
+    const { layout: now, columns: cols, visible: on } = live.current
+    const item = on.find((i) => i.id === at.id)
     if (!item) return
-    let next = layout
-    const span: Span = resize.span >= Math.max(1, columns) ? 'full' : resize.span
-    if (effectiveSpan(item.span, columns) !== resize.span || (span === 'full') !== (item.span === 'full')) {
+    let next = now
+    const span: Span = at.span >= Math.max(1, cols) ? 'full' : at.span
+    if (effectiveSpan(item.span, cols) !== at.span || (span === 'full') !== (item.span === 'full')) {
       next = setSpan(next, item.id, span)
     }
-    if (effectiveHeight(item.rows, columns) !== resize.rows) next = setHeight(next, item.id, resize.rows)
-    if (next !== layout) onLayout(next)
+    if (effectiveHeight(item.rows, cols) !== at.rows) next = setHeight(next, item.id, at.rows)
+    if (next !== now) onLayout(next)
   }
 
   // Escape abandons a drag, as everywhere else in the app.
@@ -541,9 +595,9 @@ export function Arrange({
     const def = defs.get(item.id)
     if (!def) return null
     const lifted = drag?.id === item.id
-    const sizing = resize?.id === item.id ? resize : null
-    const cols = sizing?.span ?? span
-    const high = sizing?.rows ?? rows
+    const resizing = resize?.id === item.id ? resize : null
+    const cols = resizing?.span ?? span
+    const high = resizing?.rows ?? rows
     return (
       <div
         key={item.id}
@@ -579,7 +633,7 @@ export function Arrange({
           gridColumn: `span ${cols} / span ${cols}`,
           gridRow: `span ${high} / span ${high}`,
           ...(lifted ? { transform: `translate(${drag.dx}px, ${drag.dy}px)`, zIndex: 30 } : null),
-          ...(sizing ? { zIndex: 20 } : null),
+          ...(resizing ? { zIndex: 20 } : null),
         }}
         tabIndex={editing ? 0 : undefined}
         aria-label={
@@ -606,8 +660,16 @@ export function Arrange({
             'h-full [&>*]:flex [&>*]:h-full [&>*]:flex-col',
             editing && 'rounded-2xl ring-2 ring-dashed ring-accent/40 md:rounded-xl',
             lifted && 'scale-[1.02] opacity-95 shadow-2xl ring-accent',
-            sizing && 'ring-accent',
+            resizing && 'ring-accent',
           )}
+          // Nothing inside a card is live while the page is being arranged: a
+          // chart that answers a hover with a tooltip, or a tap by drilling
+          // into the rows behind it, is a card behaving like a card at the
+          // moment you are treating it as a tile. `inert` is hit testing, the
+          // tab order and the accessibility tree in one word — a
+          // `pointer-events-none` would leave it focusable and readable to a
+          // screen reader as though it were still a chart.
+          inert={editing}
         >
           {render({
             item,
@@ -626,7 +688,7 @@ export function Arrange({
           })}
         </div>
 
-        {editing && !lifted && !sizing && (
+        {editing && !lifted && (
           <>
             {/* The grabber, in the top middle: the one shape in this app that
                 already means "take hold of this", borrowed from the underside
@@ -634,8 +696,9 @@ export function Arrange({
                 of a card are spoken for — a heading and a picker on one side, a
                 figure or a link on the other — and because the middle of the
                 top edge is where a window is picked up everywhere else.
-                It does not have to be hit: the whole card is still the handle
-                in Customise mode, and this says so. */}
+                It is the ONLY way to move a card, so it is a target rather than
+                a hint: 40px of it, standing slightly proud of the card's top
+                edge where nothing else on the card ever sits. */}
             <button
               type="button"
               data-drag-handle
@@ -643,11 +706,12 @@ export function Arrange({
               tabIndex={-1}
               title={`Drag to move ${def.label}`}
               className={cx(
-                'absolute left-1/2 top-1 z-10 flex h-5 -translate-x-1/2 cursor-grab items-center rounded-full px-2',
-                'bg-surface/90 text-ink-3 shadow-sm ring-1 ring-hairline active:cursor-grabbing',
+                'absolute left-1/2 top-0 z-20 flex h-6 w-10 -translate-x-1/2 -translate-y-1/2',
+                'cursor-grab items-center justify-center rounded-full active:cursor-grabbing',
+                'bg-surface text-ink-3 shadow-md ring-1 ring-hairline',
               )}
             >
-              <GripHorizontal size={13} />
+              <GripHorizontal size={15} />
             </button>
 
             <div className="absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-full bg-surface p-1 shadow-md ring-1 ring-hairline">
@@ -670,29 +734,34 @@ export function Arrange({
                 the button beside the eye used to do, so the one-tap way to two
                 columns survives the handle replacing it. */}
             {columns > 1 && (
-            <button
-              type="button"
-              data-no-drag
-              onPointerDown={(e) => grabCorner(e, item)}
-              onPointerMove={dragCorner}
-              onPointerUp={dropCorner}
-              onPointerCancel={() => setResize(null)}
-              onClick={() => {
-                if (dragged.current) {
-                  dragged.current = false
-                  return
-                }
-                onLayout(setSpan(layout, item.id, nextSpan(item.span, columns)))
-              }}
-              aria-label={`Resize ${def.label}`}
-              title="Drag to resize"
-              className={cx(
-                'absolute bottom-1 right-1 z-10 grid size-6 cursor-nwse-resize place-items-center',
-                'rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink',
-              )}
-            >
-              <CornerGlyph />
-            </button>
+              <button
+                type="button"
+                data-no-drag
+                // Down only: the rest of the gesture is on `window`, so nothing
+                // that happens to this element while the card reflows under the
+                // pointer can interrupt it.
+                onPointerDown={(e) => grabCorner(e, item)}
+                onClick={() => {
+                  // A press and a drag are the same pointer sequence, and a
+                  // drag ends with a click on the element it started on — so
+                  // without this every resize would finish one width past
+                  // wherever it was let go.
+                  if (dragged.current) {
+                    dragged.current = false
+                    return
+                  }
+                  onLayout(setSpan(layout, item.id, nextSpan(item.span, columns)))
+                }}
+                aria-label={`Resize ${def.label}`}
+                title="Drag to resize"
+                className={cx(
+                  'absolute -bottom-1 -right-1 z-20 grid size-7 cursor-nwse-resize place-items-center',
+                  'rounded-full bg-surface text-ink-3 shadow-md ring-1 ring-hairline',
+                  resizing ? 'text-accent ring-accent' : 'hover:text-ink',
+                )}
+              >
+                <CornerGlyph />
+              </button>
             )}
           </>
         )}
@@ -701,8 +770,8 @@ export function Arrange({
             card it is resizing. A grid step is a big change made in small
             movements, and without this the only feedback is the page reflowing
             around a card whose own edges are under your hand. */}
-        {sizing && (
-          <span className="pointer-events-none absolute bottom-2 right-2 z-20 rounded-full bg-accent px-2 py-1 text-xs font-semibold text-accent-ink tabular">
+        {resizing && (
+          <span className="pointer-events-none absolute bottom-2 right-2 z-30 rounded-full bg-accent px-2 py-1 text-xs font-semibold text-accent-ink tabular">
             {cols} × {high}
           </span>
         )}
@@ -769,7 +838,7 @@ export function Arrange({
 
       {editing && (
         <p className="mt-3 px-1 text-center text-xs text-ink-3">
-          Drag a card by the grip at the top to move it, or its bottom corner to make it wider and taller.
+          Take a card by the grip at the top to move it, or its bottom corner to make it wider and taller.
           With a card focused, the arrow keys move it and shift with the arrow keys resizes it.
         </p>
       )}

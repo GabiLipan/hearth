@@ -27,6 +27,10 @@
   --ink-2: #52514e;
   --ink-3: #898781;
   --hairline: rgba(11, 11, 11, 0.1);
+  /* The shade a pinned table column casts over the columns passing under it.
+     Black in both themes: a shadow is an absence of light, and a pale one in
+     the dark theme would read as a glow coming off the column's edge. */
+  --pin-shade: rgba(0, 0, 0, 0.09);
   --grid: #e1e0d9;
   --baseline: #c3c2b7;
   /* brand + series.
@@ -132,6 +136,7 @@
   --ink-2: #c3c2b7;
   --ink-3: #898781;
   --hairline: rgba(255, 255, 255, 0.1);
+  --pin-shade: rgba(0, 0, 0, 0.4);
   --grid: #2c2c2a;
   --baseline: #383835;
   --accent: #3987e5;
@@ -534,6 +539,59 @@ select,
 }
 .scrim-up {
   --scrim-dir: to top;
+}
+
+/**
+ * A line of text that RUNS OUT rather than being cut off.
+ *
+ * `truncate`'s ellipsis is a full stop: it says "there was more" and takes
+ * three characters to say it, in a table where the columns are already tight.
+ * A mask says the same thing by letting the last word dissolve, which is what
+ * the eye does with a word going round a corner anyway — and it costs no
+ * characters, so more of the payee survives.
+ *
+ * The gradient is positional on the BOX, not on the text, so a cell whose
+ * content ends before the ramp is untouched: nothing fades unless something is
+ * actually running off the edge. Both spellings, because iOS needs the
+ * prefixed one, and `overflow: hidden` is still what stops the text escaping —
+ * the mask only makes the last of it transparent.
+ */
+.fade-x {
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent 100%);
+}
+
+/**
+ * The soft edge of a pinned column.
+ *
+ * A sticky column paints an opaque fill, so where it meets the columns
+ * scrolling under it there is a hard vertical line — two sharp edges of text
+ * meeting with nothing between them, which reads as a rendering fault rather
+ * than as one thing passing behind another. A few pixels of shade OUTSIDE the
+ * cell is what turns the join into a depth: the pinned column is simply nearer.
+ *
+ * `translateX(100%)` puts it past the cell's own right edge, so it darkens the
+ * moving columns and never the pinned text. It is drawn whether or not the
+ * table is scrolled — the alternative is a scroll listener per table, and at
+ * this weight an unscrolled table reads as a column division rather than as a
+ * shadow.
+ *
+ * It cannot share an element with `.fade-x`: a mask applies to an element's
+ * pseudo-elements as well as its content, so the shade would be masked away
+ * with the end of the text. The cell wears this and an inner span wears that.
+ */
+.pin-edge::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  transform: translateX(100%);
+  pointer-events: none;
+  background: linear-gradient(to right, var(--pin-shade), transparent);
 }
 
 /* Recharts positions its tooltip inside the chart container and sets no
