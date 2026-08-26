@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  bendToContrast,
   contrast,
   faceInk,
   inkOn,
+  lineOn,
   luminance,
   needsRing,
+  withLightness,
   DARK_INK,
   GRAPHIC_CONTRAST,
   LIGHT_INK,
@@ -159,5 +162,149 @@ describe('the mark on an account tile', () => {
     expect(contrast('#d4d4d4', '#ffffff')).toBeGreaterThan(RING_BELOW)
     expect(needsRing('#d4d4d4', '#ffffff')).toBe(false)
     expect(needsRing('#e8e8e8', '#ffffff')).toBe(true)
+  })
+})
+
+/**
+ * The two grounds a line beside a balance is ever drawn on, exactly as
+ * `index.css` defines `--surface`.
+ */
+const LIGHT_SURFACE = '#fcfcfb'
+const DARK_SURFACE = '#1a1a19'
+
+describe('withLightness', () => {
+  it('keeps the hue and moves the lightness', () => {
+    const lighter = withLightness('#3984e4', 0.85)!
+    expect(luminance(lighter)!).toBeGreaterThan(luminance('#3984e4')!)
+    // Still blue: the blue channel leads and the red trails, as before.
+    const [r, , b] = [1, 3, 5].map((i) => parseInt(lighter.slice(i, i + 2), 16))
+    expect(b).toBeGreaterThan(r)
+  })
+
+  it('is its own inverse to within a rounding step', () => {
+    for (const hex of [...LIGHT, ...DARK, '#ffffff', '#1434cb']) {
+      const there = withLightness(hex, 0.5)!
+      const back = withLightness(there, luminanceOfOklch(hex))!
+      expect(contrast(back, hex)).toBeLessThan(1.06)
+    }
+  })
+
+  /** A saturated hue does not exist at every lightness; the chroma gives way. */
+  it('stays inside sRGB at both ends', () => {
+    for (const l of [0.02, 0.35, 0.98]) {
+      const hex = withLightness('#c19100', l)!
+      expect(hex).toMatch(/^#[0-9a-f]{6}$/)
+      expect(luminance(hex)).not.toBeNull()
+    }
+  })
+
+  it('has nothing to say about a colour it cannot read', () => {
+    expect(withLightness('var(--series-1)', 0.5)).toBeNull()
+  })
+})
+
+/** `withLightness` round-trips through OKLCh lightness, which is not luminance. */
+function luminanceOfOklch(hex: string): number {
+  // The lightness the colour already has, recovered by bisection rather than by
+  // exporting the conversion: the test is about the pair of functions, not the
+  // internals.
+  let lo = 0
+  let hi = 1
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2
+    if (luminance(withLightness(hex, mid)!)! < luminance(hex)!) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
+describe('bendToContrast', () => {
+  it('leaves a colour that already clears the bar exactly as it was', () => {
+    for (const fill of LIGHT) {
+      expect(bendToContrast(fill, LIGHT_SURFACE, GRAPHIC_CONTRAST)).toBe(fill)
+    }
+  })
+
+  it('rescues the two colours a bank card actually brings', () => {
+    // A white card on a white row, and a navy one in the dark theme.
+    for (const [hex, ground] of [
+      ['#ffffff', LIGHT_SURFACE],
+      ['#0a1f44', DARK_SURFACE],
+    ]) {
+      expect(contrast(hex, ground)).toBeLessThan(GRAPHIC_CONTRAST)
+      const bent = bendToContrast(hex, ground, GRAPHIC_CONTRAST)
+      expect(contrast(bent, ground)).toBeGreaterThanOrEqual(GRAPHIC_CONTRAST)
+    }
+  })
+
+  /**
+   * The point of bending lightness rather than picking a legible colour: the
+   * hue that says whose line it is survives.
+   */
+  it('keeps the hue it was given', () => {
+    const bent = bendToContrast('#0a1f44', DARK_SURFACE, GRAPHIC_CONTRAST)
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(bent.slice(i, i + 2), 16))
+    expect(b).toBeGreaterThan(g)
+    expect(g).toBeGreaterThan(r)
+  })
+
+  it('moves no further than it has to', () => {
+    const min = bendToContrast('#0a1f44', DARK_SURFACE, GRAPHIC_CONTRAST)
+    const more = bendToContrast('#0a1f44', DARK_SURFACE, 7)
+    expect(luminance(min)!).toBeLessThan(luminance(more)!)
+  })
+
+  /** A mid-grey ground has nothing at 7:1 against it; the best there is beats none. */
+  it('hands back its best attempt rather than nothing when the bar cannot be met', () => {
+    const bent = bendToContrast('#808080', '#808080', 7)
+    expect(luminance(bent)).not.toBeNull()
+    expect(contrast(bent, '#808080')).toBeGreaterThan(1)
+  })
+})
+
+describe('lineOn', () => {
+  it('keeps the tile colour wherever the tile colour is legible, even where black beats it', () => {
+    for (const [fills, ground] of [
+      [LIGHT, LIGHT_SURFACE],
+      [DARK, DARK_SURFACE],
+    ] as const) {
+      for (const fill of fills) {
+        expect(lineOn(fill, faceInk(fill), ground)).toBe(fill)
+      }
+    }
+  })
+
+  it('takes the mark where the tile is the colour of the row', () => {
+    // A white card in the light theme: the tile is invisible, the mark is not.
+    expect(lineOn('#ffffff', faceInk('#ffffff'), LIGHT_SURFACE)).toBe(DARK_INK)
+    // And the same from the other end, in the dark theme.
+    expect(lineOn('#111111', faceInk('#111111'), DARK_SURFACE)).toBe(LIGHT_INK)
+  })
+
+  it('clears the bar for every palette slot and every ground, both themes', () => {
+    for (const [fills, ground] of [
+      [LIGHT, LIGHT_SURFACE],
+      [DARK, DARK_SURFACE],
+    ] as const) {
+      for (const fill of fills) {
+        expect(contrast(lineOn(fill, faceInk(fill), ground), ground)).toBeGreaterThanOrEqual(
+          GRAPHIC_CONTRAST,
+        )
+      }
+    }
+  })
+
+  /**
+   * The case neither half of the pair can answer: a chosen ink as dim as the
+   * tile it sits on, on a ground close to both.
+   */
+  it('bends when neither the tile nor its mark will do', () => {
+    const fill = '#c2c2c2'
+    const ink = '#b6b6b6'
+    expect(contrast(fill, LIGHT_SURFACE)).toBeLessThan(GRAPHIC_CONTRAST)
+    expect(contrast(ink, LIGHT_SURFACE)).toBeLessThan(GRAPHIC_CONTRAST)
+    expect(contrast(lineOn(fill, ink, LIGHT_SURFACE), LIGHT_SURFACE)).toBeGreaterThanOrEqual(
+      GRAPHIC_CONTRAST,
+    )
   })
 })

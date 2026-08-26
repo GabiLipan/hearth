@@ -1449,6 +1449,23 @@ the single place a level comes from.
   reported as ("greyed out"). `customInkSeed` is the invariant stated instead —
   whatever it is handed, what comes back is custom — and `IconPicker.test.ts`
   pins it.
+- **A line beside a badge is not simply the badge's colour.** An account's
+  sparkline was painted in the tile's fill, which is legible by construction for
+  the twelve palette slots (cut to 3.4-4.0:1 against `--surface`) and fails for
+  exactly the colours a custom one is chosen to MATCH: a bank's white card drew
+  a white line down a white row, its navy drew a black line on the dark theme's
+  near-black. `lineOn` in `ink.ts` chooses between the two colours the badge
+  already carries — the fill and `faceInk`'s mark — and the preference is
+  load-bearing: the fill wins whenever it CLEARS 3:1, not whenever it measures
+  better, because the mark is usually black or white and "better" is a
+  comparison black wins on every row in the light theme, giving a card of
+  legible lines that say nothing. Where neither clears it, `bendToContrast`
+  moves the winner along the OKLCh lightness axis by bisection, just far enough
+  — hue and chroma are what carry the identity, lightness is what is spent — and
+  hands back its best attempt rather than nothing where the bar cannot be met at
+  all (a mid-grey on a mid-grey). The line's old `opacity-70` went with the
+  change and had to: a colour measured against a ground and then laid over it at
+  70% of itself is not the colour that was measured.
 - **A tick or a pipette on a swatch is measured too.** Both were a hardcoded
   white with a drop-shadow behind them, which the palette itself disagrees with:
   the twelve are cut at one lightness, so `inkOn` answers DARK for all

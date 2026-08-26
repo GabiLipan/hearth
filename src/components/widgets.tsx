@@ -34,7 +34,8 @@ import { Sankey } from './Sankey'
 import { settlement } from '../lib/reimbursements'
 import { typicalRange } from '../lib/budgetHistory'
 import { accountFace, balanceHistory, balanceOf, canAddTransactions, canSeeTransactionsAt, levelOn } from '../lib/accounts'
-import { paintOf, slotVar } from '../lib/palette'
+import { paintHex, paintOf, slotVar, tokenHex } from '../lib/palette'
+import { faceInk, lineOn } from '../lib/ink'
 import { transfer } from '../lib/goals'
 import { parseAmount, currencySymbol } from '../lib/money'
 import { syncNow } from '../lib/session'
@@ -1018,8 +1019,38 @@ const SPARK_DAYS = 30
  */
 const SPARK_BOX = 'h-5 w-12 shrink-0 sm:w-14'
 
+/**
+ * The colour an account's line is drawn in.
+ *
+ * Not simply the tile's, which is what it was. The twelve palette slots are cut
+ * to sit at 3.4-4.0:1 against `--surface`, so a line in one of those is legible
+ * by construction — but a custom colour is one hex for both themes and is
+ * usually chosen to MATCH something, and the two most obvious matches are the
+ * two that fail: a bank's white card drew a white line down a white row, and its
+ * navy drew a black-on-black one the moment the app went dark. The badge beside
+ * it already carries a second colour chosen to be legible on the first, so the
+ * pair is what to choose from — and `lineOn` bends the winner in lightness alone
+ * if neither clears the bar, which spends the part of the colour that is not
+ * carrying the identity and keeps the part that is.
+ *
+ * The 70% it used to be drawn at went with it, and had to: a colour chosen for
+ * a measured contrast and then laid over the row at 70% of itself is not the
+ * colour that was measured, so the guarantee would have been given and spent in
+ * the same breath. What made the line quiet is that it is one hairline of a
+ * colour against a card, which needs no help from the alpha.
+ *
+ * `paintHex` and `tokenHex` are undefined wherever there is no document to
+ * measure, so the fallback is the colour this drew before any of it existed.
+ */
+function sparkColour(face: { slot?: number; color?: string; ink?: string }, theme: string): string {
+  const fill = paintHex(face.slot, face.color, theme)
+  const ground = tokenHex('--surface', theme)
+  if (!fill || !ground) return paintOf(face.slot, face.color)
+  return lineOn(fill, faceInk(fill, face.ink), ground)
+}
+
 export function AccountsWidget({ data }: WidgetProps) {
-  const { money } = useApp()
+  const { money, resolvedTheme } = useApp()
   const balance = (a: Account) => balanceOf(a, data.txns, data.remoteBalances, levelOn(a.id, data.levels))
   const total = data.accounts.reduce((s, a) => s + balance(a), 0)
   if (data.accounts.length === 0) return null
@@ -1066,8 +1097,8 @@ export function AccountsWidget({ data }: WidgetProps) {
               {spark ? (
                 <Sparkline
                   values={spark}
-                  color={paintOf(face.slot, face.color)}
-                  className={cx(SPARK_BOX, 'opacity-70')}
+                  color={sparkColour(face, resolvedTheme)}
+                  className={SPARK_BOX}
                   label={`${a.name}: the last ${SPARK_DAYS} days`}
                 />
               ) : (
