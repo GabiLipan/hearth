@@ -36,6 +36,43 @@ export interface ImportBatch {
   totalMinor: number
 }
 
+/**
+ * Which way round a statement was written, and therefore what each row's
+ * position in it MEANS.
+ *
+ * A bank statement carries no time inside a day. Two rows dated the second of
+ * January are told apart by one thing only: which came first in the file, which
+ * is the bank's own answer. Half the banks in the country write the newest row
+ * first and half write the oldest, so the raw index means the opposite thing in
+ * the two cases — and this is the only place that can tell, because it is the
+ * only place holding the whole file.
+ *
+ * So the index is normalised on the way in: what is stored counts UPWARDS WITH
+ * TIME, 0 being the earliest row, whichever way the file ran. Everything
+ * downstream can then treat it as "later", full stop, and `byLedger` sorts it
+ * descending with the dates.
+ *
+ * The direction is read from the dates rather than assumed: each consecutive
+ * pair that goes backwards in time is a vote for newest-first, each pair that
+ * goes forwards is a vote for oldest-first, and the majority decides. Rows
+ * sharing a date vote for neither, which is what makes a file of one day fall
+ * through to "as written" rather than being reversed on the strength of
+ * nothing. Blank dates — a row the parser could not read — are skipped rather
+ * than counted as ties, or a file with a broken line would drag the vote.
+ */
+export function statementOrder(dates: readonly string[]): number[] {
+  const dated = dates.filter((d) => d)
+  let forwards = 0
+  let backwards = 0
+  for (let i = 1; i < dated.length; i++) {
+    const step = dated[i].localeCompare(dated[i - 1])
+    if (step > 0) forwards++
+    else if (step < 0) backwards++
+  }
+  const newestFirst = backwards > forwards
+  return dates.map((_, i) => (newestFirst ? dates.length - 1 - i : i))
+}
+
 /** Rows further apart than this were two presses of Import, not one. */
 const GAP_MS = 2 * 60 * 1000
 const MIN_ROWS = 2

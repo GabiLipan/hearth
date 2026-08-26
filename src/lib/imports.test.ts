@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Transaction } from './db'
-import { importBatches } from './imports'
+import { statementOrder, importBatches } from './imports'
 
 const NOW = Date.parse('2026-08-18T12:00:00.000Z')
 
@@ -84,5 +84,50 @@ describe('finding an import after the fact', () => {
     ]
 
     expect(importBatches(rows, NOW)).toEqual([])
+  })
+})
+
+describe('the statement\'s own order', () => {
+  /**
+   * The whole point: inside a day a statement has no clock, so its own order is
+   * the bank's only answer to which row came first — and half the banks in the
+   * country write it one way round and half the other.
+   */
+  it('counts up with time from a file written oldest first', () => {
+    expect(statementOrder(['2026-01-02', '2026-01-02', '2026-01-07'])).toEqual([0, 1, 2])
+  })
+
+  it('and reverses one written newest first', () => {
+    expect(statementOrder(['2026-01-07', '2026-01-02', '2026-01-02'])).toEqual([2, 1, 0])
+  })
+
+  /**
+   * A file that is all one day votes neither way, so it is left as written —
+   * the alternative is reversing it on the strength of no evidence at all.
+   */
+  it('leaves a single day as the file had it', () => {
+    expect(statementOrder(['2026-01-02', '2026-01-02', '2026-01-02'])).toEqual([0, 1, 2])
+  })
+
+  it('takes the majority, so one row out of place does not flip the file', () => {
+    // Banks do post a row out of order now and then; one backwards step among
+    // five forward ones is not a newest-first statement.
+    expect(statementOrder(['2026-01-01', '2026-01-03', '2026-01-02', '2026-01-04', '2026-01-05'])).toEqual([
+      0, 1, 2, 3, 4,
+    ])
+  })
+
+  /**
+   * A line the parser could not read has no date, and counting it as a tie
+   * would let a broken row drag the vote. It still gets a position — every row
+   * in the file does — it simply does not get a say in which way round the file
+   * runs.
+   */
+  it('ignores an unreadable row when deciding, but still numbers it', () => {
+    expect(statementOrder(['2026-01-07', '', '2026-01-02'])).toEqual([2, 1, 0])
+  })
+
+  it('says nothing about an empty file', () => {
+    expect(statementOrder([])).toEqual([])
   })
 })

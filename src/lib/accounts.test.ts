@@ -121,6 +121,42 @@ describe('runningBalances', () => {
     expect([...rows].sort(byLedger).map((r) => r.id)).toEqual(['zzz', 'aaa'])
   })
 
+  /**
+   * The bank's own order, which is the only evidence there is inside a day.
+   *
+   * Every row of one import carries the same `created_at` — one insert, one
+   * transaction clock — so without this the whole day fell through to the id,
+   * which is a random uuid. `statementOrder` counts up with time, so the ledger
+   * sorts it descending like the date.
+   */
+  it('lists a day in the statement\'s order, newest of the day first', () => {
+    const rows = [
+      txn('a', -870, '2026-01-02', 'zzz'),
+      txn('a', -949, '2026-01-02', 'aaa'),
+      txn('a', -50_568, '2026-01-02', 'mmm'),
+    ]
+    // As the file had them: union first, then Amazon, then the Amex payment.
+    rows[0].statementOrder = 0
+    rows[1].statementOrder = 1
+    rows[2].statementOrder = 2
+
+    expect([...rows].sort(byLedger).map((r) => r.amountMinor)).toEqual([-50_568, -949, -870])
+
+    // And the balances still read the other way: the earliest row of the day is
+    // the opening balance less its own amount.
+    const out = runningBalances([a], rows)
+    expect(out.get(rows[0].id)).toBe(a.openingBalanceMinor - 870)
+    expect(out.get(rows[1].id)).toBe(a.openingBalanceMinor - 870 - 949)
+  })
+
+  it('falls back to the stamp where only one row came from a file', () => {
+    // A row typed by hand has no position in anybody's statement, and a number
+    // on the other row is not evidence about it.
+    const typed = txn('a', -100, '2026-01-02', 'aaa')
+    const imported = { ...txn('a', -200, '2026-01-02', 'zzz'), statementOrder: 5 }
+    expect([...[typed, imported]].sort(byLedger).map((r) => r.id)).toEqual(['zzz', 'aaa'])
+  })
+
   it('steps in the order Activity lists, even when every stamp is identical', () => {
     const rows = [
       txn('a', -870, '2026-01-02', 'zzz'),

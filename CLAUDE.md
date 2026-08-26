@@ -457,6 +457,21 @@ the single place a level comes from.
   The month heading rows are `sticky left-3 w-fit` inside their cell for the
   same gesture: a heading that slides away is a band of tint over rows it no
   longer names.
+- **A statement's order is EVIDENCE, not a tie-break.** Inside a day a bank
+  export carries no time, so its own row order is the only answer there is to
+  which of two rows dated the second of January came first — and Hearth threw it
+  away: `extractRows` read the file in order, the review screen sorted by date,
+  and the ledger fell through to a random uuid. `statement_order` (migration 27)
+  is that position, and `byLedger` reads it directly under the date, above
+  `createdAt`, because a stamp written by whichever device ran the import is not
+  an answer to the question at all (and is identical across the batch anyway).
+  Two things it must keep doing. It counts up with TIME rather than with the
+  file — half the banks write newest-first — and `statementOrder` in
+  `imports.ts` decides which by voting on consecutive pairs of dates, so a file
+  of one day is left as written rather than reversed on the strength of nothing.
+  And it is compared only where BOTH rows have one: a number means "later in its
+  own file", which says nothing about a row typed by hand and nothing about a
+  row from a different import.
 - **Two orderings that are reverses of each other stop being reverses the
   moment something ties.** Activity's list and its Balance column are one
   decision — the balances are the list walked backwards — and they were written

@@ -104,6 +104,20 @@ export interface Transaction {
   createdBy?: string
   createdAt: string
   updatedAt: string
+  /**
+   * Where this row sat in the file it was imported from, counting up with TIME.
+   *
+   * A statement carries no time inside a day, so its own order is the only
+   * answer there is to which of two rows dated the second of January came
+   * first — and it was thrown away until migration 27. Zero is the earliest row
+   * of the file whichever way round the file was written; the client normalises
+   * that at import, because it is the only place that can tell.
+   *
+   * Undefined for everything that did not come from a file, which is the
+   * ordinary case: those fall back to `createdAt` and then to the id, exactly
+   * as every row did before. See `byLedger`.
+   */
+  statementOrder?: number
 }
 
 export interface Category {

@@ -186,12 +186,33 @@ export function balanceOf(
  * in as the furthest-off stamp there is, which puts a row created a moment ago
  * at the top of its day rather than the bottom. Empty string would do the
  * opposite, silently.
+ *
+ * ## Where the statement's own order comes in
+ *
+ * `statementOrder` (migration 27) sits ABOVE both, under the date, because it
+ * is the only key here that is EVIDENCE rather than a tie-break: it is the
+ * bank's own answer to which of two rows dated the second of January came
+ * first, and a stamp written by whichever device happened to run the import is
+ * not an answer to that at all. Every row of a statement carries the same
+ * `created_at` anyway — one insert, one transaction clock — so without this the
+ * whole day fell through to the id, which is a random uuid.
+ *
+ * It is only compared where BOTH rows have one. A number means "later in its
+ * own file", so it says nothing about a row typed by hand, nothing about a row
+ * imported before 27, and strictly speaking nothing about a row from a
+ * different file — two imports each having a fifth line is not a contradiction.
+ * Two files rarely overlap inside one day (the duplicate check is what stops
+ * them), and where they do the answer is arbitrary either way; what matters is
+ * that it stays STABLE, which it does.
  */
 const NEWEST = '9999-12-31T23:59:59Z'
 
 export function byLedger(a: Transaction, b: Transaction): number {
+  if (a.date !== b.date) return b.date.localeCompare(a.date)
+  if (a.statementOrder !== undefined && b.statementOrder !== undefined && a.statementOrder !== b.statementOrder) {
+    return b.statementOrder - a.statementOrder
+  }
   return (
-    b.date.localeCompare(a.date) ||
     (b.createdAt ?? NEWEST).localeCompare(a.createdAt ?? NEWEST) ||
     b.id.localeCompare(a.id)
   )

@@ -76,7 +76,7 @@ const WRITABLE: Record<SyncedTable, readonly string[]> = {
   // on it — RLS has no column-level half.
   transactions: [
     'id', 'accountId', 'categoryId', 'billId', 'date', 'payee', 'title', 'note', 'amountMinor', 'importHash',
-    'paidForHousehold', 'contributorId', 'bookMonth',
+    'paidForHousehold', 'contributorId', 'bookMonth', 'statementOrder',
   ],
   budgets: ['id', 'categoryId', 'ownerId', 'amountMinor', 'month'],
   // Written by upsert_rule, so the queued payload is the whole row — every one

@@ -34,7 +34,7 @@ import { useSyncState } from '../hooks/useSync'
 import { fmtFullDate, fmtDay } from '../lib/dates'
 import { useApp } from '../state/AppContext'
 import { alertAction } from './confirm'
-import { type ImportBatch } from '../lib/imports'
+import { statementOrder, type ImportBatch } from '../lib/imports'
 import { ImportBatchRow } from './ImportHistory'
 import { Sheet, Button, Field, Select, Segmented, CheckRow, AccountDot, useInfoNote, cx } from './ui'
 
@@ -89,6 +89,12 @@ const ABOUT_DUPLICATES = (
 
 interface ReviewRow {
   date: string
+  /**
+   * Where this row sat in the file, counting up with time — see
+   * `statementOrder`. Carried through review because the review screen SORTS by
+   * date, which is where the file's own order used to be lost for good.
+   */
+  seq: number
   payee: string
   /** What a rule, or the rows already imported, say this payee is called. */
   title?: string
@@ -225,6 +231,10 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
       db.categories.toArray(),
     ])
     const existingHashes = new Set(existing.map((t) => t.importHash ?? importHash(t)))
+    // The file's own order, normalised to count up with time, taken BEFORE
+    // anything sorts these rows. Inside a day it is the only evidence there is
+    // about which transaction came first — a statement carries no clock.
+    const order = statementOrder(extracted.map((r) => r.date))
     const fallbackExpense = cats.find((c) => c.kind === 'expense' && c.name === 'Other') ?? cats.find((c) => c.kind === 'expense')
     const fallbackIncome = cats.find((c) => c.kind === 'income') ?? fallbackExpense
     // One matcher per sort, because the answer differs by sign: the same payee
@@ -236,7 +246,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     const kindOf = (id: string) => cats.find((c) => c.id === id)?.kind
     const seen = new Set<string>()
     const matchedIds = new Set<string>()
-    const review: ReviewRow[] = extracted.map((r) => {
+    const review: ReviewRow[] = extracted.map((r, i) => {
       const hash = importHash(r)
       const duplicate = existingHashes.has(hash) || seen.has(hash)
       seen.add(hash)
@@ -292,6 +302,7 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
 
       return {
         date: r.date,
+        seq: order[i],
         // Exactly what the statement said. `prettyPayee` used to title-case a
         // stripped-down version of it, which threw away the very string the
         // reference exists to be — the one you can find on your bank's website.
@@ -319,6 +330,8 @@ export function ImportWizard({ open, onClose }: { open: boolean; onClose: () => 
     const now = new Date().toISOString()
     const ids = await createMany('transactions', toImport.map((r) => ({
       date: r.date,
+      // The bank's own order inside a day, which is the only one there is.
+      statementOrder: r.seq,
       payee: r.payee,
       title: r.title,
       categoryId: r.categoryId,
